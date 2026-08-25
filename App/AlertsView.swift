@@ -18,7 +18,10 @@ struct AlertsView: View {
                 ForEach(events) { event in
                     Button { Task { await acknowledge(event) } } label: {
                         HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: symbol(event)).font(.title3).foregroundStyle(event.acknowledged == true ? .secondary : .tint).frame(width: 28)
+                            Image(systemName: symbol(event))
+                                .font(.title3)
+                                .foregroundStyle(event.acknowledged == true ? Color.secondary : Color.accentColor)
+                                .frame(width: 28)
                             VStack(alignment: .leading, spacing: 4) { HStack { Text(event.title ?? "Tracker-Ereignis").font(.headline); if event.acknowledged != true { Circle().fill(.tint).frame(width: 7, height: 7) } }; Text(event.body ?? "").font(.subheadline).foregroundStyle(.secondary); if let ts = Date.fromUnix(event.ts) { Text(ts, style: .relative).font(.caption2).foregroundStyle(.tertiary) } }
                         }.contentShape(Rectangle())
                     }.buttonStyle(.plain)

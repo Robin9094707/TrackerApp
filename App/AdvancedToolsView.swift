@@ -4,7 +4,7 @@ struct AdvancedToolsView: View {
     @State private var routes: [APIRoute] = []
     @State private var selectedPath = "/api/state"
     @State private var method = "GET"
-    @State private var body = "{}"
+    @State private var requestBody = "{}"
     @State private var output = ""
     @State private var searching = ""
     @State private var running = false
@@ -16,7 +16,7 @@ struct AdvancedToolsView: View {
             Section("Native API-Konsole") {
                 TextField("API-Pfad", text: $selectedPath).textInputAutocapitalization(.never).autocorrectionDisabled()
                 Picker("Methode", selection: $method) { ForEach(["GET", "POST", "PATCH", "DELETE"], id: \.self) { Text($0) } }.pickerStyle(.segmented)
-                if method != "GET" { TextEditor(text: $body).font(.system(.caption, design: .monospaced)).frame(minHeight: 130).overlay(RoundedRectangle(cornerRadius: 10).stroke(.secondary.opacity(0.2))) }
+                if method != "GET" { TextEditor(text: $requestBody).font(.system(.caption, design: .monospaced)).frame(minHeight: 130).overlay(RoundedRectangle(cornerRadius: 10).stroke(.secondary.opacity(0.2))) }
                 Button { Task { await run() } } label: { Label(running ? "Läuft …" : "Request ausführen", systemImage: "play.fill") }.disabled(running || selectedPath.isEmpty)
                 if !output.isEmpty { ScrollView(.horizontal) { Text(output).font(.system(.caption2, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 320) }
             }
@@ -32,5 +32,5 @@ struct AdvancedToolsView: View {
     }
 
     private func loadRoutes() async { do { routes = try await APIClient.shared.capabilities().allApiRoutes ?? [] } catch { output = error.localizedDescription } }
-    private func run() async { running = true; defer { running = false }; do { output = try await APIClient.shared.requestRaw(path: selectedPath, method: method, bodyText: method == "GET" ? "" : body) } catch { output = "Fehler: \(error.localizedDescription)" } }
+    private func run() async { running = true; defer { running = false }; do { output = try await APIClient.shared.requestRaw(path: selectedPath, method: method, bodyText: method == "GET" ? "" : requestBody) } catch { output = "Fehler: \(error.localizedDescription)" } }
 }
