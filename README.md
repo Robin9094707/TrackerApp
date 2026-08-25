@@ -8,6 +8,8 @@ Der Workflow **Build RJ Tracker IPA** startet automatisch bei einem Push auf `ma
 
 Bei Erfolg entsteht das Artefakt `RJ-Tracker-unsigned-IPA`. Die IPA ist absichtlich unsigned und kann anschließend mit einem eigenen Signing-Dienst bzw. Provisioning-Profil signiert werden.
 
+Der Repository-Stand ist so vorbereitet, dass ein normaler Push auf `main` den iOS-Build auslöst.
+
 ## App-Funktionen
 
 - SwiftUI, iOS 17+
