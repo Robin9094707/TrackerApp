@@ -52,7 +52,9 @@ struct HistoryView: View {
         .task { await load() }
         .alert("Verlauf", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
             Button("OK") {}
-        } message: { Text(error ?? "") }
+        } message: {
+            Text(error ?? "")
+        }
     }
 
     private func historyMap(_ response: HistoryResponse) -> some View {
@@ -66,20 +68,24 @@ struct HistoryView: View {
             if let point = selectedPoint {
                 if let accuracy = point.accuracyM, accuracy > 0 {
                     MapCircle(center: point.coordinate, radius: max(accuracy, 3))
-                        .foregroundStyle(Color.accentColor.opacity(0.13))
-                        .stroke(Color.accentColor.opacity(0.55), lineWidth: 1.5)
+                        .foregroundStyle(Color.blue.opacity(0.16))
+                        .stroke(Color.blue.opacity(0.58), lineWidth: 1.5)
                 }
-                Marker(Date(timeIntervalSince1970: TimeInterval(point.timestamp)).rjTimelineText, systemImage: "location.fill", coordinate: point.coordinate)
+                Annotation("Standort", coordinate: point.coordinate, anchor: .bottom) {
+                    TrackerMapBubble(tracker: tracker, selected: true)
+                }
             }
         }
         .frame(height: 340)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .mapStyle(.standard(elevation: .realistic))
         .mapControls { MapCompass(); MapScaleView() }
         .overlay(alignment: .topLeading) {
             if let point = selectedPoint {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(Date(timeIntervalSince1970: TimeInterval(point.timestamp)).rjTimelineText)
+                VStack(alignment: .leading, spacing: 4) {
+                    ResolvedAddressText(location: point.rjTrackerLocation, fallback: "Adresse wird ermittelt …")
                         .font(.headline)
+                        .lineLimit(2)
                     HStack(spacing: 8) {
                         FreshnessLabel(timestamp: point.timestamp)
                         AccuracyPill(accuracy: point.accuracyM)
@@ -99,7 +105,7 @@ struct HistoryView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Zeitleiste").font(.headline)
                     if let point = selectedPoint {
-                        Text(point.address?.bestText.isEmpty == false ? point.address!.bestText : "\(point.latitude), \(point.longitude)")
+                        ResolvedAddressText(location: point.rjTrackerLocation, fallback: "Adresse wird ermittelt …")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
@@ -110,12 +116,8 @@ struct HistoryView: View {
             }
 
             if points.count > 1 {
-                Slider(
-                    value: $selectedIndex,
-                    in: 0...Double(points.count - 1),
-                    step: 1
-                )
-                .onChange(of: selectedIndex) { _, _ in focusSelected() }
+                Slider(value: $selectedIndex, in: 0...Double(points.count - 1), step: 1)
+                    .onChange(of: selectedIndex) { _, _ in focusSelected() }
 
                 HStack {
                     if let first = points.first {
@@ -140,7 +142,8 @@ struct HistoryView: View {
                 HStack(spacing: 12) {
                     Label(Date(timeIntervalSince1970: TimeInterval(point.timestamp)).formatted(date: .omitted, time: .shortened), systemImage: "clock")
                     if let network = point.network, !network.isEmpty {
-                        Label(network.capitalized, systemImage: "dot.radiowaves.left.and.right")
+                        Label(network.rjProviderName, systemImage: network.rjProviderSymbol)
+                            .foregroundStyle(network.rjProviderColor)
                     }
                     Spacer()
                     AccuracyPill(accuracy: point.accuracyM)
@@ -167,20 +170,24 @@ struct HistoryView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Letzte Standorte").font(.headline).padding(.bottom, 8)
             ForEach(response.points.prefix(40)) { point in
-                Button {
-                    select(point)
-                } label: {
+                Button { select(point) } label: {
                     HStack(spacing: 12) {
                         Circle()
                             .fill(Date(timeIntervalSince1970: TimeInterval(point.timestamp)).rjTrackerFreshnessColor)
                             .frame(width: 9, height: 9)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(point.address?.bestText.isEmpty == false ? point.address!.bestText : "\(point.latitude), \(point.longitude)")
+                            ResolvedAddressText(location: point.rjTrackerLocation, fallback: "Adresse wird ermittelt …")
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
                             HStack(spacing: 7) {
                                 FreshnessLabel(timestamp: point.timestamp)
+                                if let network = point.network, !network.isEmpty {
+                                    Text("•").foregroundStyle(.secondary)
+                                    Text(network.rjProviderName)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(network.rjProviderColor)
+                                }
                                 if let accuracy = point.accuracyM, accuracy > 0 {
                                     Text("±\(accuracy.metersText)").font(.caption).foregroundStyle(.secondary)
                                 }
@@ -212,8 +219,8 @@ struct HistoryView: View {
         withAnimation(.snappy(duration: 0.35)) {
             position = .region(MKCoordinateRegion(
                 center: point.coordinate,
-                latitudinalMeters: max(900, accuracy * 7),
-                longitudinalMeters: max(900, accuracy * 7)
+                latitudinalMeters: max(800, accuracy * 7),
+                longitudinalMeters: max(800, accuracy * 7)
             ))
         }
     }
