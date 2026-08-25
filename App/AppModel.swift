@@ -9,6 +9,7 @@ final class AppModel {
     var connectionState: ConnectionState = .restoring
     var bootstrap: BootstrapResponse?
     var isRefreshing = false
+    var locatingRefs: Set<String> = []
     var errorMessage: String?
     var lastRefresh: Date?
     var serverURL: String = UserDefaults.standard.string(forKey: "serverURL") ?? ""
@@ -95,28 +96,58 @@ final class AppModel {
             let newest = events.compactMap(\.ts).max() ?? previousTimestamp
             UserDefaults.standard.set(newest, forKey: "lastAlertTimestamp")
             DebugLogger.shared.log("Bootstrap loaded: \(data.trackers.count) trackers")
-        } catch { errorMessage = error.localizedDescription; DebugLogger.shared.log("Refresh failed: \(error.localizedDescription)") }
+        } catch {
+            errorMessage = error.localizedDescription
+            DebugLogger.shared.log("Refresh failed: \(error.localizedDescription)")
+        }
+    }
+
+    func isLocating(_ tracker: Tracker) -> Bool {
+        locatingRefs.contains(tracker.ref)
     }
 
     func locate(_ tracker: Tracker) async {
+        guard !locatingRefs.contains(tracker.ref) else { return }
+        locatingRefs.insert(tracker.ref)
+        let oldTimestamp = tracker.location?.timestamp ?? tracker.lastSeenTs ?? 0
+        defer { locatingRefs.remove(tracker.ref) }
+
         do {
-            _ = try await APIClient.shared.action("locate", payload: ["tracker": tracker.ref])
             Haptics.impact()
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            await refresh()
-        } catch { errorMessage = error.localizedDescription; Haptics.warning() }
+            _ = try await APIClient.shared.action("locate", payload: ["tracker": tracker.ref])
+            for _ in 0..<8 {
+                try? await Task.sleep(nanoseconds: 1_250_000_000)
+                await refresh()
+                let updated = trackers.first(where: { $0.ref == tracker.ref })
+                let newTimestamp = updated?.location?.timestamp ?? updated?.lastSeenTs ?? 0
+                if newTimestamp > oldTimestamp { break }
+            }
+            Haptics.success()
+        } catch {
+            errorMessage = error.localizedDescription
+            Haptics.warning()
+        }
     }
 
     func locateAll() async {
+        let refs = Set(trackers.map(\.ref))
+        locatingRefs.formUnion(refs)
+        defer { locatingRefs.subtract(refs) }
         do {
             _ = try await APIClient.shared.requestJSON(path: "/api/mobile/v1/locate", method: "POST", json: ["all": true])
             Haptics.impact()
-        } catch { errorMessage = error.localizedDescription }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            await refresh()
+        } catch {
+            errorMessage = error.localizedDescription
+            Haptics.warning()
+        }
     }
 
     func signOut() async {
         await APIClient.shared.logout()
         bootstrap = nil
+        locatingRefs.removeAll()
         connectionState = .disconnected
     }
 }
