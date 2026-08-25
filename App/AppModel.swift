@@ -10,6 +10,7 @@ final class AppModel {
     var bootstrap: BootstrapResponse?
     var isRefreshing = false
     var locatingRefs: Set<String> = []
+    var notificationRefs: Set<String> = []
     var errorMessage: String?
     var lastRefresh: Date?
     var serverURL: String = UserDefaults.standard.string(forKey: "serverURL") ?? ""
@@ -53,7 +54,8 @@ final class AppModel {
     }
 
     func connect(password: String) async {
-        errorMessage = nil; connectionState = .connecting
+        errorMessage = nil
+        connectionState = .connecting
         do {
             let result = try await APIClient.shared.pair(server: serverURL, username: username, password: password)
             if result.status == "two_factor_required" { connectionState = .needsTwoFactor; return }
@@ -74,13 +76,19 @@ final class AppModel {
             let result = try await APIClient.shared.pair2FA(code: code)
             guard result.status == "ok" else { throw APIError.message(result.message ?? "Code ungültig.") }
             connectionState = .connected
-            await refresh(); await PushManager.shared.registerIfPossible(); Haptics.success()
-        } catch { errorMessage = error.localizedDescription; Haptics.warning() }
+            await refresh()
+            await PushManager.shared.registerIfPossible()
+            Haptics.success()
+        } catch {
+            errorMessage = error.localizedDescription
+            Haptics.warning()
+        }
     }
 
     func refresh() async {
         guard connectionState == .connected, !isRefreshing else { return }
-        isRefreshing = true; defer { isRefreshing = false }
+        isRefreshing = true
+        defer { isRefreshing = false }
         do {
             let previousTimestamp = UserDefaults.standard.integer(forKey: "lastAlertTimestamp")
             let data = try await APIClient.shared.bootstrap()
@@ -102,9 +110,8 @@ final class AppModel {
         }
     }
 
-    func isLocating(_ tracker: Tracker) -> Bool {
-        locatingRefs.contains(tracker.ref)
-    }
+    func isLocating(_ tracker: Tracker) -> Bool { locatingRefs.contains(tracker.ref) }
+    func isUpdatingNotification(_ tracker: Tracker) -> Bool { notificationRefs.contains(tracker.ref) }
 
     func locate(_ tracker: Tracker) async {
         guard !locatingRefs.contains(tracker.ref) else { return }
@@ -115,8 +122,8 @@ final class AppModel {
         do {
             Haptics.impact()
             _ = try await APIClient.shared.action("locate", payload: ["tracker": tracker.ref])
-            for _ in 0..<8 {
-                try? await Task.sleep(nanoseconds: 1_250_000_000)
+            for _ in 0..<10 {
+                try? await Task.sleep(nanoseconds: 1_150_000_000)
                 await refresh()
                 let updated = trackers.first(where: { $0.ref == tracker.ref })
                 let newTimestamp = updated?.location?.timestamp ?? updated?.lastSeenTs ?? 0
@@ -144,10 +151,29 @@ final class AppModel {
         }
     }
 
+    func setFoundNotification(_ tracker: Tracker, enabled: Bool) async {
+        guard !notificationRefs.contains(tracker.ref) else { return }
+        notificationRefs.insert(tracker.ref)
+        defer { notificationRefs.remove(tracker.ref) }
+        do {
+            _ = try await APIClient.shared.action("set_found_notification", payload: [
+                "tracker": tracker.ref,
+                "enabled": enabled,
+                "mode": "once"
+            ])
+            await refresh()
+            Haptics.success()
+        } catch {
+            errorMessage = error.localizedDescription
+            Haptics.warning()
+        }
+    }
+
     func signOut() async {
         await APIClient.shared.logout()
         bootstrap = nil
         locatingRefs.removeAll()
+        notificationRefs.removeAll()
         connectionState = .disconnected
     }
 }
