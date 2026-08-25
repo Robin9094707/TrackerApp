@@ -1,0 +1,6 @@
+.DS_Store
+.github-derived/
+Payload/
+*.ipa
+*.xcodeproj/
+xcuserdata/

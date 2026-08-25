@@ -1,0 +1,162 @@
+name: Build RJ Tracker IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build unsigned iOS IPA
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d /Applications/Xcode_26.5.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
+          else
+            XCODE_APP="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | tail -1)"
+            test -n "$XCODE_APP"
+            sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          fi
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+
+      - name: Generate app icons
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, struct, zlib
+          from pathlib import Path
+
+          out = Path('App/Resources/Assets.xcassets/AppIcon.appiconset')
+          out.mkdir(parents=True, exist_ok=True)
+          specs = [
+              ('iphone','20x20','2x',40,'Icon-20x20@2x-iphone.png'),
+              ('iphone','20x20','3x',60,'Icon-20x20@3x-iphone.png'),
+              ('iphone','29x29','2x',58,'Icon-29x29@2x-iphone.png'),
+              ('iphone','29x29','3x',87,'Icon-29x29@3x-iphone.png'),
+              ('iphone','40x40','2x',80,'Icon-40x40@2x-iphone.png'),
+              ('iphone','40x40','3x',120,'Icon-40x40@3x-iphone.png'),
+              ('iphone','60x60','2x',120,'Icon-60x60@2x-iphone.png'),
+              ('iphone','60x60','3x',180,'Icon-60x60@3x-iphone.png'),
+              ('ipad','20x20','1x',20,'Icon-20x20@1x-ipad.png'),
+              ('ipad','20x20','2x',40,'Icon-20x20@2x-ipad.png'),
+              ('ipad','29x29','1x',29,'Icon-29x29@1x-ipad.png'),
+              ('ipad','29x29','2x',58,'Icon-29x29@2x-ipad.png'),
+              ('ipad','40x40','1x',40,'Icon-40x40@1x-ipad.png'),
+              ('ipad','40x40','2x',80,'Icon-40x40@2x-ipad.png'),
+              ('ipad','76x76','1x',76,'Icon-76x76@1x-ipad.png'),
+              ('ipad','76x76','2x',152,'Icon-76x76@2x-ipad.png'),
+              ('ipad','83.5x83.5','2x',167,'Icon-83_5x83_5@2x-ipad.png'),
+              ('ios-marketing','1024x1024','1x',1024,'Icon-1024.png'),
+          ]
+
+          def chunk(kind, data):
+              return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+
+          def write_png(path, n):
+              rows=[]
+              for y in range(n):
+                  row=bytearray([0])
+                  for x in range(n):
+                      t=(x+y)/(max(1,2*n-2))
+                      r=int(10 + 18*t); g=int(110 + 80*t); b=int(230 + 20*t)
+                      # simple white locator dot/ring in the center
+                      dx=x-(n-1)/2; dy=y-(n-1)/2
+                      d=(dx*dx+dy*dy)**0.5
+                      if n*0.12 < d < n*0.18 or d < n*0.055:
+                          r=g=b=255
+                      row.extend((r,g,b,255))
+                  rows.append(bytes(row))
+              raw=b''.join(rows)
+              png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',n,n,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(raw,9))+chunk(b'IEND',b'')
+              path.write_bytes(png)
+
+          images=[]
+          for idiom,size,scale,pixels,filename in specs:
+              write_png(out/filename,pixels)
+              images.append({'idiom':idiom,'size':size,'scale':scale,'filename':filename})
+          (out/'Contents.json').write_text(json.dumps({'images':images,'info':{'author':'xcode','version':1}},indent=2))
+          PY
+
+      - name: Install XcodeGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          xcodegen --version
+
+      - name: Generate Xcode project
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodegen generate --spec project.yml
+
+      - name: Validate project
+        shell: bash
+        run: |
+          set -euo pipefail
+          plutil -lint App/Info.plist App/RJTracker.entitlements
+          xcodebuild -project RJTracker.xcodeproj -scheme RJTracker -showBuildSettings >/dev/null
+
+      - name: Build unsigned app
+        shell: bash
+        run: |
+          set -o pipefail
+          rm -rf .github-derived
+          xcodebuild \
+            -project RJTracker.xcodeproj \
+            -scheme RJTracker \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$PWD/.github-derived" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee RJ-Tracker-build.log
+
+      - name: Create unsigned IPA
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$(find "$PWD/.github-derived/Build/Products/Release-iphoneos" -maxdepth 1 -name '*.app' -type d -print -quit)"
+          test -n "$APP"
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          /usr/bin/zip -qry RJ-Tracker-unsigned.ipa Payload
+          unzip -t RJ-Tracker-unsigned.ipa
+          ls -lh RJ-Tracker-unsigned.ipa
+
+      - name: Upload IPA
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RJ-Tracker-unsigned-IPA
+          path: RJ-Tracker-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RJ-Tracker-build-log
+          path: RJ-Tracker-build.log
+          if-no-files-found: ignore
+          retention-days: 7
