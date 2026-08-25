@@ -1,8 +1,6 @@
 name: Build RJ Tracker IPA
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -73,7 +71,6 @@ jobs:
                   for x in range(n):
                       t=(x+y)/(max(1,2*n-2))
                       r=int(10 + 18*t); g=int(110 + 80*t); b=int(230 + 20*t)
-                      # simple white locator dot/ring in the center
                       dx=x-(n-1)/2; dy=y-(n-1)/2
                       d=(dx*dx+dy*dy)**0.5
                       if n*0.12 < d < n*0.18 or d < n*0.055:
