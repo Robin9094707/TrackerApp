@@ -3,196 +3,388 @@ import MapKit
 
 struct TrackerDetailView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
     let tracker: Tracker
+
+    private enum DetailDetent: Int { case compact, medium, large }
+
     @State private var showRecoveryConfirm = false
-    @State private var working = false
     @State private var mapPosition: MapCameraPosition = .automatic
+    @State private var detent: DetailDetent = .medium
+    @GestureState private var dragTranslation: CGFloat = 0
 
     private var current: Tracker { model.trackers.first(where: { $0.ref == tracker.ref }) ?? tracker }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                if let location = current.location { heroMap(location) }
-                detailSheet
-                    .offset(y: current.location == nil ? 0 : -30)
-                    .padding(.bottom, current.location == nil ? 20 : -10)
+        GeometryReader { geometry in
+            ZStack(alignment: .bottom) {
+                heroMap
+                    .ignoresSafeArea()
+
+                detailSheet(maxHeight: geometry.size.height)
+                    .frame(height: max(235, detailHeight(maxHeight: geometry.size.height) - dragTranslation))
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 3)
             }
         }
-        .ignoresSafeArea(edges: .top)
-        .background(Color(uiColor: .systemGroupedBackground))
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .refreshable { await model.refresh() }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
         .task { focusCurrent() }
         .onChange(of: current.location) { _, _ in focusCurrent() }
     }
 
-    private func heroMap(_ location: TrackerLocation) -> some View {
+    private var heroMap: some View {
         Map(position: $mapPosition) {
-            if let accuracy = location.accuracyM, accuracy > 0 {
-                MapCircle(center: location.coordinate, radius: max(accuracy, 3))
-                    .foregroundStyle(Color.accentColor.opacity(0.13))
-                    .stroke(Color.accentColor.opacity(0.55), lineWidth: 1.5)
-            }
-            Annotation(current.name, coordinate: location.coordinate) {
-                ZStack {
-                    Circle().fill(.background).frame(width: 54, height: 54).shadow(radius: 7)
-                    if model.isLocating(current) { ProgressView() }
-                    else { Text(current.emoji ?? "📍").font(.title2) }
+            if let location = current.location {
+                if let accuracy = location.accuracyM, accuracy > 0 {
+                    MapCircle(center: location.coordinate, radius: max(accuracy, 3))
+                        .foregroundStyle(Color.blue.opacity(0.16))
+                        .stroke(Color.blue.opacity(0.58), lineWidth: 1.5)
+                }
+                Annotation(current.name, coordinate: location.coordinate, anchor: .bottom) {
+                    TrackerMapBubble(tracker: current, selected: true, locating: model.isLocating(current))
                 }
             }
         }
-        .mapStyle(.standard(elevation: .realistic))
-        .mapControls { MapCompass(); MapScaleView() }
-        .frame(height: 430)
-        .overlay(alignment: .bottomTrailing) {
-            AccuracyPill(accuracy: location.accuracyM)
-                .padding(.trailing, 16)
-                .padding(.bottom, 48)
+        .mapStyle(.standard(elevation: .realistic, pointsOfInterest: .including([.publicTransport, .park, .hospital, .school])))
+        .mapControls {
+            MapCompass()
+            MapPitchToggle()
+            MapUserLocationButton()
+        }
+        .overlay(alignment: .topTrailing) {
+            VStack(spacing: 10) {
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.title3.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .rjGlass(in: Circle())
+                }
+                Button { focusCurrent() } label: {
+                    Image(systemName: "scope")
+                        .frame(width: 44, height: 44)
+                        .rjGlass(in: Circle())
+                }
+            }
+            .padding(.top, 56)
+            .padding(.trailing, 14)
         }
     }
 
-    private var detailSheet: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Capsule().fill(.secondary.opacity(0.4)).frame(width: 42, height: 5).frame(maxWidth: .infinity)
+    private func detailSheet(maxHeight: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            Capsule()
+                .fill(.secondary.opacity(0.5))
+                .frame(width: 42, height: 5)
+                .padding(.top, 9)
+                .padding(.bottom, 10)
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture { cycleDetent() }
+                .gesture(
+                    DragGesture(minimumDistance: 5)
+                        .updating($dragTranslation) { value, state, _ in state = value.translation.height }
+                        .onEnded { value in settleDetent(value.translation.height, predicted: value.predictedEndTranslation.height) }
+                )
 
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(current.name).font(.largeTitle.bold())
-                    Spacer()
-                    ProviderBadge(provider: current.provider)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    actionGrid
+                    accuracyCard
+                    if current.provider == "fusion" { fusionDetails }
+                    notificationCard
+                    trackerInfo
+                    if ["apple", "fusion"].contains(current.provider) { recoveryCard }
                 }
-                if let location = current.location {
-                    Text(location.address?.bestText.isEmpty == false ? location.address!.bestText : "\(location.latitude), \(location.longitude)")
-                        .font(.title3)
-                        .foregroundStyle(.primary)
-                        .lineLimit(3)
-                    HStack(spacing: 7) {
-                        FreshnessLabel(timestamp: location.timestamp ?? current.lastSeenTs)
-                        Text("•").foregroundStyle(.secondary)
-                        AccuracyPill(accuracy: location.accuracyM)
+                .padding(.horizontal, 18)
+                .padding(.bottom, 28)
+            }
+            .scrollIndicators(.visible)
+        }
+        .rjGlass(in: RoundedRectangle(cornerRadius: RJDesign.sheetCorner, style: .continuous))
+        .shadow(color: .black.opacity(0.2), radius: 28, y: 12)
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(current.name)
+                    .font(.largeTitle.bold())
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.72)
+                Spacer(minLength: 10)
+                ProviderBadge(provider: current.provider)
+            }
+
+            ResolvedAddressText(location: current.location, fallback: current.location == nil ? "Noch kein Standort verfügbar" : "Adresse wird ermittelt …")
+                .font(.title3)
+                .lineLimit(3)
+
+            HStack(spacing: 7) {
+                FreshnessLabel(timestamp: current.location?.timestamp ?? current.lastSeenTs)
+                if let battery = current.battery, !battery.isEmpty {
+                    Text("•").foregroundStyle(.secondary)
+                    Label(battery, systemImage: "battery.50percent")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if current.provider == "fusion", let source = current.latestSourceName {
+                    Text("•").foregroundStyle(.secondary)
+                    Text(source.rjProviderName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(source.rjProviderColor)
+                }
+            }
+        }
+    }
+
+    private var actionGrid: some View {
+        HStack(spacing: 12) {
+            DetailActionTile(
+                title: model.isLocating(current) ? "Ortung läuft …" : "Orten",
+                subtitle: model.isLocating(current) ? "Neuer Standort wird gesucht" : "Standort aktualisieren",
+                symbol: "location.fill",
+                tint: .green,
+                loading: model.isLocating(current)
+            ) {
+                Task { await model.locate(current) }
+            }
+            .disabled(model.isLocating(current))
+
+            DetailActionTile(
+                title: "Route",
+                subtitle: current.location == nil ? "Nicht verfügbar" : "Apple Karten öffnen",
+                symbol: "arrow.triangle.turn.up.right.diamond.fill",
+                tint: .cyan
+            ) {
+                if let location = current.location { openMaps(location) }
+            }
+            .disabled(current.location == nil)
+
+            NavigationLink { HistoryView(tracker: current) } label: {
+                VStack(alignment: .leading, spacing: 8) {
+                    ZStack {
+                        Circle().fill(Color.blue.opacity(0.16)).frame(width: 42, height: 42)
+                        Image(systemName: "clock.arrow.circlepath").font(.title3).foregroundStyle(.blue)
                     }
-                } else {
-                    Text("Noch kein Standort verfügbar").foregroundStyle(.secondary)
+                    Text("Verlauf").font(.headline).foregroundStyle(.primary)
+                    Text("Zeitleiste anzeigen").font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 116, alignment: .leading)
+                .padding(14)
+                .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var accuracyCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Standortgenauigkeit", systemImage: "scope")
+                    .font(.headline)
+                Spacer()
+                AccuracyPill(accuracy: current.location?.accuracyM)
+            }
+            Text("Der blaue Kreis auf der Karte zeigt den vom Netzwerk gemeldeten Genauigkeitsbereich der letzten Ortung.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            if let confidence = current.location?.confidence {
+                LabeledContent("Vertrauen", value: "\(Int((confidence <= 1 ? confidence * 100 : confidence).rounded())) %")
+            }
+            if let quality = current.location?.quality, !quality.isEmpty {
+                LabeledContent("Qualität", value: quality.capitalized)
+            }
+        }
+        .padding(16)
+        .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var fusionDetails: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Fusion", systemImage: "point.3.connected.trianglepath.dotted")
+                    .font(.headline)
+                Spacer()
+                if let source = current.latestSourceName { SourceBadge(source: source) }
+            }
+
+            if let source = current.latestSourceName {
+                LabeledContent("Letzte Quelle", value: source.rjProviderName)
+            } else {
+                LabeledContent("Letzte Quelle", value: "Nicht gemeldet")
+            }
+
+            if !current.fusionNetworkNames.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Verknüpfte Netze")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        ForEach(current.fusionNetworkNames, id: \.self) { SourceBadge(source: $0) }
+                    }
                 }
             }
 
-            HStack(spacing: 12) {
-                Button { Task { await model.locate(current) } } label: {
-                    VStack(spacing: 8) {
-                        ZStack {
-                            Circle().fill(Color.accentColor.opacity(0.13)).frame(width: 52, height: 52)
-                            if model.isLocating(current) { ProgressView() }
-                            else { Image(systemName: "location.fill").font(.title2).foregroundStyle(.tint) }
+            if let sourceHealth = current.sourceHealth?.objectValue, !sourceHealth.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Provider-Status")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ForEach(sourceHealth.keys.sorted(), id: \.self) { key in
+                        HStack {
+                            SourceBadge(source: key)
+                            Spacer()
+                            Text("Daten vorhanden")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
-                        Text(model.isLocating(current) ? "Ortung läuft …" : "Jetzt orten")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.plain)
-                .disabled(model.isLocating(current))
-
-                NavigationLink { HistoryView(tracker: current) } label: {
-                    VStack(spacing: 8) {
-                        ZStack {
-                            Circle().fill(.secondary.opacity(0.12)).frame(width: 52, height: 52)
-                            Image(systemName: "clock.arrow.circlepath").font(.title2)
-                        }
-                        Text("Verlauf").font(.subheadline.weight(.semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.vertical, 4)
-
-            if let location = current.location {
-                Button {
-                    openMaps(location)
-                } label: {
-                    Label("Route in Apple Karten", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-            }
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Tracker").font(.headline)
-                LabeledContent("Netzwerk", value: current.provider.capitalized)
-                LabeledContent("Batterie", value: current.battery ?? "Unbekannt")
-                LabeledContent("Verlauf", value: current.historyActive == true ? "Aktiv" : "Aus")
-                if let networks = current.linkedNetworks, !networks.isEmpty {
-                    LabeledContent("Fusion", value: networks.joined(separator: " + "))
-                }
-            }
-            .padding(16)
-            .background(.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Benachrichtigungen").font(.headline)
-                Button { Task { await toggleFound() } } label: {
-                    Label(
-                        current.foundNotification?.enabled == true ? "Fundmeldung deaktivieren" : "Bei Fund melden",
-                        systemImage: current.foundNotification?.enabled == true ? "bell.slash" : "bell.and.waves.left.and.right"
-                    )
-                }
-                .buttonStyle(.bordered)
-
-                if ["apple", "fusion"].contains(current.provider) {
-                    Button(role: .destructive) { showRecoveryConfirm = true } label: {
-                        Label("Recovery Guard aktivieren", systemImage: "lifepreserver.fill")
-                    }
-                    .buttonStyle(.bordered)
-                    .confirmationDialog("Recovery Guard starten?", isPresented: $showRecoveryConfirm, titleVisibility: .visible) {
-                        Button("Aktivieren", role: .destructive) { Task { await startRecovery() } }
-                        Button("Abbrechen", role: .cancel) { }
-                    } message: {
-                        Text("Der Server beginnt einen Recovery-Fall für diesen Tracker. Das ist kein offizieller Apple-Lost-Mode.")
                     }
                 }
             }
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .rjGlass(in: RoundedRectangle(cornerRadius: 34, style: .continuous))
-        .padding(.horizontal, 10)
+        .padding(16)
+        .background(.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var notificationCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Label("Mitteilung an mich", systemImage: "bell.fill")
+                .font(.headline)
+                .foregroundStyle(.purple)
+                .padding(.bottom, 12)
+            Divider()
+            Toggle(isOn: Binding(
+                get: { current.foundNotification?.enabled == true },
+                set: { enabled in Task { await model.setFoundNotification(current, enabled: enabled) } }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Wenn gefunden")
+                    Text("Bei einer neuen Ortung benachrichtigen")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .disabled(model.isUpdatingNotification(current))
+            .padding(.vertical, 12)
+        }
+        .padding(16)
+        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var trackerInfo: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Details", systemImage: "info.circle.fill").font(.headline)
+            LabeledContent("Netzwerk", value: current.provider.rjProviderName)
+            LabeledContent("Batterie", value: current.battery ?? "Unbekannt")
+            LabeledContent("Verlauf", value: current.historyActive == true ? "Aktiv" : "Aus")
+            if let location = current.location, let accuracy = location.accuracyM, accuracy > 0 {
+                LabeledContent("Genauigkeit", value: "±\(accuracy.metersText)")
+            }
+            if let networks = current.linkedNetworks, !networks.isEmpty {
+                LabeledContent("Fusion-Netze", value: networks.map(\.rjProviderName).joined(separator: " + "))
+            }
+        }
+        .padding(16)
+        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var recoveryCard: some View {
+        Button(role: .destructive) { showRecoveryConfirm = true } label: {
+            Label("Recovery Guard aktivieren", systemImage: "lifepreserver.fill")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .confirmationDialog("Recovery Guard starten?", isPresented: $showRecoveryConfirm, titleVisibility: .visible) {
+            Button("Aktivieren", role: .destructive) { Task { await startRecovery() } }
+            Button("Abbrechen", role: .cancel) { }
+        } message: {
+            Text("Der Server beginnt einen Recovery-Fall für diesen Tracker. Das ist kein offizieller Apple-Lost-Mode.")
+        }
+    }
+
+    private func detailHeight(maxHeight: CGFloat) -> CGFloat {
+        switch detent {
+        case .compact: return min(maxHeight * 0.34, 310)
+        case .medium: return min(maxHeight * 0.58, 535)
+        case .large: return min(maxHeight * 0.88, 790)
+        }
+    }
+
+    private func cycleDetent() {
+        withAnimation(.snappy(duration: 0.32)) {
+            switch detent {
+            case .compact: detent = .medium
+            case .medium: detent = .large
+            case .large: detent = .compact
+            }
+        }
+    }
+
+    private func settleDetent(_ translation: CGFloat, predicted: CGFloat) {
+        let intent = translation + (predicted - translation) * 0.2
+        withAnimation(.snappy(duration: 0.32)) {
+            if intent < -70 {
+                if detent == .compact { detent = .medium } else { detent = .large }
+            } else if intent > 70 {
+                if detent == .large { detent = .medium } else { detent = .compact }
+            }
+        }
     }
 
     private func focusCurrent() {
         guard let location = current.location else { return }
-        let accuracy = max(location.accuracyM ?? 80, 80)
-        mapPosition = .region(MKCoordinateRegion(
-            center: location.coordinate,
-            latitudinalMeters: max(900, accuracy * 7),
-            longitudinalMeters: max(900, accuracy * 7)
-        ))
-    }
-
-    private func toggleFound() async {
-        working = true; defer { working = false }
-        do {
-            _ = try await APIClient.shared.action("set_found_notification", payload: [
-                "tracker": current.ref,
-                "enabled": current.foundNotification?.enabled != true,
-                "mode": "once"
-            ])
-            await model.refresh(); Haptics.success()
-        } catch { model.errorMessage = error.localizedDescription }
+        let accuracy = max(location.accuracyM ?? 80, 70)
+        withAnimation(.snappy(duration: 0.42)) {
+            mapPosition = .region(MKCoordinateRegion(
+                center: location.coordinate,
+                latitudinalMeters: max(650, accuracy * 6.5),
+                longitudinalMeters: max(650, accuracy * 6.5)
+            ))
+        }
     }
 
     private func startRecovery() async {
         do {
             _ = try await APIClient.shared.action("start_recovery", payload: ["tracker": current.ref, "confirmed": true])
-            await model.refresh(); Haptics.success()
-        } catch { model.errorMessage = error.localizedDescription }
+            await model.refresh()
+            Haptics.success()
+        } catch {
+            model.errorMessage = error.localizedDescription
+        }
     }
 
     private func openMaps(_ location: TrackerLocation) {
         let item = MKMapItem(placemark: MKPlacemark(coordinate: location.coordinate))
         item.name = current.name
-        item.openInMaps()
+        item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking])
+    }
+}
+
+private struct DetailActionTile: View {
+    let title: String
+    let subtitle: String
+    let symbol: String
+    let tint: Color
+    var loading = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                ZStack {
+                    Circle().fill(tint.opacity(0.18)).frame(width: 42, height: 42)
+                    if loading { ProgressView().controlSize(.small) }
+                    else { Image(systemName: symbol).font(.title3).foregroundStyle(tint) }
+                }
+                Text(title).font(.headline).foregroundStyle(.primary).lineLimit(1)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, minHeight: 116, alignment: .leading)
+            .padding(14)
+            .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }
