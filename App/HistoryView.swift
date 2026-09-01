@@ -31,6 +31,8 @@ struct HistoryView: View {
                     Text("90 Tage").tag(90)
                 }
                 .pickerStyle(.segmented)
+                .padding(6)
+                .rjGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .onChange(of: days) { _, _ in Task { await load() } }
 
                 if loading && response == nil {
@@ -44,9 +46,10 @@ struct HistoryView: View {
                     recentPointsCard(response)
                 }
             }
-            .padding()
+            .padding(16)
+            .padding(.bottom, 24)
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+        .rjScreenChrome()
         .navigationTitle("Standortverlauf")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
@@ -68,7 +71,7 @@ struct HistoryView: View {
             if let point = selectedPoint {
                 if let accuracy = point.accuracyM, accuracy > 0 {
                     MapCircle(center: point.coordinate, radius: max(accuracy, 3))
-                        .foregroundStyle(Color.blue.opacity(0.16))
+                        .foregroundStyle(Color.blue.opacity(0.14))
                         .stroke(Color.blue.opacity(0.58), lineWidth: 1.5)
                 }
                 Annotation("Standort", coordinate: point.coordinate, anchor: .bottom) {
@@ -76,10 +79,18 @@ struct HistoryView: View {
                 }
             }
         }
-        .frame(height: 340)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .mapStyle(.standard(elevation: .realistic))
+        .frame(height: 350)
+        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+        .mapStyle(.standard(
+            elevation: .realistic,
+            pointsOfInterest: .including([.publicTransport, .park, .hospital, .school])
+        ))
         .mapControls { MapCompass(); MapScaleView() }
+        .overlay {
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .stroke(.white.opacity(0.12), lineWidth: 0.8)
+                .allowsHitTesting(false)
+        }
         .overlay(alignment: .topLeading) {
             if let point = selectedPoint {
                 VStack(alignment: .leading, spacing: 4) {
@@ -156,7 +167,8 @@ struct HistoryView: View {
 
     private func summaryCard(_ response: HistoryResponse) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Zusammenfassung").font(.headline)
+            RJSectionTitle(title: "Zusammenfassung", symbol: "chart.bar.fill")
+            Divider()
             let summary = response.summary
             LabeledContent("Standortmeldungen", value: "\(summary?.matchingReports ?? response.points.count)")
             LabeledContent("Aufenthalte", value: "\(summary?.confirmedStays ?? 0)")
@@ -168,7 +180,8 @@ struct HistoryView: View {
 
     private func recentPointsCard(_ response: HistoryResponse) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Letzte Standorte").font(.headline).padding(.bottom, 8)
+            RJSectionTitle(title: "Letzte Standorte", subtitle: "Bis zu 40 Punkte", symbol: "clock.arrow.circlepath")
+                .padding(.bottom, 8)
             ForEach(response.points.prefix(40)) { point in
                 Button { select(point) } label: {
                     HStack(spacing: 12) {
