@@ -59,7 +59,7 @@ struct AlertsView: View {
                     .padding(.vertical, 24)
             } else {
                 Divider()
-                ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
+                ForEach(events) { event in
                     Button { Task { await acknowledge(event) } } label: {
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: symbol(event))
@@ -96,7 +96,7 @@ struct AlertsView: View {
                     }
                     .buttonStyle(.plain)
 
-                    if index < events.count - 1 {
+                    if event.id != events.last?.id {
                         Divider().padding(.leading, 46)
                     }
                 }
