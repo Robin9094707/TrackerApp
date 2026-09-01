@@ -1,5 +1,8 @@
 name: Temporary Legends Analyze
 
+permissions:
+  contents: write
+
 on:
   push:
     branches: [tmp-legends-patch]
@@ -7,45 +10,56 @@ on:
 
 jobs:
   analyze:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Download Legends 1.20.1 ss1.0.3
+      - uses: actions/checkout@v4
+        with:
+          ref: tmp-legends-patch
+      - name: Analyze only resource and cooldown code
+        shell: bash
         run: |
+          set -euo pipefail
           curl -L --fail --retry 3 -o Legends.jar 'https://cdn.modrinth.com/data/TfKZ50GD/versions/EwlgJgYt/Legends-1.20.1-ss1.0.3.jar'
-          ls -lh Legends.jar
-          sha256sum Legends.jar
-      - name: Find relevant classes
-        run: |
-          mkdir unpack
-          cd unpack
-          jar xf ../Legends.jar
-          cd ..
-          echo '=== filename candidates ==='
-          find unpack -type f -name '*.class' | grep -Ei 'mana|stamina|cooldown|ability|capab|energy' | head -n 300 || true
-          echo '=== classes containing keywords ==='
+          rm -rf unpack && mkdir unpack
+          (cd unpack && jar xf ../Legends.jar)
           python3 - <<'PY'
           from pathlib import Path
           keys=[b'mana',b'stamina',b'cooldown']
-          out=[]
+          rows=[]
           for p in Path('unpack').rglob('*.class'):
               b=p.read_bytes().lower()
-              hits=[k.decode() for k in keys if k in b]
-              if hits: out.append((str(p),hits))
-          for p,h in out:
-              print(','.join(h),p)
-          print('MATCH_COUNT',len(out))
+              counts={k.decode():b.count(k) for k in keys}
+              score=sum(counts.values())
+              if score:
+                  rel=str(p.relative_to('unpack'))
+                  penalty=sum(x in rel.lower() for x in ['client','render','screen','gui','model'])
+                  rows.append((penalty, -score, rel, counts))
+          rows.sort()
+          with open('candidates.txt','w') as f:
+              for penalty,neg,rel,c in rows:
+                  f.write(f"score={-neg} penalty={penalty} mana={c['mana']} stamina={c['stamina']} cooldown={c['cooldown']} {rel}\n")
+          chosen=[r[2][:-6].replace('/','.') for r in rows if r[0]==0][:25]
+          Path('chosen.txt').write_text('\n'.join(chosen)+'\n')
           PY
-      - name: Javap relevant classes
+          {
+            echo '=== SHA256 ==='
+            sha256sum Legends.jar
+            echo
+            echo '=== TOP CANDIDATES ==='
+            head -n 120 candidates.txt
+            echo
+            echo '=== JAVAP SELECTED ==='
+            while IFS= read -r cls; do
+              [ -n "$cls" ] || continue
+              echo "===== $cls ====="
+              javap -classpath Legends.jar -c -p -constants "$cls" 2>&1 || true
+            done < chosen.txt
+          } > legends-analysis.txt
+      - name: Commit analysis report
         run: |
-          python3 - <<'PY' > candidates.txt
-          from pathlib import Path
-          keys=[b'mana',b'stamina',b'cooldown']
-          for p in Path('unpack').rglob('*.class'):
-              b=p.read_bytes().lower()
-              if any(k in b for k in keys):
-                  print(str(p.relative_to('unpack'))[:-6].replace('/','.'))
-          PY
-          while IFS= read -r cls; do
-            echo "===== $cls ====="
-            javap -classpath Legends.jar -c -p -constants "$cls" || true
-          done < candidates.txt
+          git config user.name 'ChatGPT Legends Worker'
+          git config user.email 'actions@users.noreply.github.com'
+          git add legends-analysis.txt candidates.txt chosen.txt
+          git commit -m 'Add Legends bytecode analysis report [skip ci]' || exit 0
+          git push origin HEAD:tmp-legends-patch
