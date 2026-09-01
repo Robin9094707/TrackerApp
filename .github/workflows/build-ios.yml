@@ -2,11 +2,15 @@ name: Build RJ Tracker IPA
 
 on:
   push:
-    branches: [main]
+    branches: [main, liquid-glass-v2]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: rj-tracker-ios-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -137,16 +141,16 @@ jobs:
           rm -rf Payload
           mkdir -p Payload
           cp -R "$APP" Payload/
-          /usr/bin/zip -qry RJ-Tracker-unsigned.ipa Payload
-          unzip -t RJ-Tracker-unsigned.ipa
-          ls -lh RJ-Tracker-unsigned.ipa
+          /usr/bin/zip -qry RJ-Tracker-v1.3.0-unsigned.ipa Payload
+          unzip -t RJ-Tracker-v1.3.0-unsigned.ipa
+          ls -lh RJ-Tracker-v1.3.0-unsigned.ipa
 
       - name: Upload IPA
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-Tracker-unsigned-IPA
-          path: RJ-Tracker-unsigned.ipa
+          name: RJ-Tracker-v1.3.0-unsigned-IPA
+          path: RJ-Tracker-v1.3.0-unsigned.ipa
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
@@ -155,7 +159,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-Tracker-build-log
+          name: RJ-Tracker-v1.3.0-build-log
           path: RJ-Tracker-build.log
           if-no-files-found: ignore
           retention-days: 7
