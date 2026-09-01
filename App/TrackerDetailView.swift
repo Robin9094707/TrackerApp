@@ -15,6 +15,14 @@ struct TrackerDetailView: View {
 
     private var current: Tracker { model.trackers.first(where: { $0.ref == tracker.ref }) ?? tracker }
 
+    private var panelCoverage: CGFloat {
+        switch detent {
+        case .compact: 0.34
+        case .medium: 0.58
+        case .large: 0.88
+        }
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .bottom) {
@@ -23,14 +31,15 @@ struct TrackerDetailView: View {
 
                 detailSheet(maxHeight: geometry.size.height)
                     .frame(height: max(235, detailHeight(maxHeight: geometry.size.height) - dragTranslation))
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 7)
                     .padding(.bottom, 3)
             }
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .task { focusCurrent() }
+        .task { focusCurrent(animated: false) }
         .onChange(of: current.location) { _, _ in focusCurrent() }
+        .onChange(of: detent) { _, _ in focusCurrent() }
     }
 
     private var heroMap: some View {
@@ -38,7 +47,7 @@ struct TrackerDetailView: View {
             if let location = current.location {
                 if let accuracy = location.accuracyM, accuracy > 0 {
                     MapCircle(center: location.coordinate, radius: max(accuracy, 3))
-                        .foregroundStyle(Color.blue.opacity(0.16))
+                        .foregroundStyle(Color.blue.opacity(0.14))
                         .stroke(Color.blue.opacity(0.58), lineWidth: 1.5)
                 }
                 Annotation(current.name, coordinate: location.coordinate, anchor: .bottom) {
@@ -46,7 +55,10 @@ struct TrackerDetailView: View {
                 }
             }
         }
-        .mapStyle(.standard(elevation: .realistic, pointsOfInterest: .including([.publicTransport, .park, .hospital, .school])))
+        .mapStyle(.standard(
+            elevation: .realistic,
+            pointsOfInterest: .including([.publicTransport, .park, .hospital, .school])
+        ))
         .mapControls {
             MapCompass()
             MapPitchToggle()
@@ -57,14 +69,15 @@ struct TrackerDetailView: View {
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
                         .font(.title3.weight(.semibold))
-                        .frame(width: 44, height: 44)
-                        .rjGlass(in: Circle())
+                        .rjGlassControl()
                 }
+                .buttonStyle(.plain)
+
                 Button { focusCurrent() } label: {
                     Image(systemName: "scope")
-                        .frame(width: 44, height: 44)
-                        .rjGlass(in: Circle())
+                        .rjGlassControl()
                 }
+                .buttonStyle(.plain)
             }
             .padding(.top, 56)
             .padding(.trailing, 14)
@@ -74,7 +87,7 @@ struct TrackerDetailView: View {
     private func detailSheet(maxHeight: CGFloat) -> some View {
         VStack(spacing: 0) {
             Capsule()
-                .fill(.secondary.opacity(0.5))
+                .fill(.secondary.opacity(0.48))
                 .frame(width: 42, height: 5)
                 .padding(.top, 9)
                 .padding(.bottom, 10)
@@ -103,44 +116,56 @@ struct TrackerDetailView: View {
             .scrollIndicators(.visible)
         }
         .rjGlass(in: RoundedRectangle(cornerRadius: RJDesign.sheetCorner, style: .continuous))
-        .shadow(color: .black.opacity(0.2), radius: 28, y: 12)
+        .shadow(color: .black.opacity(0.18), radius: 28, y: 12)
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(current.name)
-                    .font(.largeTitle.bold())
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.72)
-                Spacer(minLength: 10)
-                ProviderBadge(provider: current.provider)
+        HStack(alignment: .top, spacing: 13) {
+            ZStack {
+                Circle().fill(.secondary.opacity(0.10))
+                Text(current.emoji ?? "📍")
+                    .font(.system(size: 31))
             }
+            .frame(width: 60, height: 60)
 
-            ResolvedAddressText(location: current.location, fallback: current.location == nil ? "Noch kein Standort verfügbar" : "Adresse wird ermittelt …")
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(current.name)
+                        .font(.largeTitle.bold())
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.72)
+                    Spacer(minLength: 8)
+                    ProviderBadge(provider: current.provider)
+                }
+
+                ResolvedAddressText(
+                    location: current.location,
+                    fallback: current.location == nil ? "Noch kein Standort verfügbar" : "Adresse wird ermittelt …"
+                )
                 .font(.title3)
                 .lineLimit(3)
 
-            HStack(spacing: 7) {
-                FreshnessLabel(timestamp: current.location?.timestamp ?? current.lastSeenTs)
-                if let battery = current.battery, !battery.isEmpty {
-                    Text("•").foregroundStyle(.secondary)
-                    Label(battery, systemImage: "battery.50percent")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if current.provider == "fusion", let source = current.latestSourceName {
-                    Text("•").foregroundStyle(.secondary)
-                    Text(source.rjProviderName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(source.rjProviderColor)
+                HStack(spacing: 7) {
+                    FreshnessLabel(timestamp: current.location?.timestamp ?? current.lastSeenTs)
+                    if let battery = current.battery, !battery.isEmpty {
+                        Text("•").foregroundStyle(.secondary)
+                        Label(battery, systemImage: "battery.50percent")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if current.provider == "fusion", let source = current.latestSourceName {
+                        Text("•").foregroundStyle(.secondary)
+                        Text(source.rjProviderName)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(source.rjProviderColor)
+                    }
                 }
             }
         }
     }
 
     private var actionGrid: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             DetailActionTile(
                 title: model.isLocating(current) ? "Ortung läuft …" : "Orten",
                 subtitle: model.isLocating(current) ? "Neuer Standort wird gesucht" : "Standort aktualisieren",
@@ -173,7 +198,7 @@ struct TrackerDetailView: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 116, alignment: .leading)
                 .padding(14)
-                .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .rjGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             }
             .buttonStyle(.plain)
         }
@@ -198,7 +223,8 @@ struct TrackerDetailView: View {
             }
         }
         .padding(16)
-        .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(.blue.opacity(0.04), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .rjGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     private var fusionDetails: some View {
@@ -245,7 +271,8 @@ struct TrackerDetailView: View {
             }
         }
         .padding(16)
-        .background(.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(.purple.opacity(0.04), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .rjGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     private var notificationCard: some View {
@@ -269,8 +296,7 @@ struct TrackerDetailView: View {
             .disabled(model.isUpdatingNotification(current))
             .padding(.vertical, 12)
         }
-        .padding(16)
-        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .rjCompactCard()
     }
 
     private var trackerInfo: some View {
@@ -286,16 +312,18 @@ struct TrackerDetailView: View {
                 LabeledContent("Fusion-Netze", value: networks.map(\.rjProviderName).joined(separator: " + "))
             }
         }
-        .padding(16)
-        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .rjCompactCard()
     }
 
     private var recoveryCard: some View {
         Button(role: .destructive) { showRecoveryConfirm = true } label: {
             Label("Recovery Guard aktivieren", systemImage: "lifepreserver.fill")
+                .font(.headline)
                 .frame(maxWidth: .infinity)
+                .padding(.vertical, 13)
+                .rjGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.plain)
         .confirmationDialog("Recovery Guard starten?", isPresented: $showRecoveryConfirm, titleVisibility: .visible) {
             Button("Aktivieren", role: .destructive) { Task { await startRecovery() } }
             Button("Abbrechen", role: .cancel) { }
@@ -333,15 +361,13 @@ struct TrackerDetailView: View {
         }
     }
 
-    private func focusCurrent() {
+    private func focusCurrent(animated: Bool = true) {
         guard let location = current.location else { return }
-        let accuracy = max(location.accuracyM ?? 80, 70)
-        withAnimation(.snappy(duration: 0.42)) {
-            mapPosition = .region(MKCoordinateRegion(
-                center: location.coordinate,
-                latitudinalMeters: max(650, accuracy * 6.5),
-                longitudinalMeters: max(650, accuracy * 6.5)
-            ))
+        let region = RJMapCamera.focusedRegion(for: location, panelCoverage: panelCoverage)
+        if animated {
+            withAnimation(.snappy(duration: 0.42)) { mapPosition = .region(region) }
+        } else {
+            mapPosition = .region(region)
         }
     }
 
@@ -374,7 +400,7 @@ private struct DetailActionTile: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 ZStack {
-                    Circle().fill(tint.opacity(0.18)).frame(width: 42, height: 42)
+                    Circle().fill(tint.opacity(0.17)).frame(width: 42, height: 42)
                     if loading { ProgressView().controlSize(.small) }
                     else { Image(systemName: symbol).font(.title3).foregroundStyle(tint) }
                 }
@@ -383,7 +409,7 @@ private struct DetailActionTile: View {
             }
             .frame(maxWidth: .infinity, minHeight: 116, alignment: .leading)
             .padding(14)
-            .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .rjGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
         .buttonStyle(.plain)
     }
