@@ -21,6 +21,14 @@ struct TrackerHomeView: View {
         return model.trackers.first(where: { $0.ref == selected.ref }) ?? selected
     }
 
+    private var panelCoverage: CGFloat {
+        switch detent {
+        case .compact: 0.34
+        case .medium: 0.58
+        case .large: 0.86
+        }
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .bottom) {
@@ -29,7 +37,7 @@ struct TrackerHomeView: View {
 
                 trackerPanel(maxHeight: geometry.size.height)
                     .frame(height: max(210, panelHeight(maxHeight: geometry.size.height) - dragTranslation))
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 7)
                     .padding(.bottom, 3)
             }
         }
@@ -38,12 +46,19 @@ struct TrackerHomeView: View {
         .navigationDestination(for: Tracker.self) { TrackerDetailView(tracker: $0) }
         .task {
             if selected == nil { selected = model.filteredTrackers.first }
+            if let current { focus(current, animated: false) }
         }
         .onChange(of: model.filteredTrackers) { _, trackers in
             if let selected, !trackers.contains(where: { $0.ref == selected.ref }) {
                 self.selected = trackers.first
                 showingTrackerDetail = false
             }
+        }
+        .onChange(of: detent) { _, _ in
+            if showingTrackerDetail, let current { focus(current) }
+        }
+        .onChange(of: current?.location) { _, _ in
+            if showingTrackerDetail, let current { focus(current) }
         }
         .toolbar { mapToolbar }
     }
@@ -54,8 +69,8 @@ struct TrackerHomeView: View {
                 if let location = tracker.location {
                     if current?.ref == tracker.ref, let accuracy = location.accuracyM, accuracy > 0 {
                         MapCircle(center: location.coordinate, radius: max(accuracy, 3))
-                            .foregroundStyle(Color.blue.opacity(0.16))
-                            .stroke(Color.blue.opacity(0.55), lineWidth: 1.4)
+                            .foregroundStyle(Color.blue.opacity(0.14))
+                            .stroke(Color.blue.opacity(0.58), lineWidth: 1.4)
                     }
 
                     Annotation(tracker.name, coordinate: location.coordinate, anchor: .bottom) {
@@ -69,28 +84,51 @@ struct TrackerHomeView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("\(tracker.name), \(tracker.provider.rjProviderName)")
                     }
                 }
             }
         }
-        .mapStyle(.standard(elevation: .realistic, pointsOfInterest: .including([.publicTransport, .school, .park, .hospital])))
+        .mapStyle(.standard(
+            elevation: .realistic,
+            pointsOfInterest: .including([.publicTransport, .school, .park, .hospital])
+        ))
         .mapControls {
             MapCompass()
             MapPitchToggle()
             MapUserLocationButton()
+        }
+        .overlay(alignment: .topLeading) {
+            if let date = model.lastRefresh {
+                Label("Sync \(date.formatted(date: .omitted, time: .shortened))", systemImage: "checkmark.icloud.fill")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .rjGlass(in: Capsule())
+                    .padding(.top, 6)
+                    .padding(.leading, 12)
+                    .allowsHitTesting(false)
+            }
         }
     }
 
     @ToolbarContentBuilder
     private var mapToolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            Button { position = .automatic } label: {
+            Button {
+                withAnimation(.snappy(duration: 0.35)) {
+                    showingTrackerDetail = false
+                    detent = .medium
+                    position = .automatic
+                }
+            } label: {
                 Image(systemName: "map.fill")
-                    .frame(width: 36, height: 36)
-                    .rjGlass(in: Circle())
+                    .rjGlassControl()
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("Alle Tracker zeigen")
         }
+
         ToolbarItem(placement: .topBarTrailing) {
             Button { Task { await model.locateAll() } } label: {
                 Group {
@@ -100,16 +138,16 @@ struct TrackerHomeView: View {
                         Image(systemName: "location.fill")
                     }
                 }
-                .frame(width: 36, height: 36)
+                .rjGlassControl()
             }
-            .rjGlass(in: Circle())
+            .buttonStyle(.plain)
             .accessibilityLabel("Alle Tracker orten")
         }
     }
 
     private func trackerPanel(maxHeight: CGFloat) -> some View {
         VStack(spacing: 0) {
-            sheetHandle(maxHeight: maxHeight)
+            sheetHandle
 
             if showingTrackerDetail, let current {
                 selectedTrackerPanel(current)
@@ -119,41 +157,42 @@ struct TrackerHomeView: View {
         }
         .frame(maxWidth: .infinity)
         .rjGlass(in: RoundedRectangle(cornerRadius: RJDesign.sheetCorner, style: .continuous))
-        .shadow(color: .black.opacity(0.18), radius: 26, y: 11)
+        .shadow(color: .black.opacity(0.17), radius: 28, y: 12)
         .animation(.snappy(duration: 0.32), value: detent)
         .animation(.snappy(duration: 0.28), value: showingTrackerDetail)
     }
 
-    private func sheetHandle(maxHeight: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            Capsule()
-                .fill(.secondary.opacity(0.5))
-                .frame(width: 42, height: 5)
-                .padding(.top, 9)
-                .padding(.bottom, 10)
-        }
-        .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
-        .onTapGesture { cycleDetent() }
-        .gesture(
-            DragGesture(minimumDistance: 5)
-                .updating($dragTranslation) { value, state, _ in
-                    state = value.translation.height
-                }
-                .onEnded { value in
-                    settleDetent(translation: value.translation.height, velocity: value.predictedEndTranslation.height - value.translation.height)
-                }
-        )
-        .accessibilityLabel("Panel hoch- oder runterziehen")
+    private var sheetHandle: some View {
+        Capsule()
+            .fill(.secondary.opacity(0.48))
+            .frame(width: 42, height: 5)
+            .padding(.top, 9)
+            .padding(.bottom, 10)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture { cycleDetent() }
+            .gesture(
+                DragGesture(minimumDistance: 5)
+                    .updating($dragTranslation) { value, state, _ in
+                        state = value.translation.height
+                    }
+                    .onEnded { value in
+                        settleDetent(
+                            translation: value.translation.height,
+                            velocity: value.predictedEndTranslation.height - value.translation.height
+                        )
+                    }
+            )
+            .accessibilityLabel("Panel hoch- oder runterziehen")
     }
 
     private var trackerListPanel: some View {
         VStack(spacing: 0) {
             HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text("Objekte")
                         .font(.largeTitle.bold())
-                    Text("\(model.filteredTrackers.count) Tracker")
+                    Text("\(model.filteredTrackers.count) von \(model.trackers.count) Trackern")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -164,24 +203,30 @@ struct TrackerHomeView: View {
                         else { Image(systemName: "arrow.clockwise") }
                     }
                     .frame(width: 44, height: 44)
-                    .background(.secondary.opacity(0.1), in: Circle())
+                    .rjGlass(in: Circle())
                 }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 18)
             .padding(.bottom, 10)
 
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Tracker suchen", text: Binding(get: { model.searchText }, set: { model.searchText = $0 }))
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Objekt suchen", text: Binding(get: { model.searchText }, set: { model.searchText = $0 }))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 if !model.searchText.isEmpty {
-                    Button { model.searchText = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                    Button { model.searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 13)
-            .frame(height: 42)
-            .background(.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .frame(height: 43)
+            .rjGlass(in: RoundedRectangle(cornerRadius: 15, style: .continuous))
             .padding(.horizontal, 16)
             .padding(.bottom, 10)
 
@@ -229,12 +274,20 @@ struct TrackerHomeView: View {
     private func selectedTrackerPanel(_ tracker: Tracker) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .top, spacing: 13) {
+                    ZStack {
+                        Circle()
+                            .fill(.secondary.opacity(0.10))
+                        Text(tracker.emoji ?? "📍")
+                            .font(.system(size: 30))
+                    }
+                    .frame(width: 58, height: 58)
+
+                    VStack(alignment: .leading, spacing: 5) {
                         Text(tracker.name)
                             .font(.largeTitle.bold())
                             .lineLimit(2)
-                            .minimumScaleFactor(0.78)
+                            .minimumScaleFactor(0.76)
                         ResolvedAddressText(location: tracker.location, fallback: "Adresse wird ermittelt …")
                             .font(.title3)
                             .lineLimit(2)
@@ -248,14 +301,20 @@ struct TrackerHomeView: View {
                             }
                         }
                     }
+
                     Spacer(minLength: 6)
+
                     Button {
-                        withAnimation(.snappy(duration: 0.28)) { showingTrackerDetail = false; detent = .medium }
+                        withAnimation(.snappy(duration: 0.28)) {
+                            showingTrackerDetail = false
+                            detent = .medium
+                            position = .automatic
+                        }
                     } label: {
                         Image(systemName: "xmark")
                             .font(.title3.weight(.semibold))
                             .frame(width: 44, height: 44)
-                            .background(.secondary.opacity(0.12), in: Circle())
+                            .rjGlass(in: Circle())
                     }
                     .buttonStyle(.plain)
                 }
@@ -270,9 +329,12 @@ struct TrackerHomeView: View {
 
                 NavigationLink(value: tracker) {
                     Label("Alle Details & Verlauf", systemImage: "info.circle.fill")
+                        .font(.headline)
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, 13)
+                        .rjGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 18)
             .padding(.bottom, 24)
@@ -329,8 +391,7 @@ struct TrackerHomeView: View {
             .disabled(model.isUpdatingNotification(tracker))
             .padding(.vertical, 12)
         }
-        .padding(16)
-        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .rjCompactCard()
     }
 
     private func fusionCard(_ tracker: Tracker) -> some View {
@@ -350,7 +411,9 @@ struct TrackerHomeView: View {
 
             if !tracker.fusionNetworkNames.isEmpty {
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("Verknüpfte Netze").font(.caption).foregroundStyle(.secondary)
+                    Text("Verknüpfte Netze")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     HStack(spacing: 6) {
                         ForEach(tracker.fusionNetworkNames, id: \.self) { SourceBadge(source: $0) }
                     }
@@ -368,7 +431,8 @@ struct TrackerHomeView: View {
             }
         }
         .padding(16)
-        .background(.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(.purple.opacity(0.05), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .rjGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     private func panelHeight(maxHeight: CGFloat) -> CGFloat {
@@ -407,14 +471,17 @@ struct TrackerHomeView: View {
         showingTrackerDetail = showDetails
         if showDetails { detent = .medium }
         Haptics.impact()
+        focus(tracker)
+    }
+
+    private func focus(_ tracker: Tracker, animated: Bool = true) {
         guard let location = tracker.location else { return }
-        let accuracy = max(location.accuracyM ?? 80, 70)
-        withAnimation(.snappy(duration: 0.45)) {
-            position = .region(MKCoordinateRegion(
-                center: location.coordinate,
-                latitudinalMeters: max(650, accuracy * 6),
-                longitudinalMeters: max(650, accuracy * 6)
-            ))
+        let coverage = showingTrackerDetail ? panelCoverage : 0.15
+        let region = RJMapCamera.focusedRegion(for: location, panelCoverage: coverage)
+        if animated {
+            withAnimation(.snappy(duration: 0.45)) { position = .region(region) }
+        } else {
+            position = .region(region)
         }
     }
 
@@ -435,7 +502,7 @@ private struct FindMyTrackerRow: View {
     var body: some View {
         HStack(spacing: 14) {
             ZStack {
-                Circle().fill(selected ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.12))
+                Circle().fill(selected ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.11))
                 Text(tracker.emoji ?? "📍").font(.title2)
             }
             .frame(width: 52, height: 52)
@@ -444,14 +511,19 @@ private struct FindMyTrackerRow: View {
                 HStack(spacing: 7) {
                     Text(tracker.name).font(.headline).lineLimit(1)
                     if tracker.provider == "fusion" {
-                        Image(systemName: "sparkles").font(.caption).foregroundStyle(.purple)
+                        Image(systemName: "sparkles")
+                            .font(.caption)
+                            .foregroundStyle(.purple)
                     }
                 }
 
-                ResolvedAddressText(location: tracker.location, fallback: tracker.location == nil ? "Noch kein Standort" : "Adresse wird ermittelt …")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                ResolvedAddressText(
+                    location: tracker.location,
+                    fallback: tracker.location == nil ? "Noch kein Standort" : "Adresse wird ermittelt …"
+                )
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
 
                 HStack(spacing: 7) {
                     FreshnessLabel(timestamp: timestamp)
@@ -477,6 +549,7 @@ private struct FindMyTrackerRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 10)
         .contentShape(Rectangle())
+        .background(selected ? Color.accentColor.opacity(0.05) : Color.clear, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 
@@ -492,16 +565,22 @@ private struct QuickActionTile: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 ZStack {
-                    Circle().fill(tint.opacity(0.18)).frame(width: 42, height: 42)
+                    Circle().fill(tint.opacity(0.17)).frame(width: 42, height: 42)
                     if loading { ProgressView().controlSize(.small) }
                     else { Image(systemName: symbol).font(.title3).foregroundStyle(tint) }
                 }
-                Text(title).font(.headline).foregroundStyle(.primary).lineLimit(1)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
             .frame(maxWidth: .infinity, minHeight: 116, alignment: .leading)
             .padding(14)
-            .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .rjGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         }
         .buttonStyle(.plain)
     }
