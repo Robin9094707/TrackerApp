@@ -1,13 +1,30 @@
 import SwiftUI
 import UIKit
 import CoreLocation
+import MapKit
 
 // MARK: - Visual language
 
 enum RJDesign {
     static let corner: CGFloat = 30
     static let compactCorner: CGFloat = 20
-    static let sheetCorner: CGFloat = 34
+    static let sheetCorner: CGFloat = 36
+    static let controlSize: CGFloat = 46
+    static let contentPadding: CGFloat = 16
+}
+
+struct RJGlassBackdrop: View {
+    var body: some View {
+        ZStack {
+            Color(uiColor: .systemGroupedBackground)
+            LinearGradient(
+                colors: [Color.accentColor.opacity(0.10), Color.clear, Color.cyan.opacity(0.05)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+        .ignoresSafeArea()
+    }
 }
 
 extension View {
@@ -17,13 +34,83 @@ extension View {
             self.glassEffect(.regular, in: shape)
         } else {
             self.background(.ultraThinMaterial, in: shape)
+                .overlay(shape.stroke(.white.opacity(0.12), lineWidth: 0.8))
         }
     }
 
     func rjCard() -> some View {
-        padding(16)
+        padding(RJDesign.contentPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .rjGlass(in: RoundedRectangle(cornerRadius: RJDesign.corner, style: .continuous))
+    }
+
+    func rjCompactCard() -> some View {
+        padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .rjGlass(in: RoundedRectangle(cornerRadius: RJDesign.compactCorner, style: .continuous))
+    }
+
+    func rjScreenChrome() -> some View {
+        background(RJGlassBackdrop())
+            .toolbarBackground(.hidden, for: .navigationBar)
+    }
+
+    func rjListChrome() -> some View {
+        scrollContentBackground(.hidden)
+            .background(RJGlassBackdrop())
+            .listStyle(.insetGrouped)
+            .toolbarBackground(.hidden, for: .navigationBar)
+    }
+
+    func rjFormChrome() -> some View {
+        scrollContentBackground(.hidden)
+            .background(RJGlassBackdrop())
+            .toolbarBackground(.hidden, for: .navigationBar)
+    }
+
+    func rjGlassControl() -> some View {
+        frame(width: RJDesign.controlSize, height: RJDesign.controlSize)
+            .rjGlass(in: Circle())
+    }
+}
+
+struct RJSectionTitle: View {
+    let title: String
+    var subtitle: String? = nil
+    var symbol: String? = nil
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 9) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .foregroundStyle(.tint)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+        }
+    }
+}
+
+struct RJStatusPill: View {
+    let text: String
+    let symbol: String
+    var tint: Color = .blue
+
+    var body: some View {
+        Label(text, systemImage: symbol)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(tint.opacity(0.12), in: Capsule())
     }
 }
 
@@ -84,6 +171,32 @@ struct AccuracyPill: View {
     }
 }
 
+// MARK: - Map framing
+
+enum RJMapCamera {
+    /// Keeps the selected pin above a bottom sheet instead of geometrically centering it behind the sheet.
+    static func focusedRegion(
+        for location: TrackerLocation,
+        zoomMeters: Double? = nil,
+        panelCoverage: CGFloat = 0.0
+    ) -> MKCoordinateRegion {
+        let accuracy = max(location.accuracyM ?? 80, 70)
+        let spanMeters = max(zoomMeters ?? (accuracy * 6.5), 650)
+        let coverage = min(max(Double(panelCoverage), 0), 0.90)
+        let upwardScreenShift = min(0.34, coverage * 0.43)
+        let latitudeOffset = (spanMeters * upwardScreenShift) / 111_320.0
+        let center = CLLocationCoordinate2D(
+            latitude: location.latitude - latitudeOffset,
+            longitude: location.longitude
+        )
+        return MKCoordinateRegion(
+            center: center,
+            latitudinalMeters: spanMeters,
+            longitudinalMeters: spanMeters
+        )
+    }
+}
+
 // MARK: - Apple-like map marker
 
 struct TrackerMapBubble: View {
@@ -92,36 +205,39 @@ struct TrackerMapBubble: View {
     var locating: Bool = false
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            RoundedRectangle(cornerRadius: selected ? 22 : 19, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .frame(width: selected ? 58 : 50, height: selected ? 58 : 50)
-                .overlay {
-                    RoundedRectangle(cornerRadius: selected ? 22 : 19, style: .continuous)
-                        .stroke(.white.opacity(0.34), lineWidth: 1)
-                }
-                .shadow(color: .black.opacity(0.22), radius: 8, y: 4)
+        VStack(spacing: -6) {
+            ZStack {
+                RoundedRectangle(cornerRadius: selected ? 24 : 21, style: .continuous)
+                    .fill(.clear)
+                    .frame(width: selected ? 62 : 54, height: selected ? 62 : 54)
+                    .rjGlass(in: RoundedRectangle(cornerRadius: selected ? 24 : 21, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: selected ? 24 : 21, style: .continuous)
+                            .stroke(.white.opacity(selected ? 0.48 : 0.28), lineWidth: 1)
+                    }
+                    .shadow(color: .black.opacity(0.20), radius: 9, y: 5)
 
-            DiamondTip()
-                .fill(.ultraThinMaterial)
-                .frame(width: 16, height: 16)
-                .rotationEffect(.degrees(45))
-                .offset(y: 5)
-                .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
-
-            Group {
                 if locating {
                     ProgressView().controlSize(.small)
                 } else {
                     Text(tracker.emoji ?? "📍")
-                        .font(selected ? .system(size: 30) : .system(size: 25))
+                        .font(selected ? .system(size: 31) : .system(size: 27))
                 }
             }
-            .frame(width: selected ? 58 : 50, height: selected ? 54 : 46)
-            .offset(y: selected ? -3 : -2)
+
+            DiamondTip()
+                .fill(.ultraThinMaterial)
+                .frame(width: 15, height: 15)
+                .rotationEffect(.degrees(45))
+                .overlay {
+                    DiamondTip()
+                        .stroke(.white.opacity(0.20), lineWidth: 0.8)
+                        .rotationEffect(.degrees(45))
+                }
+                .shadow(color: .black.opacity(0.10), radius: 2, y: 1)
         }
-        .frame(width: selected ? 66 : 58, height: selected ? 72 : 64)
-        .scaleEffect(selected ? 1.02 : 1)
+        .frame(width: selected ? 70 : 62, height: selected ? 78 : 70)
+        .scaleEffect(selected ? 1.04 : 1)
         .animation(.snappy(duration: 0.25), value: selected)
     }
 }
