@@ -1,0 +1,51 @@
+name: Temporary Legends Analyze
+
+on:
+  push:
+    branches: [tmp-legends-patch]
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Legends 1.20.1 ss1.0.3
+        run: |
+          curl -L --fail --retry 3 -o Legends.jar 'https://cdn.modrinth.com/data/TfKZ50GD/versions/EwlgJgYt/Legends-1.20.1-ss1.0.3.jar'
+          ls -lh Legends.jar
+          sha256sum Legends.jar
+      - name: Find relevant classes
+        run: |
+          mkdir unpack
+          cd unpack
+          jar xf ../Legends.jar
+          cd ..
+          echo '=== filename candidates ==='
+          find unpack -type f -name '*.class' | grep -Ei 'mana|stamina|cooldown|ability|capab|energy' | head -n 300 || true
+          echo '=== classes containing keywords ==='
+          python3 - <<'PY'
+          from pathlib import Path
+          keys=[b'mana',b'stamina',b'cooldown']
+          out=[]
+          for p in Path('unpack').rglob('*.class'):
+              b=p.read_bytes().lower()
+              hits=[k.decode() for k in keys if k in b]
+              if hits: out.append((str(p),hits))
+          for p,h in out:
+              print(','.join(h),p)
+          print('MATCH_COUNT',len(out))
+          PY
+      - name: Javap relevant classes
+        run: |
+          python3 - <<'PY' > candidates.txt
+          from pathlib import Path
+          keys=[b'mana',b'stamina',b'cooldown']
+          for p in Path('unpack').rglob('*.class'):
+              b=p.read_bytes().lower()
+              if any(k in b for k in keys):
+                  print(str(p.relative_to('unpack'))[:-6].replace('/','.'))
+          PY
+          while IFS= read -r cls; do
+            echo "===== $cls ====="
+            javap -classpath Legends.jar -c -p -constants "$cls" || true
+          done < candidates.txt
