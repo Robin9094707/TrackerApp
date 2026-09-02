@@ -3,6 +3,9 @@ name: Build RJ Tracker IPA
 on:
   push:
     branches: [main, liquid-glass-v2]
+    paths-ignore:
+      - 'android/**'
+      - '.github/workflows/build-android.yml'
   workflow_dispatch:
 
 permissions:
