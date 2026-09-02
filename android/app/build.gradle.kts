@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "eu.simplexsmp.rjtracker.share"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "eu.simplexsmp.rjtracker.share"
@@ -53,14 +53,16 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
 
-    implementation("androidx.compose.ui:ui:1.12.0")
-    implementation("androidx.compose.ui:ui-tooling-preview:1.12.0")
-    implementation("androidx.compose.foundation:foundation:1.12.0")
-    implementation("androidx.compose.material3:material3:1.4.0")
-    implementation("androidx.compose.material:material-icons-extended:1.12.0")
+    val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
+    implementation(composeBom)
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("org.maplibre.gl:android-sdk:13.6.0")
 
-    debugImplementation("androidx.compose.ui:ui-tooling:1.12.0")
+    debugImplementation("androidx.compose.ui:ui-tooling")
 }
