@@ -4,3 +4,11 @@ Payload/
 *.ipa
 *.xcodeproj/
 xcuserdata/
+
+# Android
+.gradle/
+**/build/
+local.properties
+*.apk
+*.aab
+.idea/
