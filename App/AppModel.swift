@@ -13,6 +13,14 @@ final class AppModel {
     var notificationRefs: Set<String> = []
     var errorMessage: String?
     var lastRefresh: Date?
+    var refreshError: String?
+    var statusMessage: String?
+    var selectedScope: TrackerScope = .all
+    var selectedSort: TrackerSort = .favorites
+    var selectedGroup: String?
+    var updatingRefs: Set<String> = []
+    var isLocatingAll = false
+    let locationService = LocationService()
     var serverURL: String = UserDefaults.standard.string(forKey: "serverURL") ?? ""
     var username: String = UserDefaults.standard.string(forKey: "username") ?? ""
     var providerFilter = "all"
@@ -20,12 +28,11 @@ final class AppModel {
 
     var trackers: [Tracker] { bootstrap?.trackers ?? [] }
     var filteredTrackers: [Tracker] {
-        trackers.filter { tracker in
-            let providerOK = providerFilter == "all" || tracker.provider == providerFilter
-            let searchOK = searchText.isEmpty || tracker.name.localizedCaseInsensitiveContains(searchText) || tracker.ref.localizedCaseInsensitiveContains(searchText)
-            return providerOK && searchOK
-        }
+        TrackerQuery(text: searchText, provider: providerFilter, scope: selectedScope,
+                     sort: selectedSort, group: selectedGroup)
+            .apply(to: trackers, origin: locationService.location)
     }
+
 
     init() {
         NotificationCenter.default.addObserver(forName: .apiSessionExpired, object: nil, queue: .main) { [weak self] _ in
@@ -37,7 +44,14 @@ final class AppModel {
     }
 
     func start() async {
-        await PushManager.shared.requestAuthorization()
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
+            bootstrap = PreviewFixtures.bootstrap
+            connectionState = .connected
+            lastRefresh = Date()
+            return
+        }
+        #endif
         guard !serverURL.isEmpty else { connectionState = .disconnected; return }
         do {
             try APIClient.shared.configure(server: serverURL)
@@ -86,15 +100,19 @@ final class AppModel {
     }
 
     func refresh() async {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing") { return }
+        #endif
         guard connectionState == .connected, !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
         do {
             let previousTimestamp = UserDefaults.standard.integer(forKey: "lastAlertTimestamp")
             let data = try await APIClient.shared.bootstrap()
+            guard connectionState == .connected else { return }
             bootstrap = data
             lastRefresh = Date()
-            errorMessage = nil
+            refreshError = nil
             let events = data.alerts?.events ?? []
             if data.push?.serverConfigured != true {
                 for event in events.filter({ ($0.ts ?? 0) > previousTimestamp }).reversed() {
@@ -104,8 +122,10 @@ final class AppModel {
             let newest = events.compactMap(\.ts).max() ?? previousTimestamp
             UserDefaults.standard.set(newest, forKey: "lastAlertTimestamp")
             DebugLogger.shared.log("Bootstrap loaded: \(data.trackers.count) trackers")
+        } catch is CancellationError {
+            return
         } catch {
-            errorMessage = error.localizedDescription
+            refreshError = error.localizedDescription
             DebugLogger.shared.log("Refresh failed: \(error.localizedDescription)")
         }
     }
@@ -114,40 +134,73 @@ final class AppModel {
     func isUpdatingNotification(_ tracker: Tracker) -> Bool { notificationRefs.contains(tracker.ref) }
 
     func locate(_ tracker: Tracker) async {
-        guard !locatingRefs.contains(tracker.ref) else { return }
+        guard !locatingRefs.contains(tracker.ref), !isLocatingAll else { return }
         locatingRefs.insert(tracker.ref)
-        let oldTimestamp = tracker.location?.timestamp ?? tracker.lastSeenTs ?? 0
+        statusMessage = nil
+        let oldTimestamp = tracker.reportTimestamp
         defer { locatingRefs.remove(tracker.ref) }
-
         do {
             Haptics.impact()
             _ = try await APIClient.shared.action("locate", payload: ["tracker": tracker.ref])
-            for _ in 0..<10 {
-                try? await Task.sleep(nanoseconds: 1_150_000_000)
+            for _ in 0..<9 {
+                try await Task.sleep(for: .seconds(5))
+                guard connectionState == .connected else { return }
                 await refresh()
-                let updated = trackers.first(where: { $0.ref == tracker.ref })
-                let newTimestamp = updated?.location?.timestamp ?? updated?.lastSeenTs ?? 0
-                if newTimestamp > oldTimestamp { break }
+                if let updated = trackers.first(where: { $0.ref == tracker.ref }), updated.reportTimestamp > oldTimestamp {
+                    statusMessage = "Neuer Standort für \(tracker.name) empfangen."
+                    Haptics.success()
+                    return
+                }
             }
-            Haptics.success()
-        } catch {
-            errorMessage = error.localizedDescription
-            Haptics.warning()
-        }
+            statusMessage = "Ortung angefordert. Für \(tracker.name) liegt noch keine neuere Meldung vor."
+        } catch is CancellationError { return }
+        catch { errorMessage = error.localizedDescription; Haptics.warning() }
     }
 
     func locateAll() async {
-        let refs = Set(trackers.map(\.ref))
-        locatingRefs.formUnion(refs)
-        defer { locatingRefs.subtract(refs) }
+        guard !isLocatingAll, locatingRefs.isEmpty else { return }
+        isLocatingAll = true
+        statusMessage = nil
+        defer { isLocatingAll = false }
         do {
             _ = try await APIClient.shared.requestJSON(path: "/api/mobile/v1/locate", method: "POST", json: ["all": true])
+            statusMessage = "Ortung für alle Objekte angefordert. Neue Meldungen erscheinen automatisch."
             Haptics.impact()
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            try await Task.sleep(for: .seconds(15))
             await refresh()
-        } catch {
-            errorMessage = error.localizedDescription
-            Haptics.warning()
+        } catch is CancellationError { return }
+        catch { errorMessage = error.localizedDescription; Haptics.warning() }
+    }
+
+    func setFavorite(_ tracker: Tracker) async {
+        guard !updatingRefs.contains(tracker.ref) else { return }
+        updatingRefs.insert(tracker.ref)
+        defer { updatingRefs.remove(tracker.ref) }
+        let newValue = tracker.favorite != true
+        do {
+            _ = try await APIClient.shared.requestJSON(
+                path: "/api/v2/trackers/\(tracker.provider)/\(tracker.apiID)/preferences",
+                method: "POST", json: ["favorite": newValue])
+            if let index = bootstrap?.trackers.firstIndex(where: { $0.ref == tracker.ref }) {
+                bootstrap?.trackers[index].favorite = newValue
+            }
+            await refresh()
+            Haptics.success()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func runAction(_ action: String, payload: [String: Any]) async throws {
+        _ = try await APIClient.shared.action(action, payload: payload)
+        await refresh()
+        Haptics.success()
+    }
+
+    func foregroundUpdates() async {
+        while !Task.isCancelled {
+            guard connectionState == .connected else { return }
+            await refresh()
+            do { try await Task.sleep(for: .seconds(30)) }
+            catch { return }
         }
     }
 
@@ -172,8 +225,15 @@ final class AppModel {
     func signOut() async {
         await APIClient.shared.logout()
         bootstrap = nil
+        refreshError = nil
+        statusMessage = nil
+        searchText = ""
+        providerFilter = "all"
+        selectedScope = .all
+        selectedGroup = nil
         locatingRefs.removeAll()
         notificationRefs.removeAll()
         connectionState = .disconnected
     }
 }
+

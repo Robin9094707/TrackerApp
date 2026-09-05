@@ -125,7 +125,7 @@ final class APIClient {
         var request = URLRequest(url: url, timeoutInterval: 120)
         request.httpMethod = method.uppercased()
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("RJTracker-iOS/1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("RJTracker-iOS/2.0", forHTTPHeaderField: "User-Agent")
         if let json {
             guard JSONSerialization.isValidJSONObject(json) else { throw APIError.message("Ungültiger JSON-Body.") }
             request.httpBody = try JSONSerialization.data(withJSONObject: json)
@@ -143,6 +143,9 @@ final class APIClient {
             let message = envelope?.message ?? "Serverfehler HTTP \(http.statusCode)."
             if http.statusCode == 401 { NotificationCenter.default.post(name: .apiSessionExpired, object: nil) }
             throw APIError.http(http.statusCode, message)
+        }
+        if let envelope = try? decoder.decode(APIMessage.self, from: data), envelope.status == "error" {
+            throw APIError.message(envelope.message ?? "Die Aktion konnte nicht ausgeführt werden.")
         }
         return data
     }
@@ -165,3 +168,4 @@ extension Notification.Name {
     static let apiSessionExpired = Notification.Name("apiSessionExpired")
     static let apnsTokenAvailable = Notification.Name("apnsTokenAvailable")
 }
+

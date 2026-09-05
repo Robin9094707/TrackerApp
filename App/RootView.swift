@@ -26,7 +26,7 @@ struct RootView: View {
             }
         }
         .tint(.blue)
-        .alert("RJ Tracker", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
+        .alert("RJ Tracker", isPresented: Binding(get: { model.connectionState != .connected && model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK") { model.errorMessage = nil }
         } message: {
             Text(model.errorMessage ?? "")
@@ -35,27 +35,12 @@ struct RootView: View {
 }
 
 struct MainTabView: View {
-    @State private var selection = 0
-
+    @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
     var body: some View {
-        TabView(selection: $selection) {
-            NavigationStack { TrackerHomeView() }
-                .tabItem { Label("Objekte", systemImage: "airtag.radiowaves.forward") }
-                .tag(0)
-
-            NavigationStack { TrackerMapView() }
-                .tabItem { Label("Karte", systemImage: "map.fill") }
-                .tag(1)
-
-            NavigationStack { AlertsView() }
-                .tabItem { Label("Meldungen", systemImage: "bell.badge.fill") }
-                .tag(2)
-
-            NavigationStack { MoreView() }
-                .tabItem { Label("Ich", systemImage: "person.crop.circle.fill") }
-                .tag(3)
-        }
-        .toolbarBackground(.ultraThinMaterial, for: .tabBar)
-        .toolbarBackground(.visible, for: .tabBar)
+        TrackerHomeView()
+            .task(id: scenePhase) {
+                if scenePhase == .active { await model.foregroundUpdates() }
+            }
     }
 }

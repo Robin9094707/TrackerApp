@@ -19,7 +19,7 @@ jobs:
   build:
     name: Build unsigned iOS IPA
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -117,6 +117,38 @@ jobs:
           plutil -lint App/Info.plist App/RJTracker.entitlements
           xcodebuild -project RJTracker.xcodeproj -scheme RJTracker -showBuildSettings >/dev/null
 
+      - name: Run iOS tests and capture simulator screens
+        shell: bash
+        run: |
+          set -o pipefail
+          SIM_ID="$(xcrun simctl list devices available --json | python3 -c 'import sys,json; d=json.load(sys.stdin)["devices"]; phones=[p for k,v in d.items() if "iOS" in k for p in v if p["name"].startswith("iPhone")]; phones.sort(key=lambda p: ("Pro" not in p["name"], p["name"])); print(phones[0]["udid"])')"
+          xcodebuild test \
+            -project RJTracker.xcodeproj -scheme RJTracker \
+            -configuration Debug -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -resultBundlePath RJ-Tracker-tests.xcresult \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee RJ-Tracker-tests.log
+
+      - name: Export simulator screenshots
+        if: always()
+        shell: bash
+        run: |
+          if [ -d RJ-Tracker-tests.xcresult ]; then
+            xcrun xcresulttool export attachments --path RJ-Tracker-tests.xcresult --output-path TestScreenshots || true
+          fi
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RJ-Tracker-v2.0.0-tests-and-screenshots
+          path: |
+            RJ-Tracker-tests.log
+            TestScreenshots
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Build unsigned app
         shell: bash
         run: |
@@ -144,25 +176,26 @@ jobs:
           rm -rf Payload
           mkdir -p Payload
           cp -R "$APP" Payload/
-          /usr/bin/zip -qry RJ-Tracker-v1.3.0-unsigned.ipa Payload
-          unzip -t RJ-Tracker-v1.3.0-unsigned.ipa
-          ls -lh RJ-Tracker-v1.3.0-unsigned.ipa
+          /usr/bin/zip -qry RJ-Tracker-v2.0.0-unsigned.ipa Payload
+          unzip -t RJ-Tracker-v2.0.0-unsigned.ipa
+          ls -lh RJ-Tracker-v2.0.0-unsigned.ipa
 
       - name: Upload IPA
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-Tracker-v1.3.0-unsigned-IPA
-          path: RJ-Tracker-v1.3.0-unsigned.ipa
+          name: RJ-Tracker-v2.0.0-unsigned-IPA
+          path: RJ-Tracker-v2.0.0-unsigned.ipa
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
           compression-level: 0
 
       - name: Upload build log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-Tracker-v1.3.0-build-log
+          name: RJ-Tracker-v2.0.0-build-log
           path: RJ-Tracker-build.log
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 30
+

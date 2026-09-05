@@ -60,66 +60,14 @@ struct GeofencesView: View {
 }
 
 struct NewGeofenceView: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    @State private var label = ""
-    @State private var latitude = ""
-    @State private var longitude = ""
-    @State private var radius = 150.0
-
-    var body: some View {
-        Form {
-            Section("Ort") {
-                TextField("Name", text: $label)
-                TextField("Breitengrad", text: $latitude).keyboardType(.numbersAndPunctuation)
-                TextField("Längengrad", text: $longitude).keyboardType(.numbersAndPunctuation)
-                LabeledContent("Radius", value: radius.metersText)
-                Slider(value: $radius, in: 25...1000, step: 25)
-            }
-            .listRowBackground(Color.clear)
-
-            Section {
-                Label("Koordinaten kannst du aus Apple Karten kopieren. Der Geofence wird serverseitig ausgewertet.", systemImage: "info.circle")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            .listRowBackground(Color.clear)
-        }
-        .rjFormChrome()
-        .navigationTitle("Neuer Geofence")
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() } }
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Speichern") { Task { await save() } }
-                    .disabled(label.isEmpty || Double(latitude) == nil || Double(longitude) == nil)
-            }
-        }
-    }
-
-    private func save() async {
-        guard let lat = Double(latitude), let lon = Double(longitude) else { return }
-        do {
-            _ = try await APIClient.shared.action("create_geofence", payload: [
-                "label": label,
-                "latitude": lat,
-                "longitude": lon,
-                "radius_m": radius,
-                "notify_enter": true,
-                "notify_exit": true,
-                "enabled": true
-            ])
-            await model.refresh()
-            dismiss()
-            Haptics.success()
-        } catch {
-            model.errorMessage = error.localizedDescription
-        }
-    }
+    var body: some View { PlaceEditorView(geofence: true) }
 }
 
 struct GeofenceDetailView: View {
     @Environment(AppModel.self) private var model
     let fence: Geofence
+    @Environment(\.dismiss) private var dismiss
+    private var current: Geofence { model.bootstrap?.geofences?.first { $0.id == fence.id } ?? fence }
     @State private var deleteConfirm = false
 
     var body: some View {
@@ -140,7 +88,7 @@ struct GeofenceDetailView: View {
                 LabeledContent("Radius", value: (fence.radiusM ?? 0).metersText)
                 LabeledContent("Betreten", value: fence.notifyEnter == true ? "Melden" : "Aus")
                 LabeledContent("Verlassen", value: fence.notifyExit == true ? "Melden" : "Aus")
-                Toggle("Aktiv", isOn: Binding(get: { fence.enabled == true }, set: { value in Task { await toggle(value) } }))
+                Toggle("Aktiv", isOn: Binding(get: { current.enabled == true }, set: { value in Task { await toggle(value) } }))
             }
             .listRowBackground(Color.clear)
 
@@ -170,9 +118,11 @@ struct GeofenceDetailView: View {
         do {
             _ = try await APIClient.shared.action("delete_geofence", payload: ["geofence": fence.id])
             await model.refresh()
+            dismiss()
             Haptics.success()
         } catch {
             model.errorMessage = error.localizedDescription
         }
     }
 }
+

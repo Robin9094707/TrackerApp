@@ -3,585 +3,339 @@ import MapKit
 
 struct TrackerHomeView: View {
     @Environment(AppModel.self) private var model
-
-    private enum SheetDetent: Int, CaseIterable {
-        case compact, medium, large
-    }
-
-    @State private var provider = "all"
-    @State private var selected: Tracker?
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var position: MapCameraPosition = .automatic
-    @State private var detent: SheetDetent = .medium
-    @State private var showingTrackerDetail = false
-    @GestureState private var dragTranslation: CGFloat = 0
+    @State private var selectedRef: String?
+    @State private var path: [String] = []
+    @State private var tab = 0
+    @State private var detent: PresentationDetent = .medium
+    @State private var follow = true
+    @AppStorage("mapAppearance") private var mapAppearance = "standard"
+    @AppStorage("showMapZones") private var showZones = false
 
-    private var located: [Tracker] { model.filteredTrackers.filter { $0.location != nil } }
-    private var current: Tracker? {
-        guard let selected else { return nil }
-        return model.trackers.first(where: { $0.ref == selected.ref }) ?? selected
-    }
-
-    private var panelCoverage: CGFloat {
-        switch detent {
-        case .compact: 0.34
-        case .medium: 0.58
-        case .large: 0.86
-        }
-    }
+    private var current: Tracker? { model.trackers.first { $0.ref == selectedRef } }
+    private var located: [Tracker] { model.filteredTrackers.filter { $0.validLocation != nil } }
+    private var coverage: CGFloat { sizeClass == .regular ? 0 : (detent == .large ? 0.80 : detent == .medium ? 0.48 : 0.22) }
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .bottom) {
-                trackerMap
-                    .ignoresSafeArea(edges: .bottom)
-
-                trackerPanel(maxHeight: geometry.size.height)
-                    .frame(height: max(210, panelHeight(maxHeight: geometry.size.height) - dragTranslation))
-                    .padding(.horizontal, 7)
-                    .padding(.bottom, 3)
+        ZStack(alignment: .topLeading) {
+            map
+            if sizeClass == .regular {
+                inspector
+                    .frame(width: 380)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28))
+                    .clipShape(RoundedRectangle(cornerRadius: 28))
+                    .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
+                    .padding(16)
             }
         }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .navigationDestination(for: Tracker.self) { TrackerDetailView(tracker: $0) }
-        .task {
-            if selected == nil { selected = model.filteredTrackers.first }
-            if let current { focus(current, animated: false) }
+        .sheet(isPresented: Binding(get: { sizeClass != .regular }, set: { _ in })) {
+            inspector
+                .presentationDetents([.height(190), .medium, .large], selection: $detent)
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+                .presentationBackgroundInteraction(.enabled(upThrough: .large))
+                .interactiveDismissDisabled()
         }
-        .onChange(of: model.filteredTrackers) { _, trackers in
-            if let selected, !trackers.contains(where: { $0.ref == selected.ref }) {
-                self.selected = trackers.first
-                showingTrackerDetail = false
-            }
+        .onChange(of: current?.location) { _, _ in if follow { focusCurrent() } }
+        .onChange(of: detent) { _, value in
+            if value != .large, follow { focusCurrent() }
         }
-        .onChange(of: detent) { _, _ in
-            if showingTrackerDetail, let current { focus(current) }
+        .onChange(of: model.locationService.location) { _, value in
+            guard let value, selectedRef == nil else { return }
+            animate { position = .region(MKCoordinateRegion(center: value.coordinate, latitudinalMeters: 1500, longitudinalMeters: 1500)) }
         }
-        .onChange(of: current?.location) { _, _ in
-            if showingTrackerDetail, let current { focus(current) }
+        .onChange(of: path) { _, value in
+            selectedRef = value.last
+            follow = true
+            if selectedRef != nil { focusCurrent() }
         }
-        .toolbar { mapToolbar }
     }
 
-    private var trackerMap: some View {
+    private var map: some View {
         Map(position: $position) {
+            UserAnnotation()
             ForEach(located) { tracker in
-                if let location = tracker.location {
-                    if current?.ref == tracker.ref, let accuracy = location.accuracyM, accuracy > 0 {
-                        MapCircle(center: location.coordinate, radius: max(accuracy, 3))
-                            .foregroundStyle(Color.blue.opacity(0.14))
-                            .stroke(Color.blue.opacity(0.58), lineWidth: 1.4)
+                if let location = tracker.validLocation {
+                    if selectedRef == tracker.ref, let accuracy = location.accuracyM, accuracy > 0 {
+                        MapCircle(center: location.coordinate, radius: min(accuracy, 100_000))
+                            .foregroundStyle(.blue.opacity(0.10))
+                            .stroke(.blue.opacity(0.35), lineWidth: 1)
                     }
-
                     Annotation(tracker.name, coordinate: location.coordinate, anchor: .bottom) {
-                        Button {
-                            select(tracker, showDetails: true)
-                        } label: {
-                            TrackerMapBubble(
-                                tracker: tracker,
-                                selected: current?.ref == tracker.ref,
-                                locating: model.isLocating(tracker)
-                            )
+                        Button { select(tracker) } label: {
+                            TrackerMapBubble(tracker: tracker, selected: selectedRef == tracker.ref, locating: model.isLocating(tracker))
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("\(tracker.name), \(tracker.provider.rjProviderName)")
+                        .accessibilityLabel("\(tracker.name) auf Karte öffnen")
+                    }
+                }
+            }
+            if showZones {
+                ForEach(model.bootstrap?.geofences ?? []) { fence in
+                    MapCircle(center: fence.center.coordinate, radius: fence.radiusM ?? 100)
+                        .foregroundStyle(.purple.opacity(0.08))
+                        .stroke(.purple.opacity(0.35), lineWidth: 1)
+                }
+                ForEach(model.bootstrap?.savedPlaces ?? []) { place in
+                    if let lat = place.latitude, let lon = place.longitude {
+                        Marker(place.label, systemImage: "star.fill", coordinate: .init(latitude: lat, longitude: lon)).tint(.orange)
                     }
                 }
             }
         }
-        .mapStyle(.standard(
-            elevation: .realistic,
-            pointsOfInterest: .including([.publicTransport, .school, .park, .hospital])
-        ))
-        .mapControls {
-            MapCompass()
-            MapPitchToggle()
-            MapUserLocationButton()
+        .mapStyle(mapStyle)
+        .mapControls { MapCompass(); MapScaleView() }
+        .onMapCameraChange(frequency: .onEnd) { _ in
+            if position.positionedByUser { follow = false }
         }
-        .overlay(alignment: .topLeading) {
-            if let date = model.lastRefresh {
-                Label("Sync \(date.formatted(date: .omitted, time: .shortened))", systemImage: "checkmark.icloud.fill")
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .rjGlass(in: Capsule())
-                    .padding(.top, 6)
-                    .padding(.leading, 12)
-                    .allowsHitTesting(false)
-            }
-        }
-    }
-
-    @ToolbarContentBuilder
-    private var mapToolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            Button {
-                withAnimation(.snappy(duration: 0.35)) {
-                    showingTrackerDetail = false
-                    detent = .medium
-                    position = .automatic
+        .ignoresSafeArea()
+        .safeAreaInset(edge: .top, alignment: .trailing) {
+            VStack(spacing: 12) {
+                Menu {
+                    Picker("Kartenansicht", selection: $mapAppearance) {
+                        Text("Standard").tag("standard")
+                        Text("Satellit").tag("hybrid")
+                        Text("Nahverkehr").tag("transit")
+                    }
+                    Toggle("Orte und Geofences", isOn: $showZones)
+                } label: { Image(systemName: "map").rjGlassControl() }
+                .accessibilityLabel("Kartenoptionen")
+                Button {
+                    selectedRef = nil
+                    path = []
+                    follow = false
+                    animate { position = .automatic }
+                } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").rjGlassControl() }
+                .accessibilityLabel("Alle Objekte zeigen")
+                Button {
+                    selectedRef = nil
+                    path = []
+                    model.locationService.request()
+                } label: { Image(systemName: "location").rjGlassControl() }
+                .accessibilityLabel("Meine Position")
+                if current != nil {
+                    Button { follow.toggle(); if follow { focusCurrent() } } label: {
+                        Image(systemName: follow ? "scope" : "viewfinder").rjGlassControl()
+                    }
+                    .accessibilityLabel(follow ? "Tracker nicht mehr folgen" : "Tracker folgen")
+                    .tint(follow ? .blue : .primary)
                 }
-            } label: {
-                Image(systemName: "map.fill")
-                    .rjGlassControl()
             }
+            .font(.title3)
             .buttonStyle(.plain)
-            .accessibilityLabel("Alle Tracker zeigen")
-        }
-
-        ToolbarItem(placement: .topBarTrailing) {
-            Button { Task { await model.locateAll() } } label: {
-                Group {
-                    if !model.locatingRefs.isEmpty {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "location.fill")
-                    }
-                }
-                .rjGlassControl()
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Alle Tracker orten")
+            .padding(.trailing, 16)
+            .padding(.top, 8)
         }
     }
 
-    private func trackerPanel(maxHeight: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            sheetHandle
-
-            if showingTrackerDetail, let current {
-                selectedTrackerPanel(current)
-            } else {
-                trackerListPanel
-            }
+    private var mapStyle: MapStyle {
+        switch mapAppearance {
+        case "hybrid": .hybrid(elevation: .realistic)
+        case "transit": .standard(pointsOfInterest: .including([.publicTransport]))
+        default: .standard(elevation: .realistic, pointsOfInterest: .excludingAll)
         }
-        .frame(maxWidth: .infinity)
-        .rjGlass(in: RoundedRectangle(cornerRadius: RJDesign.sheetCorner, style: .continuous))
-        .shadow(color: .black.opacity(0.17), radius: 28, y: 12)
-        .animation(.snappy(duration: 0.32), value: detent)
-        .animation(.snappy(duration: 0.28), value: showingTrackerDetail)
     }
 
-    private var sheetHandle: some View {
-        Capsule()
-            .fill(.secondary.opacity(0.48))
-            .frame(width: 42, height: 5)
-            .padding(.top, 9)
-            .padding(.bottom, 10)
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-            .onTapGesture { cycleDetent() }
-            .gesture(
-                DragGesture(minimumDistance: 5)
-                    .updating($dragTranslation) { value, state, _ in
-                        state = value.translation.height
-                    }
-                    .onEnded { value in
-                        settleDetent(
-                            translation: value.translation.height,
-                            velocity: value.predictedEndTranslation.height - value.translation.height
-                        )
-                    }
-            )
-            .accessibilityLabel("Panel hoch- oder runterziehen")
-    }
-
-    private var trackerListPanel: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Objekte")
-                        .font(.largeTitle.bold())
-                    Text("\(model.filteredTrackers.count) von \(model.trackers.count) Trackern")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button { Task { await model.refresh() } } label: {
-                    Group {
-                        if model.isRefreshing { ProgressView().controlSize(.small) }
-                        else { Image(systemName: "arrow.clockwise") }
-                    }
-                    .frame(width: 44, height: 44)
-                    .rjGlass(in: Circle())
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 18)
-            .padding(.bottom, 10)
-
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("Objekt suchen", text: Binding(get: { model.searchText }, set: { model.searchText = $0 }))
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                if !model.searchText.isEmpty {
-                    Button { model.searchText = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 13)
-            .frame(height: 43)
-            .rjGlass(in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-            .padding(.horizontal, 16)
-            .padding(.bottom, 10)
-
-            Picker("Netz", selection: $provider) {
-                Text("Alle").tag("all")
-                Text("Fusion").tag("fusion")
-                Text("Apple").tag("apple")
-                Text("Google").tag("google")
-                Text("Samsung").tag("samsung")
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
-            .onChange(of: provider) { _, newValue in model.providerFilter = newValue }
-
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    if model.filteredTrackers.isEmpty {
-                        ContentUnavailableView("Keine Tracker", systemImage: "location.slash")
-                            .padding(.vertical, 30)
-                    }
-
-                    ForEach(model.filteredTrackers) { tracker in
-                        Button { select(tracker, showDetails: true) } label: {
-                            FindMyTrackerRow(
-                                tracker: tracker,
-                                selected: current?.ref == tracker.ref,
-                                locating: model.isLocating(tracker)
-                            )
-                        }
-                        .buttonStyle(.plain)
-
-                        if tracker.id != model.filteredTrackers.last?.id {
-                            Divider().padding(.leading, 78)
+    private var inspector: some View {
+        TabView(selection: $tab) {
+            NavigationStack(path: $path) {
+                TrackerLibraryView(onSelect: select)
+                    .navigationDestination(for: String.self) { ref in
+                        if let tracker = model.trackers.first(where: { $0.ref == ref }) {
+                            TrackerDetailView(tracker: tracker)
+                        } else {
+                            ContentUnavailableView("Objekt nicht verfügbar", systemImage: "airtag", description: Text("Es wurde entfernt oder ist für dieses Konto nicht sichtbar."))
                         }
                     }
-                }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 8)
             }
-            .scrollIndicators(.visible)
+            .tabItem { Label("Objekte", systemImage: "airtag.radiowaves.forward") }.tag(0)
+            NavigationStack { PlacesHomeView() }
+                .tabItem { Label("Orte", systemImage: "mappin.and.ellipse") }.tag(1)
+            NavigationStack { AlertsView() }
+                .tabItem { Label("Meldungen", systemImage: "bell") }
+                .badge(model.bootstrap?.alerts?.unreadCount ?? 0).tag(2)
+            NavigationStack { MoreView() }
+                .tabItem { Label("Ich", systemImage: "person.crop.circle") }.tag(3)
         }
+        .onChange(of: tab) { _, value in
+            if value != 0 { detent = .large }
+            else { detent = .medium }
+        }
+        .alert("RJ Tracker", isPresented: Binding(get: { model.errorMessage != nil || model.locationService.message != nil }, set: { if !$0 { model.errorMessage = nil; model.locationService.message = nil } })) {
+            Button("OK") { model.errorMessage = nil; model.locationService.message = nil }
+        } message: { Text(model.errorMessage ?? model.locationService.message ?? "") }
     }
 
-    private func selectedTrackerPanel(_ tracker: Tracker) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .top, spacing: 13) {
-                    ZStack {
-                        Circle()
-                            .fill(.secondary.opacity(0.10))
-                        Text(tracker.emoji ?? "📍")
-                            .font(.system(size: 30))
-                    }
-                    .frame(width: 58, height: 58)
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(tracker.name)
-                            .font(.largeTitle.bold())
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.76)
-                        ResolvedAddressText(location: tracker.location, fallback: "Adresse wird ermittelt …")
-                            .font(.title3)
-                            .lineLimit(2)
-                        HStack(spacing: 7) {
-                            FreshnessLabel(timestamp: tracker.location?.timestamp ?? tracker.lastSeenTs)
-                            if let battery = tracker.battery, !battery.isEmpty {
-                                Text("•").foregroundStyle(.secondary)
-                                Label(battery, systemImage: "battery.50percent")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-
-                    Spacer(minLength: 6)
-
-                    Button {
-                        withAnimation(.snappy(duration: 0.28)) {
-                            showingTrackerDetail = false
-                            detent = .medium
-                            position = .automatic
-                        }
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.title3.weight(.semibold))
-                            .frame(width: 44, height: 44)
-                            .rjGlass(in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                quickActions(tracker)
-
-                if tracker.provider == "fusion" {
-                    fusionCard(tracker)
-                }
-
-                notificationCard(tracker)
-
-                NavigationLink(value: tracker) {
-                    Label("Alle Details & Verlauf", systemImage: "info.circle.fill")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
-                        .rjGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 18)
-            .padding(.bottom, 24)
-        }
-        .scrollIndicators(.visible)
-    }
-
-    private func quickActions(_ tracker: Tracker) -> some View {
-        HStack(spacing: 12) {
-            QuickActionTile(
-                title: model.isLocating(tracker) ? "Ortung läuft …" : "Orten",
-                subtitle: model.isLocating(tracker) ? "Suche nach neuem Standort" : "Standort aktualisieren",
-                symbol: "location.fill",
-                tint: .green,
-                loading: model.isLocating(tracker)
-            ) {
-                Task { await model.locate(tracker) }
-            }
-            .disabled(model.isLocating(tracker))
-
-            QuickActionTile(
-                title: "Route",
-                subtitle: tracker.location == nil ? "Kein Standort" : "In Apple Karten",
-                symbol: "arrow.triangle.turn.up.right.diamond.fill",
-                tint: .cyan
-            ) {
-                if let location = tracker.location { openMaps(tracker, location) }
-            }
-            .disabled(tracker.location == nil)
-        }
-    }
-
-    private func notificationCard(_ tracker: Tracker) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Label("Mitteilung an mich", systemImage: "bell.fill")
-                .font(.headline)
-                .foregroundStyle(.purple)
-                .padding(.bottom, 12)
-
-            Divider()
-
-            Toggle(isOn: Binding(
-                get: { tracker.foundNotification?.enabled == true },
-                set: { enabled in Task { await model.setFoundNotification(tracker, enabled: enabled) } }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Wenn gefunden")
-                        .foregroundStyle(.primary)
-                    Text("Benachrichtigt dich bei einer neuen Ortung")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .disabled(model.isUpdatingNotification(tracker))
-            .padding(.vertical, 12)
-        }
-        .rjCompactCard()
-    }
-
-    private func fusionCard(_ tracker: Tracker) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Fusion-Details", systemImage: "point.3.connected.trianglepath.dotted")
-                    .font(.headline)
-                Spacer()
-                if let source = tracker.latestSourceName { SourceBadge(source: source) }
-            }
-
-            if let source = tracker.latestSourceName {
-                LabeledContent("Letzte Ortung", value: source.rjProviderName)
-            } else {
-                LabeledContent("Letzte Ortung", value: "Quelle nicht gemeldet")
-            }
-
-            if !tracker.fusionNetworkNames.isEmpty {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("Verknüpfte Netze")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 6) {
-                        ForEach(tracker.fusionNetworkNames, id: \.self) { SourceBadge(source: $0) }
-                    }
-                }
-            }
-
-            if let confidence = tracker.location?.confidence {
-                LabeledContent("Fusion-Vertrauen", value: "\(Int((confidence <= 1 ? confidence * 100 : confidence).rounded())) %")
-            }
-            if let quality = tracker.location?.quality, !quality.isEmpty {
-                LabeledContent("Standortqualität", value: quality.capitalized)
-            }
-            if let accuracy = tracker.location?.accuracyM, accuracy > 0 {
-                LabeledContent("Genauigkeit", value: "±\(accuracy.metersText)")
-            }
-        }
-        .padding(16)
-        .background(.purple.opacity(0.05), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .rjGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-    }
-
-    private func panelHeight(maxHeight: CGFloat) -> CGFloat {
-        switch detent {
-        case .compact: return min(maxHeight * 0.34, 300)
-        case .medium: return min(maxHeight * 0.58, 520)
-        case .large: return min(maxHeight * 0.86, 780)
-        }
-    }
-
-    private func cycleDetent() {
-        withAnimation(.snappy(duration: 0.32)) {
-            switch detent {
-            case .compact: detent = .medium
-            case .medium: detent = .large
-            case .large: detent = .compact
-            }
-        }
-    }
-
-    private func settleDetent(translation: CGFloat, velocity: CGFloat) {
-        let intent = translation + velocity * 0.2
-        withAnimation(.snappy(duration: 0.32)) {
-            if intent < -70 {
-                if detent == .compact { detent = .medium }
-                else { detent = .large }
-            } else if intent > 70 {
-                if detent == .large { detent = .medium }
-                else { detent = .compact }
-            }
-        }
-    }
-
-    private func select(_ tracker: Tracker, showDetails: Bool) {
-        selected = tracker
-        showingTrackerDetail = showDetails
-        if showDetails { detent = .medium }
+    private func select(_ tracker: Tracker) {
+        selectedRef = tracker.ref
+        tab = 0
+        path = [tracker.ref]
+        detent = .medium
+        follow = true
+        focusCurrent()
         Haptics.impact()
-        focus(tracker)
     }
 
-    private func focus(_ tracker: Tracker, animated: Bool = true) {
-        guard let location = tracker.location else { return }
-        let coverage = showingTrackerDetail ? panelCoverage : 0.15
-        let region = RJMapCamera.focusedRegion(for: location, panelCoverage: coverage)
-        if animated {
-            withAnimation(.snappy(duration: 0.45)) { position = .region(region) }
-        } else {
-            position = .region(region)
-        }
+    private func focusCurrent() {
+        guard let location = current?.validLocation else { return }
+        animate { position = .region(RJMapCamera.focusedRegion(for: location, panelCoverage: coverage)) }
     }
 
-    private func openMaps(_ tracker: Tracker, _ location: TrackerLocation) {
-        let item = MKMapItem(placemark: MKPlacemark(coordinate: location.coordinate))
-        item.name = tracker.name
-        item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking])
+    private func animate(_ change: () -> Void) {
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.35), change)
     }
 }
 
-private struct FindMyTrackerRow: View {
+struct TrackerLibraryView: View {
+    @Environment(AppModel.self) private var model
+    let onSelect: (Tracker) -> Void
+
+    var body: some View {
+        @Bindable var model = model
+        List {
+            Section {
+                SyncStatusView()
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                if let message = model.statusMessage {
+                    HStack(alignment: .top) {
+                        Text(message).font(.footnote).foregroundStyle(.secondary)
+                        Spacer()
+                        Button { model.statusMessage = nil } label: { Image(systemName: "xmark.circle.fill") }
+                            .accessibilityLabel("Hinweis schließen")
+                    }
+                }
+                if model.filteredTrackers.isEmpty {
+                    ContentUnavailableView(model.trackers.isEmpty ? "Noch keine Objekte" : "Keine Treffer", systemImage: "airtag", description: Text(model.trackers.isEmpty ? "Füge Tracker in deinem Web Studio hinzu und aktualisiere diese Liste." : "Passe deine Suche oder Filter an."))
+                }
+                ForEach(model.filteredTrackers) { tracker in
+                    Button { onSelect(tracker) } label: { TrackerListRow(tracker: tracker) }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("tracker-row-\(tracker.ref)")
+                        .swipeActions(edge: .leading) {
+                            Button { Task { await model.setFavorite(tracker) } } label: {
+                                Label(tracker.favorite == true ? "Entfernen" : "Favorit", systemImage: "star.fill")
+                            }.tint(.orange)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button { Task { await model.locate(tracker) } } label: { Label("Orten", systemImage: "location.fill") }.tint(.blue)
+                        }
+                        .contextMenu {
+                            Button { Task { await model.setFavorite(tracker) } } label: {
+                                Label(tracker.favorite == true ? "Favorit entfernen" : "Als Favorit sichern", systemImage: "star")
+                            }
+                            if tracker.validLocation != nil { ShareLink(item: tracker.shareText) { Label("Standort teilen", systemImage: "square.and.arrow.up") } }
+                        }
+                }
+            } header: {
+                if model.selectedScope != .all || model.providerFilter != "all" {
+                    Text("\(model.selectedScope.title) · \(model.providerFilter == "all" ? "Alle Netze" : model.providerFilter.rjProviderName)")
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .navigationTitle("Objekte")
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $model.searchText, prompt: "Name, Adresse oder Notiz")
+        .refreshable { await model.refresh() }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Menu {
+                    Picker("Ansicht", selection: $model.selectedScope) {
+                        ForEach(TrackerScope.allCases) { Text($0.title).tag($0) }
+                    }
+                    Picker("Netzwerk", selection: $model.providerFilter) {
+                        Text("Alle Netze").tag("all")
+                        ForEach(["fusion", "apple", "google", "samsung"], id: \.self) { Text($0.rjProviderName).tag($0) }
+                    }
+                    Picker("Sortierung", selection: $model.selectedSort) {
+                        ForEach(TrackerSort.allCases) { Text($0.title).tag($0) }
+                    }
+                    if !(model.bootstrap?.trackerGroups ?? []).isEmpty {
+                        Picker("Gruppe", selection: $model.selectedGroup) {
+                            Text("Alle Gruppen").tag(nil as String?)
+                            ForEach(groupOptions, id: \.id) { Text($0.name).tag(Optional($0.id)) }
+                        }
+                    }
+                    Button("Filter zurücksetzen") {
+                        model.selectedScope = .all; model.providerFilter = "all"; model.selectedGroup = nil; model.searchText = ""
+                    }
+                } label: { Image(systemName: "line.3.horizontal.decrease") }
+                .accessibilityLabel("Filter und Sortierung")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { Task { await model.locateAll() } } label: {
+                    if model.isLocatingAll { ProgressView() } else { Image(systemName: "arrow.clockwise") }
+                }
+                .disabled(model.isLocatingAll || !model.locatingRefs.isEmpty || model.trackers.isEmpty)
+                .accessibilityLabel("Alle Tracker orten")
+            }
+        }
+        .onChange(of: model.selectedSort) { _, sort in
+            if sort == .nearest { model.locationService.request() }
+        }
+    }
+
+    private var groupOptions: [(id: String, name: String)] {
+        (model.bootstrap?.trackerGroups ?? []).compactMap { value in
+            guard let row = value.objectValue, let id = row["id"]?.stringValue else { return nil }
+            return (id, row["name"]?.stringValue ?? row["label"]?.stringValue ?? "Gruppe")
+        }
+    }
+}
+
+struct TrackerListRow: View {
+    @Environment(AppModel.self) private var model
     let tracker: Tracker
-    let selected: Bool
-    let locating: Bool
-
-    private var timestamp: Int? { tracker.location?.timestamp ?? tracker.lastSeenTs }
-
     var body: some View {
         HStack(spacing: 14) {
-            ZStack {
-                Circle().fill(selected ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.11))
-                Text(tracker.emoji ?? "📍").font(.title2)
-            }
-            .frame(width: 52, height: 52)
-
+            Text(tracker.emoji ?? "📍").font(.system(size: 30))
+                .frame(width: 54, height: 54)
+                .background(tracker.provider.rjProviderColor.opacity(0.08), in: Circle())
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 7) {
-                    Text(tracker.name).font(.headline).lineLimit(1)
-                    if tracker.provider == "fusion" {
-                        Image(systemName: "sparkles")
-                            .font(.caption)
-                            .foregroundStyle(.purple)
-                    }
+                HStack(spacing: 5) {
+                    Text(tracker.name).font(.headline).foregroundStyle(.primary)
+                    if tracker.favorite == true { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.orange) }
                 }
-
-                ResolvedAddressText(
-                    location: tracker.location,
-                    fallback: tracker.location == nil ? "Noch kein Standort" : "Adresse wird ermittelt …"
-                )
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-                HStack(spacing: 7) {
-                    FreshnessLabel(timestamp: timestamp)
-                    if tracker.provider == "fusion", let source = tracker.latestSourceName {
-                        Text("•").font(.caption).foregroundStyle(.secondary)
-                        Text(source.rjProviderName)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(source.rjProviderColor)
+                ResolvedAddressText(location: tracker.validLocation, fallback: tracker.location == nil ? "Kein Standort" : "Adresse nicht verfügbar")
+                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                HStack(spacing: 6) {
+                    FreshnessLabel(timestamp: tracker.reportTimestamp > 0 ? tracker.reportTimestamp : nil)
+                    Text("· \(tracker.latestSourceName?.rjProviderName ?? tracker.provider.rjProviderName)")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let origin = model.locationService.location, let distance = tracker.distance(from: origin) {
+                        Text("· \(distance.metersText)").font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
-
-            Spacer(minLength: 8)
-
-            if locating {
-                ProgressView().controlSize(.small)
-            } else {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
+            Spacer(minLength: 0)
+            if model.isLocating(tracker) { ProgressView().controlSize(.small) }
+            else { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary) }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 10)
+        .padding(.vertical, 6)
         .contentShape(Rectangle())
-        .background(selected ? Color.accentColor.opacity(0.05) : Color.clear, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 
-private struct QuickActionTile: View {
-    let title: String
-    let subtitle: String
-    let symbol: String
-    let tint: Color
-    var loading = false
-    let action: () -> Void
-
+struct SyncStatusView: View {
+    @Environment(AppModel.self) private var model
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                ZStack {
-                    Circle().fill(tint.opacity(0.17)).frame(width: 42, height: 42)
-                    if loading { ProgressView().controlSize(.small) }
-                    else { Image(systemName: symbol).font(.title3).foregroundStyle(tint) }
-                }
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+        HStack(spacing: 6) {
+            if model.isRefreshing { ProgressView().controlSize(.mini) }
+            else { Image(systemName: model.refreshError == nil ? "checkmark.icloud" : "wifi.exclamationmark") }
+            VStack(alignment: .leading, spacing: 2) {
+                if let date = model.lastRefresh {
+                    Text("\(model.trackers.count) Objekte · Stand \(date.formatted(date: .omitted, time: .shortened))")
+                } else { Text("Daten werden geladen …") }
+                if model.refreshError != nil { Text("Server nicht erreichbar. Letzter Stand wird angezeigt.").foregroundStyle(.orange) }
             }
-            .frame(maxWidth: .infinity, minHeight: 116, alignment: .leading)
-            .padding(14)
-            .rjGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            Spacer()
         }
-        .buttonStyle(.plain)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .accessibilityIdentifier("sync-status")
     }
 }

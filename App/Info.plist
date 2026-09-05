@@ -10,8 +10,10 @@
 <key>CFBundlePackageType</key><string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
 <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
+<key>NSLocationWhenInUseUsageDescription</key><string>Zeige deine Position auf der Karte und die Entfernung zu deinen Trackern. Dein iPhone-Standort wird nicht an den Tracker-Server gesendet.</string>
 <key>UILaunchScreen</key><dict/>
 <key>UIApplicationSupportsIndirectInputEvents</key><true/>
 <key>UIBackgroundModes</key><array><string>remote-notification</string><string>fetch</string></array>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict></plist>
+

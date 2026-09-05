@@ -6,24 +6,16 @@ import MapKit
 // MARK: - Visual language
 
 enum RJDesign {
-    static let corner: CGFloat = 30
+    static let corner: CGFloat = 22
     static let compactCorner: CGFloat = 20
-    static let sheetCorner: CGFloat = 36
+    static let sheetCorner: CGFloat = 28
     static let controlSize: CGFloat = 46
     static let contentPadding: CGFloat = 16
 }
 
 struct RJGlassBackdrop: View {
     var body: some View {
-        ZStack {
-            Color(uiColor: .systemGroupedBackground)
-            LinearGradient(
-                colors: [Color.accentColor.opacity(0.10), Color.clear, Color.cyan.opacity(0.05)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-        .ignoresSafeArea()
+        Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
     }
 }
 
@@ -41,13 +33,13 @@ extension View {
     func rjCard() -> some View {
         padding(RJDesign.contentPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .rjGlass(in: RoundedRectangle(cornerRadius: RJDesign.corner, style: .continuous))
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: RJDesign.corner, style: .continuous))
     }
 
     func rjCompactCard() -> some View {
         padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .rjGlass(in: RoundedRectangle(cornerRadius: RJDesign.compactCorner, style: .continuous))
+            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: RJDesign.compactCorner, style: .continuous))
     }
 
     func rjScreenChrome() -> some View {
@@ -205,46 +197,25 @@ struct TrackerMapBubble: View {
     var locating: Bool = false
 
     var body: some View {
-        VStack(spacing: -6) {
-            ZStack {
-                RoundedRectangle(cornerRadius: selected ? 24 : 21, style: .continuous)
-                    .fill(.clear)
-                    .frame(width: selected ? 62 : 54, height: selected ? 62 : 54)
-                    .rjGlass(in: RoundedRectangle(cornerRadius: selected ? 24 : 21, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: selected ? 24 : 21, style: .continuous)
-                            .stroke(.white.opacity(selected ? 0.48 : 0.28), lineWidth: 1)
-                    }
-                    .shadow(color: .black.opacity(0.20), radius: 9, y: 5)
-
+        VStack(spacing: 3) {
+            ZStack(alignment: .bottomTrailing) {
+                Text(tracker.emoji ?? "📍")
+                    .font(.system(size: selected ? 30 : 25))
+                    .frame(width: selected ? 62 : 52, height: selected ? 62 : 52)
+                    .background(Color(uiColor: .systemBackground), in: Circle())
+                    .overlay(Circle().stroke(selected ? Color.accentColor : Color(uiColor: .separator), lineWidth: selected ? 3 : 0.5))
+                    .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
                 if locating {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Text(tracker.emoji ?? "📍")
-                        .font(selected ? .system(size: 31) : .system(size: 27))
+                    ProgressView().controlSize(.mini).padding(4)
+                        .background(.regularMaterial, in: Circle())
                 }
             }
-
-            DiamondTip()
-                .fill(.ultraThinMaterial)
-                .frame(width: 15, height: 15)
-                .rotationEffect(.degrees(45))
-                .overlay {
-                    DiamondTip()
-                        .stroke(.white.opacity(0.20), lineWidth: 0.8)
-                        .rotationEffect(.degrees(45))
-                }
-                .shadow(color: .black.opacity(0.10), radius: 2, y: 1)
+            Circle().fill(selected ? Color.accentColor : tracker.provider.rjProviderColor)
+                .frame(width: 8, height: 8)
+                .overlay(Circle().stroke(.white, lineWidth: 1.5))
         }
-        .frame(width: selected ? 70 : 62, height: selected ? 78 : 70)
-        .scaleEffect(selected ? 1.04 : 1)
-        .animation(.snappy(duration: 0.25), value: selected)
-    }
-}
-
-private struct DiamondTip: Shape {
-    func path(in rect: CGRect) -> Path {
-        Path(CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: rect.height))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(tracker.name)
     }
 }
 
@@ -314,8 +285,11 @@ struct ResolvedAddressText: View {
     var body: some View {
         Text(supplied ?? resolved ?? fallback)
             .task(id: taskKey) {
+                resolved = nil
                 guard supplied == nil, let location else { return }
-                resolved = await ReverseGeocoder.shared.address(for: location)
+                let value = await ReverseGeocoder.shared.address(for: location)
+                guard !Task.isCancelled else { return }
+                resolved = value
             }
     }
 
@@ -471,3 +445,4 @@ extension Double {
         return "\(Int(self.rounded())) m"
     }
 }
+

@@ -80,6 +80,9 @@ struct Tracker: Codable, Identifiable, Hashable {
     var recovery: JSONValue?
     var polling: JSONValue?
     var sourceHealth: JSONValue?
+    var serverID: String?
+    var historyPolicy: JSONValue?
+    var groups: [String]?
     var networkDisagreement: JSONValue?
     var capabilities: JSONValue?
 
@@ -93,6 +96,9 @@ struct Tracker: Codable, Identifiable, Hashable {
         case departureNotification = "departure_notification"
         case linkedNetworks = "linked_networks"
         case sourceHealth = "source_health"
+        case serverID = "id"
+        case historyPolicy = "history_policy"
+        case groups
         case networkDisagreement = "network_disagreement"
     }
 }
@@ -309,7 +315,7 @@ struct HistoryPoint: Codable, Identifiable, Hashable {
     var observedAtLocal: String?
     var network: String?
     var address: AddressInfo?
-    var id: String { "\(timestamp)-\(latitude)-\(longitude)" }
+    var id: String { "\(timestamp)-\(latitude)-\(longitude)-\(network ?? "unknown")" }
     var coordinate: CLLocationCoordinate2D { .init(latitude: latitude, longitude: longitude) }
 
     enum CodingKeys: String, CodingKey {
@@ -425,3 +431,4 @@ indirect enum JSONValue: Codable, Hashable {
         return string
     }
 }
+

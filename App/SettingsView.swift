@@ -3,11 +3,21 @@ import UserNotifications
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
+    @AppStorage("appearance") private var appearance = "system"
     @State private var signOutConfirm = false
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Darstellung").font(.headline)
+                    Picker("Erscheinungsbild", selection: $appearance) {
+                        Text("Automatisch").tag("system")
+                        Text("Hell").tag("light")
+                        Text("Dunkel").tag("dark")
+                    }.pickerStyle(.segmented)
+                    Text("Die App folgt außerdem deinen Einstellungen für größere Schrift und reduzierte Bewegung.").font(.footnote).foregroundStyle(.secondary)
+                }.rjCard()
                 connectionCard
                 notificationCard
                 securityCard
@@ -88,3 +98,4 @@ struct SettingsView: View {
         .buttonStyle(.plain)
     }
 }
+
