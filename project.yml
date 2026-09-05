@@ -31,7 +31,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: eu.rjuhas.rjtracker
-        PRODUCT_NAME: RJ Tracker
+        PRODUCT_NAME: RJTracker
         PRODUCT_MODULE_NAME: RJTracker
         INFOPLIST_FILE: App/Info.plist
         GENERATE_INFOPLIST_FILE: NO
