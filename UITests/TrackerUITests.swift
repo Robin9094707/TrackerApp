@@ -24,12 +24,16 @@ final class TrackerUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["tracker-row-fusion:demo-bag"].waitForExistence(timeout: 20))
         capture("04-Dark-Large-Text")
-        let sheet = app.sheets.firstMatch
-        let start = sheet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02))
-        start.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)))
+        let navigation = app.navigationBars["Objekte"]
+        let initialY = navigation.frame.minY
+        let handle = app.buttons["Sheet Grabber"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        handle.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)))
+        XCTAssertLessThan(navigation.frame.minY, initialY - 100)
         capture("08-Dark-Expanded")
-        let expandedStart = sheet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02))
-        expandedStart.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)))
+        let expandedY = navigation.frame.minY
+        let expandedHandle = app.buttons["Sheet Grabber"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        expandedHandle.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)))
+        XCTAssertGreaterThan(navigation.frame.minY, expandedY + 100)
         capture("09-Dark-Collapsed")
     }
 
