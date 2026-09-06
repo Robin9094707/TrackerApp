@@ -166,6 +166,19 @@ struct AccuracyPill: View {
 // MARK: - Map framing
 
 enum RJMapCamera {
+    static func overview(locations: [TrackerLocation], panelCoverage: CGFloat) -> MKCoordinateRegion? {
+        guard let first = locations.first else { return nil }
+        // Unwrap longitude around the first object so the date line does not create a world-wide span.
+        let longitudes = locations.map { first.longitude + ($0.longitude - first.longitude + 540).truncatingRemainder(dividingBy: 360) - 180 }
+        let latitudes = locations.map(\.latitude)
+        let middleLat = (latitudes.min()! + latitudes.max()!) / 2
+        let middleLon = (longitudes.min()! + longitudes.max()!) / 2
+        let coverage = min(max(Double(panelCoverage), 0), 0.8)
+        let latitudeDelta = min(160, max(0.012, (latitudes.max()! - latitudes.min()!) * 1.5) / (1 - coverage))
+        let longitudeDelta = min(350, max(0.018, (longitudes.max()! - longitudes.min()!) * 1.6))
+        return MKCoordinateRegion(center: .init(latitude: max(-80, min(80, middleLat - latitudeDelta * coverage / 2)), longitude: (middleLon + 540).truncatingRemainder(dividingBy: 360) - 180), span: .init(latitudeDelta: latitudeDelta, longitudeDelta: longitudeDelta))
+    }
+
     /// Keeps the selected pin above a bottom sheet instead of geometrically centering it behind the sheet.
     static func focusedRegion(
         for location: TrackerLocation,

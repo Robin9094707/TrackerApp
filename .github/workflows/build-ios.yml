@@ -142,7 +142,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-Tracker-v2.0.0-tests-and-screenshots
+          name: RJ-Tracker-v2.1.0-tests-and-screenshots
           path: |
             RJ-Tracker-tests.log
             TestScreenshots
@@ -176,16 +176,16 @@ jobs:
           rm -rf Payload
           mkdir -p Payload
           cp -R "$APP" Payload/
-          /usr/bin/zip -qry RJ-Tracker-v2.0.0-unsigned.ipa Payload
-          unzip -t RJ-Tracker-v2.0.0-unsigned.ipa
-          ls -lh RJ-Tracker-v2.0.0-unsigned.ipa
+          /usr/bin/zip -qry RJ-Tracker-v2.1.0-unsigned.ipa Payload
+          unzip -t RJ-Tracker-v2.1.0-unsigned.ipa
+          ls -lh RJ-Tracker-v2.1.0-unsigned.ipa
 
       - name: Upload IPA
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-Tracker-v2.0.0-unsigned-IPA
-          path: RJ-Tracker-v2.0.0-unsigned.ipa
+          name: RJ-Tracker-v2.1.0-unsigned-IPA
+          path: RJ-Tracker-v2.1.0-unsigned.ipa
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
@@ -194,7 +194,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-Tracker-v2.0.0-build-log
+          name: RJ-Tracker-v2.1.0-build-log
           path: RJ-Tracker-build.log
           if-no-files-found: ignore
           retention-days: 30

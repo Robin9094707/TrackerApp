@@ -81,9 +81,20 @@ final class APIClient {
         KeychainStore.delete("csrf")
     }
 
-    func requestJSON(path: String, method: String = "GET", json: [String: Any]? = nil) async throws -> JSONValue {
-        let data = try await raw(path: path, method: method, json: json, query: [])
+    func requestJSON(path: String, method: String = "GET", json: [String: Any]? = nil, query: [URLQueryItem] = []) async throws -> JSONValue {
+        let data = try await raw(path: path, method: method, json: json, query: query)
         return try decoder.decode(JSONValue.self, from: data)
+    }
+
+    func requestForm(path: String, values: [String: String]) async throws -> JSONValue {
+        let data = try await raw(path: path, method: "POST", json: nil, query: [], form: values)
+        return try decoder.decode(JSONValue.self, from: data)
+    }
+
+    static func formBody(_ values: [String: String]) -> Data {
+        var components = URLComponents()
+        components.queryItems = values.keys.sorted().map { URLQueryItem(name: $0, value: values[$0]) }
+        return Data((components.percentEncodedQuery ?? "").replacingOccurrences(of: "+", with: "%2B").utf8)
     }
 
     func requestRaw(path: String, method: String, bodyText: String) async throws -> String {
@@ -95,7 +106,10 @@ final class APIClient {
             }
             object = parsed
         }
-        let data = try await raw(path: path, method: method, json: object, query: [])
+        guard let parts = URLComponents(string: path), parts.scheme == nil, parts.host == nil else {
+            throw APIError.message("Bitte einen relativen API-Pfad angeben.")
+        }
+        let data = try await raw(path: parts.path, method: method, json: object, query: parts.queryItems ?? [])
         if let object = try? JSONSerialization.jsonObject(with: data), JSONSerialization.isValidJSONObject(object),
            let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
             return String(decoding: pretty, as: UTF8.self)
@@ -112,7 +126,13 @@ final class APIClient {
         }
     }
 
-    private func raw(path: String, method: String, json: [String: Any]?, query: [URLQueryItem], needsCSRF: Bool? = nil) async throws -> Data {
+    private func raw(path: String, method: String, json: [String: Any]?, query: [URLQueryItem], needsCSRF: Bool? = nil, form: [String: String]? = nil) async throws -> Data {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
+            guard method == "GET", let data = PreviewFixtures.response(path: path) else { throw APIError.message("Im UI-Test sind Serveränderungen deaktiviert.") }
+            return data
+        }
+        #endif
         guard let baseURL else { throw APIError.message("Noch kein Server gekoppelt.") }
         let cleanPath = path.hasPrefix("/") ? String(path.dropFirst()) : path
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
@@ -125,11 +145,15 @@ final class APIClient {
         var request = URLRequest(url: url, timeoutInterval: 120)
         request.httpMethod = method.uppercased()
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("RJTracker-iOS/2.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("RJTracker-iOS/2.1", forHTTPHeaderField: "User-Agent")
         if let json {
             guard JSONSerialization.isValidJSONObject(json) else { throw APIError.message("Ungültiger JSON-Body.") }
             request.httpBody = try JSONSerialization.data(withJSONObject: json)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        if let form {
+            request.httpBody = Self.formBody(form)
+            request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
         }
         let writing = !["GET", "HEAD"].contains(request.httpMethod ?? "GET")
         if (needsCSRF ?? writing), !csrfToken.isEmpty { request.setValue(csrfToken, forHTTPHeaderField: "X-CSRF-Token") }

@@ -38,9 +38,11 @@ struct TrackerHomeView: View {
                 .presentationBackgroundInteraction(.enabled(upThrough: .large))
                 .interactiveDismissDisabled()
         }
+        .task { fitAll() }
+        .onChange(of: located.map(\.ref)) { _, _ in if selectedRef == nil { fitAll() } }
         .onChange(of: current?.location) { _, _ in if follow { focusCurrent() } }
         .onChange(of: detent) { _, value in
-            if value != .large, follow { focusCurrent() }
+            if value != .large { if selectedRef == nil { fitAll() } else if follow { focusCurrent() } }
         }
         .onChange(of: model.locationService.location) { _, value in
             guard let value, selectedRef == nil else { return }
@@ -97,7 +99,7 @@ struct TrackerHomeView: View {
                     Picker("Kartenansicht", selection: $mapAppearance) {
                         Text("Standard").tag("standard")
                         Text("Satellit").tag("hybrid")
-                        Text("Nahverkehr").tag("transit")
+                        Text("Haltestellen").tag("transit")
                     }
                     Toggle("Orte und Geofences", isOn: $showZones)
                 } label: { Image(systemName: "map").rjGlassControl() }
@@ -106,7 +108,7 @@ struct TrackerHomeView: View {
                     selectedRef = nil
                     path = []
                     follow = false
-                    animate { position = .automatic }
+                    fitAll()
                 } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").rjGlassControl() }
                 .accessibilityLabel("Alle Objekte zeigen")
                 Button {
@@ -176,6 +178,11 @@ struct TrackerHomeView: View {
         follow = true
         focusCurrent()
         Haptics.impact()
+    }
+
+    private func fitAll() {
+        guard let region = RJMapCamera.overview(locations: located.compactMap(\.validLocation), panelCoverage: coverage) else { return }
+        animate { position = .region(region) }
     }
 
     private func focusCurrent() {
@@ -330,7 +337,7 @@ struct SyncStatusView: View {
                 if let date = model.lastRefresh {
                     Text("\(model.trackers.count) Objekte · Stand \(date.formatted(date: .omitted, time: .shortened))")
                 } else { Text("Daten werden geladen …") }
-                if model.refreshError != nil { Text("Server nicht erreichbar. Letzter Stand wird angezeigt.").foregroundStyle(.orange) }
+                if model.refreshError != nil { Text("Synchronisierung fehlgeschlagen. Letzter Stand wird angezeigt.").foregroundStyle(.orange) }
             }
             Spacer()
         }

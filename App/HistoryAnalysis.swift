@@ -34,14 +34,14 @@ enum HistoryAnalysis {
     }
 
     static func csv(_ points: [HistoryPoint]) -> String {
-        func cell(_ value: String) -> String {
+        func cell(_ value: String, protectFormula: Bool) -> String {
             // A shared address must never become a spreadsheet formula when opened in Excel.
-            let safe = ["=", "+", "-", "@", "\t", "\r"].contains(where: { value.hasPrefix($0) }) ? "'" + value : value
+            let safe = protectFormula && ["=", "+", "-", "@", "\t", "\r"].contains(where: { value.hasPrefix($0) }) ? "'" + value : value
             return "\"" + safe.replacingOccurrences(of: "\"", with: "\"\"") + "\""
         }
         let formatter = ISO8601DateFormatter()
         let rows = points.map { point in
-            [formatter.string(from: Date(timeIntervalSince1970: TimeInterval(point.timestamp))), String(point.latitude), String(point.longitude), point.accuracyM.map(String.init(describing:)) ?? "", point.network ?? "", point.address?.bestText ?? ""].map(cell).joined(separator: ",")
+            [formatter.string(from: Date(timeIntervalSince1970: TimeInterval(point.timestamp))), String(point.latitude), String(point.longitude), point.accuracyM.map(String.init(describing:)) ?? "", point.network ?? "", point.address?.bestText ?? ""].enumerated().map { cell($0.element, protectFormula: $0.offset >= 4) }.joined(separator: ",")
         }
         return (["time_utc,latitude,longitude,accuracy_m,network,address"] + rows).joined(separator: "\r\n")
     }
@@ -57,8 +57,12 @@ enum HistoryAnalysis {
     }
 }
 
+extension UTType {
+    static let rjGPX = UTType(importedAs: "com.topografix.gpx", conformingTo: .xml)
+}
+
 struct HistoryExportDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.commaSeparatedText, .xml] }
+    static var readableContentTypes: [UTType] { [.commaSeparatedText, .rjGPX] }
     var text: String
     init(text: String) { self.text = text }
     init(configuration: ReadConfiguration) throws { text = String(decoding: configuration.file.regularFileContents ?? Data(), as: UTF8.self) }

@@ -14,9 +14,13 @@ struct MoreView: View {
                 }.padding(.vertical, 8)
                 SyncStatusView()
             }
+            Section("Meine Objekte") {
+                NavigationLink { GroupsView() } label: { Label("Gruppen", systemImage: "folder") }
+                NavigationLink { ArchiveView() } label: { Label("Archiv & ausgeblendete Objekte", systemImage: "archivebox") }
+            }
             Section {
                 NavigationLink { SettingsView() } label: { Label("Einstellungen", systemImage: "gearshape") }
-                NavigationLink { SystemStatusView() } label: { Label("Verbindung & Netzwerke", systemImage: "waveform.path.ecg") }
+                NavigationLink { SystemStatusView() } label: { Label("Serverzentrale", systemImage: "waveform.path.ecg") }
                 NavigationLink { WebStudioView() } label: { Label("Web Studio", systemImage: "safari") }
             }
             Section("Erweitert") {

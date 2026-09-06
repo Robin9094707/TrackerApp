@@ -54,16 +54,44 @@ final class TrackerTests: XCTestCase {
 
     func testCSVQuotesAddressAndNeutralizesSpreadsheetFormula() {
         var sample = point(1000)
+        sample.latitude = -32
         sample.address = AddressInfo(label: "=HYPERLINK(\"example\")")
         let csv = HistoryAnalysis.csv([sample])
         XCTAssertTrue(csv.contains("\"'=HYPERLINK(\"\"example\"\")\""))
         XCTAssertTrue(csv.contains("1970-01-01T00:16:40Z"))
+        XCTAssertTrue(csv.contains("\"-32.0\""))
+        XCTAssertFalse(csv.contains("'-32"))
     }
 
     func testGPXSeparatesDiscontinuousTracks() {
         let gpx = HistoryAnalysis.gpx([point(1000), point(5000)])
         XCTAssertEqual(gpx.components(separatedBy: "<trkseg>").count - 1, 2)
         XCTAssertTrue(gpx.contains("http://www.topografix.com/GPX/1/1"))
+    }
+
+    @MainActor
+    func testGuestPasswordFormEncodingPreservesSpecialCharacters() throws {
+        let password = "a+b &?=ä#123"
+        let data = APIClient.formBody(["pw": password])
+        let encoded = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertFalse(encoded.contains("+"))
+        XCTAssertEqual(URLComponents(string: "https://example.test/?" + encoded)?.queryItems?.first?.value, password)
+        XCTAssertEqual(NativeShareOptions().form["show_history"], "0")
+    }
+
+    func testPollingBoundsAndOrderingMatchServer() {
+        XCTAssertTrue(PollingInterval(minimum: 15, maximum: 300).isValid(for: "apple"))
+        XCTAssertFalse(PollingInterval(minimum: 14, maximum: 300).isValid(for: "apple"))
+        XCTAssertFalse(PollingInterval(minimum: 60, maximum: 30).isValid(for: "google"))
+        XCTAssertFalse(PollingInterval(minimum: 20, maximum: 601).isValid(for: "samsung"))
+    }
+
+    func testOverviewMovesObjectsAbovePanelAndUnwrapsDateLine() throws {
+        let locations = [TrackerLocation(latitude: 52, longitude: 179.9), TrackerLocation(latitude: 52.01, longitude: -179.9)]
+        let region = try XCTUnwrap(RJMapCamera.overview(locations: locations, panelCoverage: 0.48))
+        XCTAssertLessThan(region.center.latitude, 52)
+        XCTAssertLessThan(region.span.longitudeDelta, 1)
+        XCTAssertNil(RJMapCamera.overview(locations: [], panelCoverage: 0.5))
     }
 
     private func point(_ timestamp: Int, network: String = "apple") -> HistoryPoint {

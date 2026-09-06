@@ -4,11 +4,15 @@ import MapKit
 struct TrackerDetailView: View {
     @Environment(AppModel.self) private var model
     let tracker: Tracker
+    @Environment(\.dismiss) private var dismiss
     @State private var showEdit = false
     @State private var showAutomation = false
     @State private var showSavePlace = false
     @State private var showGeofence = false
     @State private var showRecoveryConfirm = false
+    @State private var showGroups = false
+    @State private var showSharing = false
+    @State private var visibilityAction: String?
     @State private var busy = false
     private var current: Tracker { model.trackers.first { $0.ref == tracker.ref } ?? tracker }
 
@@ -52,10 +56,16 @@ struct TrackerDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    Button { showGroups = true } label: { Label("Gruppen zuordnen", systemImage: "folder") }
+                    if ["apple", "fusion"].contains(current.provider), !current.apiID.contains("/") {
+                        Button { showSharing = true } label: { Label("Gastfreigabe verwalten", systemImage: "person.badge.plus") }
+                    }
                     Button { showEdit = true } label: { Label("Name & Symbol bearbeiten", systemImage: "pencil") }
                     Button { Task { await model.setFavorite(current) } } label: {
                         Label(current.favorite == true ? "Favorit entfernen" : "Als Favorit sichern", systemImage: "star")
                     }.disabled(model.updatingRefs.contains(current.ref))
+                    Button { visibilityAction = "hidden" } label: { Label("Ausblenden", systemImage: "eye.slash") }
+                    Button { visibilityAction = "archived" } label: { Label("Archivieren", systemImage: "archivebox") }
                     if current.validLocation != nil {
                         ShareLink(item: current.shareText) { Label("Standort teilen", systemImage: "square.and.arrow.up") }
                     }
@@ -63,6 +73,13 @@ struct TrackerDetailView: View {
                 .accessibilityLabel("Objektaktionen")
             }
         }
+        .sheet(isPresented: $showGroups) { NavigationStack { GroupAssignmentView(tracker: current) } }
+        .sheet(isPresented: $showSharing) { NavigationStack { TrackerSharingView(tracker: current) } }
+        .confirmationDialog("Objekt aus der Liste nehmen?", isPresented: Binding(get: { visibilityAction != nil }, set: { if !$0 { visibilityAction = nil } }), titleVisibility: .visible) {
+            if let action = visibilityAction {
+                Button(action == "hidden" ? "Ausblenden" : "Archivieren") { Task { await changeVisibility(action) } }
+            }
+        } message: { Text("Du kannst es unter Ich → Archiv wiederherstellen. Gespeicherte Daten werden nicht gelöscht.") }
         .sheet(isPresented: $showEdit) { NavigationStack { TrackerEditorView(tracker: current) } }
         .sheet(isPresented: $showAutomation) { NavigationStack { TrackerAutomationView(tracker: current) } }
         .sheet(isPresented: $showSavePlace) { NavigationStack { PlaceEditorView(seed: current.validLocation, suggestedName: current.name) } }
@@ -74,22 +91,26 @@ struct TrackerDetailView: View {
     }
 
     private var header: some View {
-        VStack(spacing: 10) {
-            Text(current.emoji ?? "📍").font(.system(size: 50))
-                .frame(width: 86, height: 86)
-                .background(current.provider.rjProviderColor.opacity(0.08), in: Circle())
-            HStack(spacing: 7) {
+        HStack(alignment: .top, spacing: 14) {
+            Text(current.emoji ?? "📍").font(.system(size: 34))
+                .frame(width: 64, height: 64)
+                .background(current.provider.rjProviderColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 22))
+            VStack(alignment: .leading, spacing: 6) {
                 Text(current.name).font(.title2.bold())
-                if current.favorite == true { Image(systemName: "star.fill").foregroundStyle(.orange) }
+                ResolvedAddressText(location: current.validLocation, fallback: "Noch kein Standort gemeldet")
+                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                HStack(spacing: 8) {
+                    FreshnessLabel(timestamp: current.reportTimestamp > 0 ? current.reportTimestamp : nil)
+                    if let source = current.latestSourceName { SourceBadge(source: source) }
+                }
             }
-            ResolvedAddressText(location: current.validLocation, fallback: current.location == nil ? "Noch kein Standort gemeldet" : "Adresse nicht verfügbar")
-                .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            HStack(spacing: 8) {
-                FreshnessLabel(timestamp: current.reportTimestamp > 0 ? current.reportTimestamp : nil)
-                if let source = current.latestSourceName { SourceBadge(source: source) }
-            }
+            Spacer(minLength: 0)
+            Button { Task { await model.setFavorite(current) } } label: {
+                Image(systemName: current.favorite == true ? "star.fill" : "star").foregroundStyle(.orange).frame(width: 44, height: 44)
+            }.buttonStyle(.plain).disabled(model.updatingRefs.contains(current.ref)).accessibilityLabel("Favorit umschalten")
         }
-        .frame(maxWidth: .infinity).padding(.top, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("tracker-detail-header")
     }
@@ -154,6 +175,13 @@ struct TrackerDetailView: View {
         let item = MKMapItem(placemark: MKPlacemark(coordinate: location.coordinate))
         item.name = current.name
         item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: mode])
+    }
+
+    private func changeVisibility(_ field: String) async {
+        do {
+            _ = try await APIClient.shared.requestJSON(path: "/api/v2/trackers/\(current.provider)/\(current.apiID)/preferences", method: "POST", json: [field: true])
+            await model.refresh(); dismiss()
+        } catch { model.errorMessage = error.localizedDescription }
     }
 
     private func recover() async {
@@ -252,7 +280,7 @@ struct TrackerAutomationView: View {
     let tracker: Tracker
     @State private var radius = 150.0
     @State private var repeatAlarm = false
-    @State private var retention = "30_days"
+    @State private var retention = "unchanged"
     @State private var busy = false
     @State private var error: String?
     private var current: Tracker { model.trackers.first { $0.ref == tracker.ref } ?? tracker }
@@ -276,9 +304,14 @@ struct TrackerAutomationView: View {
             Section {
                 LabeledContent("Aufzeichnung", value: current.historyActive == true ? "Aktiv" : "Aus")
                 Picker("Aufbewahren", selection: $retention) {
+                    Text("Aktuell: \(current.historyPolicy?.objectValue?["label"]?.stringValue ?? "Unverändert")").tag("unchanged")
                     Text("7 Tage").tag("7_days"); Text("14 Tage").tag("14_days"); Text("30 Tage").tag("30_days"); Text("90 Tage").tag("90_days"); Text("Dauerhaft").tag("forever")
                 }
-                Button("Verlauf mit dieser Dauer aktivieren") { perform("set_history", ["enabled": true, "retention": retention]) }
+                Button("Verlauf aktivieren / Dauer anwenden") {
+                    var payload: [String: Any] = ["enabled": true]
+                    if retention != "unchanged" { payload["retention"] = retention }
+                    perform("set_history", payload)
+                }
                 if current.historyActive == true {
                     Button("Aufzeichnung pausieren") { perform("set_history", ["enabled": false]) }
                 }

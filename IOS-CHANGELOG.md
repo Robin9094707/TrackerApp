@@ -1,3 +1,15 @@
+# iOS 2.1.0
+
+- Kompakter Detailkopf und Kartenübersicht mit Platz für das Objektpanel.
+- Native Gruppen erstellen, bearbeiten, löschen und Objekte zuordnen.
+- Passwortgeschützte Gastfreigaben mit Ablauf, Standortgenauigkeit und Zugriffsrechten; bestehende Links ausdrücklich ersetzen oder widerrufen.
+- Objekte ausblenden/archivieren und im Archiv wiederherstellen.
+- Serverzentrale mit Netzwerkstatus, validierten Ortungsintervallen, Schnellprüfung und Speicherübersicht.
+- Kontowechsel schützt vor verspäteten Antworten; erste Synchronisierung erzeugt keine Benachrichtigungsflut.
+- GPX-Dateityp und CSV-Export verbessert; vorhandene Aufbewahrung beim Bearbeiten bleibt erhalten.
+- API-Werkzeuge unterstützen Query-Parameter. Web-Backend und Android unverändert.
+- Simulatorprüfungen verwenden synthetische Daten; Gastfreigaben nur für vom bestehenden Share-Endpunkt unterstützte Apple-/Fusion-Objekte.
+
 # RJ Tracker iOS 2.0
 
 The iOS app now uses a single MapKit canvas with a native, resizable inspector on iPhone and a sidebar on iPad. Objects, places, alerts and account settings share this navigation. System tab bars, toolbars, menus and sheets adopt Liquid Glass on iOS 26; the deployment target remains iOS 17 with native material fallbacks. Content cards use standard system surfaces rather than stacking glass effects.

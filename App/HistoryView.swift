@@ -68,7 +68,7 @@ struct HistoryView: View {
             } label: { Image(systemName: "square.and.arrow.up") }
                 .disabled(points.isEmpty || loading).accessibilityLabel("Verlauf exportieren")
         }
-        .fileExporter(isPresented: $export, document: document, contentType: exportGPX ? .xml : .commaSeparatedText, defaultFilename: exportGPX ? "RJ-Tracker-Verlauf.gpx" : "RJ-Tracker-Verlauf.csv") { result in
+        .fileExporter(isPresented: $export, document: document, contentType: exportGPX ? .rjGPX : .commaSeparatedText, defaultFilename: exportGPX ? "RJ-Tracker-Verlauf.gpx" : "RJ-Tracker-Verlauf.csv") { result in
             if case .failure(let failure) = result { error = failure.localizedDescription }
         }
     }

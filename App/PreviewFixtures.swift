@@ -3,6 +3,17 @@ import Foundation
 
 /// Synthetic public-location fixtures, compiled only into Debug builds for simulator UI checks.
 enum PreviewFixtures {
+    static func response(path: String) -> Data? {
+        let json: String
+        switch path {
+        case "/api/v2/groups": json = #"{"groups":[{"id":"travel","label":"Reisen","emoji":"🧳"}]}"#
+        case "/api/polling/settings": json = #"{"polling":{"providers":{"apple":{"interval_min":30,"interval_max":120},"google":{"interval_min":60,"interval_max":180},"samsung":{"interval_min":40,"interval_max":120}}}}"#
+        case "/api/diagnostics": json = #"{"status":"completed","checks":[{"id":"connection","title":"Serververbindung","status":"ok","summary":"Alle Ortungsnetzwerke antworten."}]}"#
+        case "/api/mobile/v1/trackers": return try? JSONEncoder().encode(bootstrap)
+        default: return nil
+        }
+        return Data(json.utf8)
+    }
     static var bootstrap: BootstrapResponse {
         let now = Int(Date().timeIntervalSince1970)
         let json = """

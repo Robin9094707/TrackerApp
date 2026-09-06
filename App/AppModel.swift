@@ -6,6 +6,7 @@ import Observation
 final class AppModel {
     enum ConnectionState: Equatable { case restoring, disconnected, connecting, needsTwoFactor, connected }
 
+    private var sessionGeneration = UUID()
     var connectionState: ConnectionState = .restoring
     var bootstrap: BootstrapResponse?
     var isRefreshing = false
@@ -68,6 +69,7 @@ final class AppModel {
     }
 
     func connect(password: String) async {
+        sessionGeneration = UUID()
         errorMessage = nil
         connectionState = .connecting
         do {
@@ -105,22 +107,24 @@ final class AppModel {
         #endif
         guard connectionState == .connected, !isRefreshing else { return }
         isRefreshing = true
+        let generation = sessionGeneration
         defer { isRefreshing = false }
         do {
-            let previousTimestamp = UserDefaults.standard.integer(forKey: "lastAlertTimestamp")
             let data = try await APIClient.shared.bootstrap()
-            guard connectionState == .connected else { return }
+            guard connectionState == .connected, generation == sessionGeneration else { return }
+            let alertKey = "lastAlertTimestamp:\(APIClient.shared.baseURL?.absoluteString ?? serverURL):\(data.session?.user?.id ?? username)"
+            let previousTimestamp = UserDefaults.standard.integer(forKey: alertKey)
             bootstrap = data
             lastRefresh = Date()
             refreshError = nil
             let events = data.alerts?.events ?? []
-            if data.push?.serverConfigured != true {
+            if previousTimestamp > 0, data.push?.serverConfigured != true {
                 for event in events.filter({ ($0.ts ?? 0) > previousTimestamp }).reversed() {
                     await PushManager.shared.scheduleLocal(event: event)
                 }
             }
             let newest = events.compactMap(\.ts).max() ?? previousTimestamp
-            UserDefaults.standard.set(newest, forKey: "lastAlertTimestamp")
+            UserDefaults.standard.set(newest, forKey: alertKey)
             DebugLogger.shared.log("Bootstrap loaded: \(data.trackers.count) trackers")
         } catch is CancellationError {
             return
@@ -223,6 +227,7 @@ final class AppModel {
     }
 
     func signOut() async {
+        sessionGeneration = UUID()
         await APIClient.shared.logout()
         bootstrap = nil
         refreshError = nil

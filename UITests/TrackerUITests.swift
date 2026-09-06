@@ -4,7 +4,7 @@ final class TrackerUITests: XCTestCase {
     @MainActor
     func testMapLibraryDetailsAndPlaces() {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing"]
+        app.launchArguments = ["--ui-testing", "-appearance", "light"]
         app.launch()
         let bag = app.buttons["tracker-row-fusion:demo-bag"]
         XCTAssertTrue(bag.waitForExistence(timeout: 20))
@@ -24,6 +24,25 @@ final class TrackerUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["tracker-row-fusion:demo-bag"].waitForExistence(timeout: 20))
         capture("04-Dark-Large-Text")
+    }
+
+    @MainActor
+    func testGroupsAndPollingSettings() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "-appearance", "light"]
+        app.launch()
+        XCTAssertTrue(app.buttons["tracker-row-fusion:demo-bag"].waitForExistence(timeout: 20))
+        app.tabBars.buttons["Ich"].tap()
+        app.buttons["Gruppen"].tap()
+        XCTAssertTrue(app.staticTexts["Reisen"].waitForExistence(timeout: 10))
+        capture("05-Groups")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["Serverzentrale"].tap()
+        XCTAssertTrue(app.staticTexts["Ortungsnetzwerke"].waitForExistence(timeout: 10))
+        capture("06-Server")
+        app.buttons["Ortungsintervalle"].tap()
+        XCTAssertTrue(app.staticTexts["Mindestens 30 Sekunden"].waitForExistence(timeout: 10))
+        capture("07-Polling")
     }
 
     @MainActor
