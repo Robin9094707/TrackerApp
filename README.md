@@ -7,11 +7,13 @@ Dieses Repository enthält zwei sauber getrennte mobile Clients für Universal T
 
 Die iOS-App wurde absichtlich nicht in einen neuen Ordner verschoben, damit der bestehende XcodeGen-/IPA-Build unverändert weiter funktioniert.
 
-## iOS 2.0 — Native Karte und Liquid Glass
+## iOS 2.1 — Native Karte, Liquid Glass und Verwaltung
 
 Die iOS-App bietet jetzt eine große MapKit-Karte mit nativem Schiebepanel, Favoriten, Quellenvergleich bei Fusionen, Namens-/Symbolbearbeitung, Kartenwahl für Orte und Geofences, Bewegungsalarme sowie einen abspielbaren Verlauf mit Netzfiltern und CSV-/GPX-Export. [Alle Neuerungen und technische Grenzen](IOS-CHANGELOG.md).
 
-Der iOS-Build prüft Logik und Bedienung mit Unit-/Simulator-Tests, speichert Bildschirmaufnahmen und erzeugt anschließend **RJ-Tracker-v2.0.0-unsigned.ipa**. Android bleibt davon unabhängig.
+Neu in 2.1: Gruppenverwaltung, passwortgeschützte Gastfreigaben, Archiv und Wiederherstellung sowie eine Serverzentrale mit Ortungsintervallen, Diagnose und Speicherübersicht. Details und Grenzen stehen im [iOS-Changelog](IOS-CHANGELOG.md).
+
+Der iOS-Build prüft Logik und Bedienung mit Unit-/Simulator-Tests, speichert Bildschirmaufnahmen und erzeugt anschließend **RJ-Tracker-v2.1.0-unsigned.ipa**. Android bleibt davon unabhängig.
 
 ## iOS — Build als IPA
 
