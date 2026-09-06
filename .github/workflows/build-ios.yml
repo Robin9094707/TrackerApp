@@ -43,59 +43,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json, struct, zlib
-          from pathlib import Path
-
-          out = Path('App/Resources/Assets.xcassets/AppIcon.appiconset')
-          out.mkdir(parents=True, exist_ok=True)
-          specs = [
-              ('iphone','20x20','2x',40,'Icon-20x20@2x-iphone.png'),
-              ('iphone','20x20','3x',60,'Icon-20x20@3x-iphone.png'),
-              ('iphone','29x29','2x',58,'Icon-29x29@2x-iphone.png'),
-              ('iphone','29x29','3x',87,'Icon-29x29@3x-iphone.png'),
-              ('iphone','40x40','2x',80,'Icon-40x40@2x-iphone.png'),
-              ('iphone','40x40','3x',120,'Icon-40x40@3x-iphone.png'),
-              ('iphone','60x60','2x',120,'Icon-60x60@2x-iphone.png'),
-              ('iphone','60x60','3x',180,'Icon-60x60@3x-iphone.png'),
-              ('ipad','20x20','1x',20,'Icon-20x20@1x-ipad.png'),
-              ('ipad','20x20','2x',40,'Icon-20x20@2x-ipad.png'),
-              ('ipad','29x29','1x',29,'Icon-29x29@1x-ipad.png'),
-              ('ipad','29x29','2x',58,'Icon-29x29@2x-ipad.png'),
-              ('ipad','40x40','1x',40,'Icon-40x40@1x-ipad.png'),
-              ('ipad','40x40','2x',80,'Icon-40x40@2x-ipad.png'),
-              ('ipad','76x76','1x',76,'Icon-76x76@1x-ipad.png'),
-              ('ipad','76x76','2x',152,'Icon-76x76@2x-ipad.png'),
-              ('ipad','83.5x83.5','2x',167,'Icon-83_5x83_5@2x-ipad.png'),
-              ('ios-marketing','1024x1024','1x',1024,'Icon-1024.png'),
-          ]
-
-          def chunk(kind, data):
-              return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
-
-          def write_png(path, n):
-              rows=[]
-              for y in range(n):
-                  row=bytearray([0])
-                  for x in range(n):
-                      t=(x+y)/(max(1,2*n-2))
-                      r=int(10 + 18*t); g=int(110 + 80*t); b=int(230 + 20*t)
-                      dx=x-(n-1)/2; dy=y-(n-1)/2
-                      d=(dx*dx+dy*dy)**0.5
-                      if n*0.12 < d < n*0.18 or d < n*0.055:
-                          r=g=b=255
-                      row.extend((r,g,b,255))
-                  rows.append(bytes(row))
-              raw=b''.join(rows)
-              png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',n,n,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(raw,9))+chunk(b'IEND',b'')
-              path.write_bytes(png)
-
-          images=[]
-          for idiom,size,scale,pixels,filename in specs:
-              write_png(out/filename,pixels)
-              images.append({'idiom':idiom,'size':size,'scale':scale,'filename':filename})
-          (out/'Contents.json').write_text(json.dumps({'images':images,'info':{'author':'xcode','version':1}},indent=2))
-          PY
+          python3 Scripts/generate_app_icon.py
 
       - name: Install XcodeGen
         shell: bash
@@ -142,7 +90,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-Tracker-v2.1.0-tests-and-screenshots
+          name: RJ-Tracker-v2.1.1-tests-and-screenshots
           path: |
             RJ-Tracker-tests.log
             TestScreenshots
@@ -175,17 +123,20 @@ jobs:
           test -n "$APP"
           rm -rf Payload
           mkdir -p Payload
+          test -f "$APP/Assets.car"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$APP/Info.plist"
+          test -n "$(find "$APP" -name 'AppIcon*.png' -print -quit)"
           cp -R "$APP" Payload/
-          /usr/bin/zip -qry RJ-Tracker-v2.1.0-unsigned.ipa Payload
-          unzip -t RJ-Tracker-v2.1.0-unsigned.ipa
-          ls -lh RJ-Tracker-v2.1.0-unsigned.ipa
+          /usr/bin/zip -qry RJ-Tracker-v2.1.1-unsigned.ipa Payload
+          unzip -t RJ-Tracker-v2.1.1-unsigned.ipa
+          ls -lh RJ-Tracker-v2.1.1-unsigned.ipa
 
       - name: Upload IPA
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-Tracker-v2.1.0-unsigned-IPA
-          path: RJ-Tracker-v2.1.0-unsigned.ipa
+          name: RJ-Tracker-v2.1.1-unsigned-IPA
+          path: RJ-Tracker-v2.1.1-unsigned.ipa
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
@@ -194,7 +145,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-Tracker-v2.1.0-build-log
+          name: RJ-Tracker-v2.1.1-build-log
           path: RJ-Tracker-build.log
           if-no-files-found: ignore
           retention-days: 30

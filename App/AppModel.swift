@@ -6,6 +6,7 @@ import Observation
 final class AppModel {
     enum ConnectionState: Equatable { case restoring, disconnected, connecting, needsTwoFactor, connected }
 
+    private let preferences: UserDefaults
     private var sessionGeneration = UUID()
     var connectionState: ConnectionState = .restoring
     var bootstrap: BootstrapResponse?
@@ -16,15 +17,15 @@ final class AppModel {
     var lastRefresh: Date?
     var refreshError: String?
     var statusMessage: String?
-    var selectedScope: TrackerScope = .all
-    var selectedSort: TrackerSort = .favorites
-    var selectedGroup: String?
+    var selectedScope: TrackerScope = .all { didSet { preferences.set(selectedScope.rawValue, forKey: "tracker.scope") } }
+    var selectedSort: TrackerSort = .favorites { didSet { preferences.set(selectedSort.rawValue, forKey: "tracker.sort") } }
+    var selectedGroup: String? { didSet { preferences.set(selectedGroup, forKey: "tracker.group") } }
     var updatingRefs: Set<String> = []
     var isLocatingAll = false
     let locationService = LocationService()
     var serverURL: String = UserDefaults.standard.string(forKey: "serverURL") ?? ""
     var username: String = UserDefaults.standard.string(forKey: "username") ?? ""
-    var providerFilter = "all"
+    var providerFilter = "all" { didSet { preferences.set(providerFilter, forKey: "tracker.provider") } }
     var searchText = ""
 
     var trackers: [Tracker] { bootstrap?.trackers ?? [] }
@@ -35,7 +36,13 @@ final class AppModel {
     }
 
 
-    init() {
+    init(preferences: UserDefaults = .standard) {
+        self.preferences = preferences
+        selectedSort = TrackerSort(rawValue: preferences.string(forKey: "tracker.sort") ?? "") ?? .favorites
+        selectedScope = TrackerScope(rawValue: preferences.string(forKey: "tracker.scope") ?? "") ?? .all
+        let provider = preferences.string(forKey: "tracker.provider") ?? "all"
+        providerFilter = ["all", "apple", "google", "samsung", "fusion"].contains(provider) ? provider : "all"
+        selectedGroup = preferences.string(forKey: "tracker.group")
         NotificationCenter.default.addObserver(forName: .apiSessionExpired, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.connectionState = .disconnected }
         }

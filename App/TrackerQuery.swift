@@ -8,8 +8,8 @@ enum TrackerSort: String, CaseIterable, Identifiable {
         switch self {
         case .favorites: "Favoriten zuerst"
         case .name: "Name"
-        case .newest: "Zuletzt gesehen"
-        case .nearest: "Entfernung zu mir"
+        case .newest: "Neueste zuerst"
+        case .nearest: "Nächste zuerst"
         }
     }
 }

@@ -13,7 +13,7 @@ Die iOS-App bietet jetzt eine große MapKit-Karte mit nativem Schiebepanel, Favo
 
 Neu in 2.1: Gruppenverwaltung, passwortgeschützte Gastfreigaben, Archiv und Wiederherstellung sowie eine Serverzentrale mit Ortungsintervallen, Diagnose und Speicherübersicht. Details und Grenzen stehen im [iOS-Changelog](IOS-CHANGELOG.md).
 
-Der iOS-Build prüft Logik und Bedienung mit Unit-/Simulator-Tests, speichert Bildschirmaufnahmen und erzeugt anschließend **RJ-Tracker-v2.1.0-unsigned.ipa**. Android bleibt davon unabhängig.
+Der iOS-Build prüft Logik und Bedienung mit Unit-/Simulator-Tests, speichert Bildschirmaufnahmen und erzeugt anschließend **RJ-Tracker-v2.1.1-unsigned.ipa**. Android bleibt davon unabhängig.
 
 ## iOS — Build als IPA
 
@@ -74,3 +74,7 @@ TrackerApp/
     └── build-android.yml
 ```
 
+
+### iOS 2.1.1
+
+Sortierung, Netzwerk-, Ansichts- und Gruppenfilter bleiben beim Neustart erhalten. Das Objektpanel verwendet in jeder Höhe einen deckenden Systemhintergrund. Der Asset-Katalog wird jetzt tatsächlich eingebunden; das neue Radar-/Pin-Icon wird durch `python3 Scripts/generate_app_icon.py` vor `xcodegen generate` reproduzierbar erzeugt. CI prüft den Icon-Eintrag und die kompilierten Assets in der fertigen App.

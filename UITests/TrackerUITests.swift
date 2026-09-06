@@ -24,6 +24,13 @@ final class TrackerUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["tracker-row-fusion:demo-bag"].waitForExistence(timeout: 20))
         capture("04-Dark-Large-Text")
+        let sheet = app.sheets.firstMatch
+        let start = sheet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02))
+        start.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)))
+        capture("08-Dark-Expanded")
+        let expandedStart = sheet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02))
+        expandedStart.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)))
+        capture("09-Dark-Collapsed")
     }
 
     @MainActor

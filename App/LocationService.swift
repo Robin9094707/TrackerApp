@@ -16,6 +16,12 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         authorization = manager.authorizationStatus
     }
 
+    func refreshIfAuthorized() {
+        if manager.authorizationStatus == .authorizedAlways || manager.authorizationStatus == .authorizedWhenInUse {
+            manager.requestLocation()
+        }
+    }
+
     func request() {
         switch manager.authorizationStatus {
         case .notDetermined: manager.requestWhenInUseAuthorization()

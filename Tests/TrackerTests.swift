@@ -94,6 +94,27 @@ final class TrackerTests: XCTestCase {
         XCTAssertNil(RJMapCamera.overview(locations: [], panelCoverage: 0.5))
     }
 
+    @MainActor
+    func testFilterPreferencesSurviveNewAppModel() throws {
+        let suite = "TrackerTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = AppModel(preferences: defaults)
+        first.selectedSort = .newest
+        first.selectedScope = .favorites
+        first.providerFilter = "fusion"
+        first.selectedGroup = "travel"
+        let restored = AppModel(preferences: defaults)
+        XCTAssertEqual(restored.selectedSort, .newest)
+        XCTAssertEqual(restored.selectedScope, .favorites)
+        XCTAssertEqual(restored.providerFilter, "fusion")
+        XCTAssertEqual(restored.selectedGroup, "travel")
+        restored.selectedSort = .nearest
+        XCTAssertEqual(AppModel(preferences: defaults).selectedSort, .nearest)
+        defaults.set("removed-value", forKey: "tracker.sort")
+        XCTAssertEqual(AppModel(preferences: defaults).selectedSort, .favorites)
+    }
+
     private func point(_ timestamp: Int, network: String = "apple") -> HistoryPoint {
         HistoryPoint(latitude: 52.5163, longitude: 13.3777, accuracyM: 20, timestamp: timestamp, network: network)
     }

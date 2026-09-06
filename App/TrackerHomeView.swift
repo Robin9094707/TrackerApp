@@ -24,7 +24,7 @@ struct TrackerHomeView: View {
             if sizeClass == .regular {
                 inspector
                     .frame(width: 380)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28))
+                    .background(Color(uiColor: .systemGroupedBackground), in: RoundedRectangle(cornerRadius: 28))
                     .clipShape(RoundedRectangle(cornerRadius: 28))
                     .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
                     .padding(16)
@@ -35,6 +35,7 @@ struct TrackerHomeView: View {
                 .presentationDetents([.height(190), .medium, .large], selection: $detent)
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
+                .presentationBackground(Color(uiColor: .systemGroupedBackground))
                 .presentationBackgroundInteraction(.enabled(upThrough: .large))
                 .interactiveDismissDisabled()
         }
@@ -280,6 +281,9 @@ struct TrackerLibraryView: View {
                 .disabled(model.isLocatingAll || !model.locatingRefs.isEmpty || model.trackers.isEmpty)
                 .accessibilityLabel("Alle Tracker orten")
             }
+        }
+        .task {
+            if model.selectedSort == .nearest { model.locationService.refreshIfAuthorized() }
         }
         .onChange(of: model.selectedSort) { _, sort in
             if sort == .nearest { model.locationService.request() }

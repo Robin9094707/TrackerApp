@@ -1,3 +1,11 @@
+# iOS 2.1.1
+
+- Filter und Sortierung über App-Neustarts speichern, einschließlich „Neueste zuerst“ und „Nächste zuerst“.
+- Bei gespeicherter Entfernungssortierung die eigene Position mit vorhandener Berechtigung aktualisieren.
+- Deckender Panelhintergrund bei jeder Höhe, auch im Dunkelmodus.
+- Fehlende Einbindung des Asset-Katalogs korrigiert und eigenes Radar-/Pin-Icon in allen iPhone-/iPad-Größen ergänzt.
+- IPA-Erstellung prüft Assets.car, AppIcon-Dateien und CFBundleIcons.
+
 # iOS 2.1.0
 
 - Kompakter Detailkopf und Kartenübersicht mit Platz für das Objektpanel.
