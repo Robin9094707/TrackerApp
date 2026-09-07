@@ -248,7 +248,7 @@ struct TrackerLibraryView: View {
         .navigationTitle("Objekte")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $model.searchText, prompt: "Name, Adresse oder Notiz")
-        .refreshable { await model.refresh() }
+        .refreshable { await model.refreshTrackers() }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Menu {
@@ -268,6 +268,8 @@ struct TrackerLibraryView: View {
                             ForEach(groupOptions, id: \.id) { Text($0.name).tag(Optional($0.id)) }
                         }
                     }
+                    Button("Alle Tracker orten") { Task { await model.locateAll() } }
+                        .disabled(model.isLocatingAll || !model.locatingRefs.isEmpty)
                     Button("Filter zurücksetzen") {
                         model.selectedScope = .all; model.providerFilter = "all"; model.selectedGroup = nil; model.searchText = ""
                     }
@@ -275,11 +277,11 @@ struct TrackerLibraryView: View {
                 .accessibilityLabel("Filter und Sortierung")
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button { Task { await model.locateAll() } } label: {
-                    if model.isLocatingAll { ProgressView() } else { Image(systemName: "arrow.clockwise") }
+                Button { Task { await model.refreshTrackers() } } label: {
+                    if model.isRefreshingTrackers { ProgressView() } else { Image(systemName: "arrow.clockwise") }
                 }
-                .disabled(model.isLocatingAll || !model.locatingRefs.isEmpty || model.trackers.isEmpty)
-                .accessibilityLabel("Alle Tracker orten")
+                .disabled(model.isRefreshingTrackers)
+                .accessibilityLabel("Standorte aktualisieren")
             }
         }
         .task {

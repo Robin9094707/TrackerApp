@@ -14,6 +14,10 @@ struct MoreView: View {
                 }.padding(.vertical, 8)
                 SyncStatusView()
             }
+            Section("Konto") {
+                NavigationLink { AccountManagementView() } label: { Label("Konto & Sicherheit", systemImage: "person.badge.shield.checkmark") }
+                NavigationLink { InternalSharesView() } label: { Label("Interne Freigaben", systemImage: "person.2") }
+            }
             Section("Meine Objekte") {
                 NavigationLink { GroupsView() } label: { Label("Gruppen", systemImage: "folder") }
                 NavigationLink { ArchiveView() } label: { Label("Archiv & ausgeblendete Objekte", systemImage: "archivebox") }
@@ -22,6 +26,13 @@ struct MoreView: View {
                 NavigationLink { SettingsView() } label: { Label("Einstellungen", systemImage: "gearshape") }
                 NavigationLink { SystemStatusView() } label: { Label("Serverzentrale", systemImage: "waveform.path.ecg") }
                 NavigationLink { WebStudioView() } label: { Label("Web Studio", systemImage: "safari") }
+            }
+            Section("Server verwalten") {
+                NavigationLink { BackupsManagementView() } label: { Label("Backups & Wiederherstellung", systemImage: "externaldrive.badge.timemachine") }
+                NavigationLink { NetworkComparisonView() } label: { Label("Netzwerkvergleich", systemImage: "chart.bar.xaxis") }
+                NavigationLink { GoogleRepairView() } label: { Label("Google-Reparatur", systemImage: "wrench.and.screwdriver") }
+                NavigationLink { StorageCleanupView() } label: { Label("Speicher bereinigen", systemImage: "externaldrive.badge.minus") }
+                NavigationLink { GlobalPollingView() } label: { Label("Automatische Ortung", systemImage: "pause.circle") }
             }
             Section("Erweitert") {
                 NavigationLink { AdvancedToolsView() } label: { Label("API-Werkzeuge", systemImage: "terminal") }

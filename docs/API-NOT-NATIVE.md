@@ -1,3 +1,5 @@
+> **Historischer Stand 2.1.1.** Diese Bestandsaufnahme wurde durch iOS 2.2 teilweise überholt und ist keine aktuelle Liste fehlender Funktionen. Konto/Sicherheit, Benutzer, interne Freigaben, Backups, Google-Reparatur, Vergleichstests, Speicherbereinigung sowie `mark_recovery_found` und `global_pause` sind inzwischen eingebaut. Siehe [Changelog](../IOS-CHANGELOG.md). Passkey-Registrierung bleibt an die Serverwebsite gebunden; ein vollständiger neuer Endpunktabgleich wurde hier nicht vorgenommen.
+
 # API-Endpunkte ohne direkten nativen Aufruf – iOS 2.1.1
 
 Abgleich des iOS-Quellcodes mit der hochgeladenen Backend-Datei `findmyairtags 2(3).py`. Stand: 6. September 2026. Keine dieser zusätzlichen Funktionen wird durch diesen Bericht implementiert.

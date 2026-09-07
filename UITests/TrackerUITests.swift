@@ -48,12 +48,34 @@ final class TrackerUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Reisen"].waitForExistence(timeout: 10))
         capture("05-Groups")
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        app.buttons["Serverzentrale"].tap()
+        let server = app.buttons["Serverzentrale"]
+        for _ in 0..<4 { if server.isHittable { break }; app.swipeUp() }
+        server.tap()
         XCTAssertTrue(app.staticTexts["Ortungsnetzwerke"].waitForExistence(timeout: 10))
         capture("06-Server")
         app.buttons["Ortungsintervalle"].tap()
         XCTAssertTrue(app.staticTexts["Mindestens 30 Sekunden"].waitForExistence(timeout: 10))
         capture("07-Polling")
+    }
+
+    @MainActor
+    func testAccountSecurityAndHistory() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "-appearance", "dark"]
+        app.launch()
+        let bag = app.buttons["tracker-row-fusion:demo-bag"]
+        XCTAssertTrue(bag.waitForExistence(timeout: 20))
+        bag.tap()
+        app.buttons["tracker-history-link"].tap()
+        XCTAssertTrue(app.buttons["Verlauf abspielen"].waitForExistence(timeout: 10))
+        capture("10-History")
+        app.tabBars.buttons["Ich"].tap()
+        app.buttons["Konto & Sicherheit"].tap()
+        XCTAssertTrue(app.buttons["Profil bearbeiten"].waitForExistence(timeout: 10))
+        app.buttons["Passwort, 2FA & Passkeys"].tap()
+        app.buttons["Zwei-Faktor-Schutz"].tap()
+        XCTAssertTrue(app.staticTexts["Zwei-Faktor-Schutz nicht aktiv"].waitForExistence(timeout: 10))
+        capture("11-Security")
     }
 
     @MainActor

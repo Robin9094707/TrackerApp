@@ -25,7 +25,7 @@ struct TrackerDetailView: View {
                 VStack(spacing: 0) {
                     NavigationLink { HistoryView(tracker: current) } label: {
                         detailRow("Standortverlauf", subtitle: current.historyActive == true ? "Aufzeichnung aktiv" : "Gespeicherte Meldungen ansehen", icon: "clock.arrow.circlepath", color: .blue)
-                    }
+                    }.accessibilityIdentifier("tracker-history-link")
                     Divider().padding(.leading, 48)
                     Button { showAutomation = true } label: {
                         detailRow("Mitteilungen & Verlauf", subtitle: alarmSubtitle, icon: "bell.badge", color: .purple)
@@ -56,6 +56,11 @@ struct TrackerDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    if ["apple", "fusion"].contains(current.provider) {
+                        NavigationLink {
+                            ManagementForm(title: "Als wiedergefunden markieren", path: "/api/mobile/v1/action", constants: ["action": .string("mark_recovery_found"), "tracker": .string(current.ref), "confirmed": .bool(true)], confirmation: "Recovery-Suche für dieses Objekt beenden und als gefunden markieren?") { _ in Task { await model.refreshTrackers() } }
+                        } label: { Label("Wiedergefunden", systemImage: "checkmark.seal") }
+                    }
                     Button { showGroups = true } label: { Label("Gruppen zuordnen", systemImage: "folder") }
                     if ["apple", "fusion"].contains(current.provider), !current.apiID.contains("/") {
                         Button { showSharing = true } label: { Label("Gastfreigabe verwalten", systemImage: "person.badge.plus") }
@@ -87,7 +92,7 @@ struct TrackerDetailView: View {
         .confirmationDialog("Recovery-Suche starten?", isPresented: $showRecoveryConfirm, titleVisibility: .visible) {
             Button("Suche aktivieren") { Task { await recover() } }
         } message: { Text("Der Server legt einen Recovery-Fall an. Dies aktiviert keinen offiziellen Apple-Verloren-Modus.") }
-        .refreshable { await model.refresh() }
+        .refreshable { await model.refreshTrackers() }
     }
 
     private var header: some View {

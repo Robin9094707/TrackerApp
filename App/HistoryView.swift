@@ -6,7 +6,12 @@ struct HistoryView: View {
     let tracker: Tracker
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var response: HistoryResponse?
-    @State private var days = 7
+    @AppStorage("historyPeriodDays") private var days = 1
+    @State private var loadedDays: Int?
+    @State private var prepared: [HistoryPoint] = []
+    @State private var segments: [HistorySegment] = []
+    @State private var timelineLimit = 60
+    @State private var loadID = UUID()
     @State private var loading = false
     @State private var error: String?
     @State private var position: MapCameraPosition = .automatic
@@ -18,7 +23,7 @@ struct HistoryView: View {
     @State private var document = HistoryExportDocument(text: "")
 
     private var networks: [String] { Array(Set((response?.points ?? []).map { ($0.network ?? "unknown").rjNormalizedProvider })).sorted() }
-    private var points: [HistoryPoint] { HistoryAnalysis.filtered(response?.points ?? [], networks: enabledNetworks) }
+    private var points: [HistoryPoint] { prepared }
     private var selectedPoint: HistoryPoint? {
         guard !points.isEmpty else { return nil }
         return points[min(max(Int(selectedIndex), 0), points.count - 1)]
@@ -32,9 +37,10 @@ struct HistoryView: View {
                 if loading { ProgressView("Standortverlauf wird geladen …").frame(maxWidth: .infinity).padding() }
                 if let error {
                     ContentUnavailableView("Verlauf nicht verfügbar", systemImage: "wifi.exclamationmark", description: Text(error))
-                    Button("Erneut versuchen") { Task { await load() } }.buttonStyle(.bordered)
+                    Button("Erneut versuchen") { Task { await load(force: true) } }.buttonStyle(.bordered)
                 }
                 if response != nil {
+                    if let loadedDays, loadedDays != days { Text("Noch angezeigt: die letzten \(loadedDays) Tage. Der neue Zeitraum ist noch nicht geladen.").font(.caption).foregroundStyle(.orange) }
                     sourceFilters
                     if points.isEmpty {
                         ContentUnavailableView("Keine Standortpunkte", systemImage: "clock", description: Text("Für diesen Zeitraum und diese Netzwerkauswahl liegen keine Meldungen vor."))
@@ -50,6 +56,7 @@ struct HistoryView: View {
         .rjScreenChrome()
         .navigationTitle("Standortverlauf").navigationBarTitleDisplayMode(.inline)
         .task(id: days) { await load() }
+        .refreshable { await load(force: true) }
         .task(id: playing) {
             guard playing else { return }
             while !Task.isCancelled, playing {
@@ -59,7 +66,7 @@ struct HistoryView: View {
                 focusSelected()
             }
         }
-        .onChange(of: enabledNetworks) { _, _ in playing = false; selectedIndex = Double(max(points.count - 1, 0)); position = .automatic }
+        .onChange(of: enabledNetworks) { _, _ in prepare() }
         .onDisappear { playing = false }
         .toolbar {
             Menu {
@@ -91,9 +98,13 @@ struct HistoryView: View {
 
     private var historyMap: some View {
         Map(position: $position) {
-            ForEach(HistoryAnalysis.segments(points)) { segment in
-                if segment.points.count > 1 { MapPolyline(coordinates: segment.points.map(\.coordinate)).stroke(.blue, lineWidth: 3) }
+            ForEach(segments) { segment in
+                if segment.points.count > 1 { MapPolyline(coordinates: segment.points.map(\.coordinate)).stroke((segment.points.first?.network ?? "unknown").rjProviderColor, lineWidth: 3) }
             }
+            ForEach(segments.filter { $0.points.count == 1 }) { segment in
+                if let point = segment.points.first { Annotation("Beobachtung", coordinate: point.coordinate) { Circle().fill((point.network ?? "unknown").rjProviderColor).frame(width: 6, height: 6) } }
+            }
+            if let last = points.last { Marker("Letzte Meldung", systemImage: "flag.checkered", coordinate: last.coordinate).tint(.orange) }
             if let first = points.first { Marker("Beginn", systemImage: "flag", coordinate: first.coordinate).tint(.green) }
             if let point = selectedPoint {
                 if let accuracy = point.accuracyM, accuracy > 0 {
@@ -128,8 +139,8 @@ struct HistoryView: View {
                         .buttonStyle(.bordered).disabled(points.count < 2).accessibilityLabel(playing ? "Wiedergabe pausieren" : "Verlauf abspielen")
                 }
                 if points.count > 1 {
-                    Slider(value: $selectedIndex, in: 0...Double(points.count - 1), step: 1) { editing in if editing { playing = false } }
-                        .onChange(of: selectedIndex) { _, _ in focusSelected() }.accessibilityLabel("Standortmeldung auswählen")
+                    Slider(value: Binding(get: { selectedIndex }, set: { selectedIndex = $0; focusSelected() }), in: 0...Double(points.count - 1), step: 1) { editing in if editing { playing = false } }
+                        .accessibilityLabel("Standortmeldung auswählen")
                 }
                 ResolvedAddressText(location: point.rjTrackerLocation, fallback: "Adresse nicht verfügbar").font(.subheadline)
                 AccuracyPill(accuracy: point.accuracyM)
@@ -141,19 +152,19 @@ struct HistoryView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("\(points.count) angezeigte Meldungen").font(.headline)
             if let total = response?.matchingTotal, total > (response?.points.count ?? 0) {
-                Text("Der Server hat \(response?.points.count ?? 0) von \(total) Treffern geliefert. Wähle für mehr Details einen kürzeren Zeitraum.").font(.footnote).foregroundStyle(.orange)
+                Text("Der Server liefert die neuesten \(response?.points.count ?? 0) von \(total) Treffern. Karte und Export zeigen diesen Ausschnitt, nicht den gesamten Zeitraum.").font(.footnote).foregroundStyle(.orange)
             }
-            Text("Linien verbinden Beobachtungen. Längere Lücken und unplausible Sprünge bleiben unterbrochen. Der Export enthält die angezeigte Netzwerkauswahl.").font(.footnote).foregroundStyle(.secondary)
+            Text("Jede Farbe gehört zu einem Ortungsnetz. Linien verbinden nur Meldungen derselben Quelle; sie sind keine berechnete Straßenroute. Lücken und Sprünge bleiben unterbrochen.").font(.footnote).foregroundStyle(.secondary)
         }.rjCard()
     }
 
     private var timeline: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        LazyVStack(alignment: .leading, spacing: 0) {
             Text("Letzte Meldungen").font(.headline).padding(.bottom, 8)
-            ForEach(Array(points.suffix(60).reversed())) { point in
+            ForEach(Array(points.suffix(timelineLimit).reversed())) { point in
                 Button {
                     playing = false
-                    if let index = points.firstIndex(where: { $0.id == point.id }) { selectedIndex = Double(index) }
+                    if let index = points.firstIndex(where: { $0.id == point.id }) { selectedIndex = Double(index); focusSelected() }
                 } label: {
                     HStack(spacing: 12) {
                         Circle().fill((point.network ?? "unknown").rjProviderColor).frame(width: 8, height: 8)
@@ -167,6 +178,7 @@ struct HistoryView: View {
                 }.buttonStyle(.plain)
                 Divider()
             }
+            if timelineLimit < points.count { Button("Weitere Meldungen anzeigen") { timelineLimit += 100 }.padding(.top, 12) }
         }.rjCard()
     }
 
@@ -181,19 +193,28 @@ struct HistoryView: View {
         document = HistoryExportDocument(text: gpx ? HistoryAnalysis.gpx(points) : HistoryAnalysis.csv(points))
         export = true
     }
-    private func load() async {
-        loading = true; error = nil; playing = false; response = nil
+    private func prepare() {
+        playing = false
+        prepared = HistoryAnalysis.filtered(response?.points ?? [], networks: enabledNetworks)
+        segments = HistoryAnalysis.sourceSegments(prepared)
+        selectedIndex = Double(max(prepared.count - 1, 0)); timelineLimit = 60; position = .automatic
+    }
+    private func load(force: Bool = false) async {
+        let id = UUID(); loadID = id
+        loading = true; error = nil; playing = false
         let requestedDays = days
+        defer { if loadID == id { loading = false } }
         do {
-            let loaded = try await APIClient.shared.history(tracker: tracker.ref, days: requestedDays)
-            guard !Task.isCancelled, requestedDays == days else { return }
+            let loaded = try await APIClient.shared.history(tracker: tracker.ref, days: requestedDays, force: force)
+            guard !Task.isCancelled, requestedDays == days, loadID == id else { return }
+            loadedDays = requestedDays
             response = loaded
             enabledNetworks = Set(loaded.points.map { ($0.network ?? "unknown").rjNormalizedProvider })
-            selectedIndex = Double(max(points.count - 1, 0)); position = .automatic
-        } catch {
-            guard !Task.isCancelled, requestedDays == days else { return }
+            prepare()
+        } catch is CancellationError { }
+        catch {
+            guard !Task.isCancelled, requestedDays == days, loadID == id else { return }
             self.error = error.localizedDescription
         }
-        loading = false
     }
 }

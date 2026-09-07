@@ -6,6 +6,10 @@ import Observation
 final class AppModel {
     enum ConnectionState: Equatable { case restoring, disconnected, connecting, needsTwoFactor, connected }
 
+    private var locationMonitors: [String: Task<Void, Never>] = [:]
+    private var catalogTask: Task<[Tracker], Error>?
+    private var trackerRevision = 0
+    var isRefreshingTrackers = false
     private let preferences: UserDefaults
     private var sessionGeneration = UUID()
     var connectionState: ConnectionState = .restoring
@@ -76,7 +80,12 @@ final class AppModel {
     }
 
     func connect(password: String) async {
+        locationMonitors.values.forEach { $0.cancel() }; locationMonitors.removeAll()
+        catalogTask?.cancel(); catalogTask = nil
+        APIClient.shared.clearHistoryCache()
         sessionGeneration = UUID()
+        isRefreshing = false; isRefreshingTrackers = false; isLocatingAll = false
+        locatingRefs.removeAll()
         errorMessage = nil
         connectionState = .connecting
         do {
@@ -115,12 +124,14 @@ final class AppModel {
         guard connectionState == .connected, !isRefreshing else { return }
         isRefreshing = true
         let generation = sessionGeneration
-        defer { isRefreshing = false }
+        let revision = trackerRevision
+        defer { if generation == sessionGeneration { isRefreshing = false } }
         do {
-            let data = try await APIClient.shared.bootstrap()
+            var data = try await APIClient.shared.bootstrap()
             guard connectionState == .connected, generation == sessionGeneration else { return }
             let alertKey = "lastAlertTimestamp:\(APIClient.shared.baseURL?.absoluteString ?? serverURL):\(data.session?.user?.id ?? username)"
             let previousTimestamp = UserDefaults.standard.integer(forKey: alertKey)
+            if revision != trackerRevision, let current = bootstrap?.trackers { data.trackers = current }
             bootstrap = data
             lastRefresh = Date()
             refreshError = nil
@@ -144,43 +155,81 @@ final class AppModel {
     func isLocating(_ tracker: Tracker) -> Bool { locatingRefs.contains(tracker.ref) }
     func isUpdatingNotification(_ tracker: Tracker) -> Bool { notificationRefs.contains(tracker.ref) }
 
+    func refreshTrackers() async {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing") { return }
+        #endif
+        guard connectionState == .connected else { return }
+        if bootstrap == nil { await refresh(); return }
+        if let task = catalogTask { _ = try? await task.value; return }
+        let generation = sessionGeneration
+        let revision = trackerRevision
+        let task = Task { try await APIClient.shared.trackerCatalog() }
+        catalogTask = task; isRefreshingTrackers = true
+        defer { if generation == sessionGeneration { catalogTask = nil; isRefreshingTrackers = false } }
+        do {
+            let items = try await task.value
+            guard generation == sessionGeneration, connectionState == .connected else { return }
+            if revision == trackerRevision { bootstrap?.trackers = items; trackerRevision += 1 }
+            lastRefresh = Date(); refreshError = nil
+        } catch is CancellationError { } catch { refreshError = error.localizedDescription }
+    }
+
+    private func updateTracker(_ tracker: Tracker) {
+        if let index = bootstrap?.trackers.firstIndex(where: { $0.ref == tracker.ref }) { bootstrap?.trackers[index] = tracker; trackerRevision += 1 }
+    }
+
     func locate(_ tracker: Tracker) async {
         guard !locatingRefs.contains(tracker.ref), !isLocatingAll else { return }
         locatingRefs.insert(tracker.ref)
-        statusMessage = nil
-        let oldTimestamp = tracker.reportTimestamp
-        defer { locatingRefs.remove(tracker.ref) }
+        let generation = sessionGeneration
         do {
             Haptics.impact()
-            _ = try await APIClient.shared.action("locate", payload: ["tracker": tracker.ref])
-            for _ in 0..<9 {
-                try await Task.sleep(for: .seconds(5))
-                guard connectionState == .connected else { return }
-                await refresh()
-                if let updated = trackers.first(where: { $0.ref == tracker.ref }), updated.reportTimestamp > oldTimestamp {
-                    statusMessage = "Neuer Standort für \(tracker.name) empfangen."
-                    Haptics.success()
-                    return
+            _ = try await APIClient.shared.requestJSON(path: "/api/mobile/v1/locate", method: "POST", json: ["tracker": tracker.ref])
+            guard generation == sessionGeneration else { return }
+            statusMessage = "Ortung für \(tracker.name) angefordert. Warte auf eine neue Meldung …"
+            locationMonitors[tracker.ref] = Task { [weak self] in
+                guard let self else { return }
+                defer { if self.sessionGeneration == generation { self.locatingRefs.remove(tracker.ref); self.locationMonitors[tracker.ref] = nil } }
+                for delay in [1, 2, 3, 5, 8, 12, 15] {
+                    do {
+                        try await Task.sleep(for: .seconds(delay))
+                        guard self.sessionGeneration == generation, self.connectionState == .connected else { return }
+                        let updated = try await APIClient.shared.tracker(reference: tracker.ref)
+                        guard self.sessionGeneration == generation, !Task.isCancelled else { return }
+                        self.updateTracker(updated)
+                        if updated.reportTimestamp > tracker.reportTimestamp {
+                            self.statusMessage = "Neuer Standort für \(tracker.name) empfangen."; Haptics.success(); return
+                        }
+                    } catch is CancellationError { return }
+                    catch { self.statusMessage = "Ortung angefordert, Abruf fehlgeschlagen: \(error.localizedDescription)"; return }
                 }
+                self.statusMessage = "Noch keine neuere Meldung für \(tracker.name). Die Serverortung läuft unabhängig weiter."
             }
-            statusMessage = "Ortung angefordert. Für \(tracker.name) liegt noch keine neuere Meldung vor."
-        } catch is CancellationError { return }
-        catch { errorMessage = error.localizedDescription; Haptics.warning() }
+        } catch { guard generation == sessionGeneration else { return }; locatingRefs.remove(tracker.ref); errorMessage = error.localizedDescription; Haptics.warning() }
     }
 
     func locateAll() async {
         guard !isLocatingAll, locatingRefs.isEmpty else { return }
         isLocatingAll = true
-        statusMessage = nil
-        defer { isLocatingAll = false }
+        let generation = sessionGeneration
+        defer { if generation == sessionGeneration { isLocatingAll = false } }
         do {
-            _ = try await APIClient.shared.requestJSON(path: "/api/mobile/v1/locate", method: "POST", json: ["all": true])
-            statusMessage = "Ortung für alle Objekte angefordert. Neue Meldungen erscheinen automatisch."
+            let result = try await APIClient.shared.requestJSON(path: "/api/mobile/v1/locate", method: "POST", json: ["all": true])
+            guard generation == sessionGeneration, connectionState == .connected else { return }
+            statusMessage = "Ortung für \(result["count"].integer) Objekte angefordert. Neue Meldungen erscheinen automatisch."
             Haptics.impact()
-            try await Task.sleep(for: .seconds(15))
-            await refresh()
-        } catch is CancellationError { return }
-        catch { errorMessage = error.localizedDescription; Haptics.warning() }
+            locationMonitors["all"]?.cancel()
+            locationMonitors["all"] = Task { [weak self] in
+                guard let self else { return }
+                defer { if self.sessionGeneration == generation { self.locationMonitors["all"] = nil } }
+                for delay in [2, 4, 8, 15] {
+                    do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                    guard generation == self.sessionGeneration else { return }
+                    await self.refreshTrackers()
+                }
+            }
+        } catch { errorMessage = error.localizedDescription; Haptics.warning() }
     }
 
     func setFavorite(_ tracker: Tracker) async {
@@ -195,21 +244,26 @@ final class AppModel {
             if let index = bootstrap?.trackers.firstIndex(where: { $0.ref == tracker.ref }) {
                 bootstrap?.trackers[index].favorite = newValue
             }
-            await refresh()
+            trackerRevision += 1
             Haptics.success()
         } catch { errorMessage = error.localizedDescription }
     }
 
     func runAction(_ action: String, payload: [String: Any]) async throws {
         _ = try await APIClient.shared.action(action, payload: payload)
-        await refresh()
+        APIClient.shared.clearHistoryCache()
+        if let reference = payload["tracker"] as? String {
+            if let tracker = try? await APIClient.shared.tracker(reference: reference) { updateTracker(tracker) }
+        } else { await refresh() }
         Haptics.success()
     }
 
     func foregroundUpdates() async {
+        var cycle = 0
         while !Task.isCancelled {
             guard connectionState == .connected else { return }
-            await refresh()
+            if cycle % 4 == 0 { await refresh() } else { await refreshTrackers() }
+            cycle += 1
             do { try await Task.sleep(for: .seconds(30)) }
             catch { return }
         }
@@ -234,7 +288,12 @@ final class AppModel {
     }
 
     func signOut() async {
+        locationMonitors.values.forEach { $0.cancel() }; locationMonitors.removeAll()
+        catalogTask?.cancel(); catalogTask = nil
+        APIClient.shared.clearHistoryCache()
         sessionGeneration = UUID()
+        isRefreshing = false; isRefreshingTrackers = false; isLocatingAll = false
+        locatingRefs.removeAll()
         await APIClient.shared.logout()
         bootstrap = nil
         refreshError = nil

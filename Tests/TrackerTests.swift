@@ -115,6 +115,14 @@ final class TrackerTests: XCTestCase {
         XCTAssertEqual(AppModel(preferences: defaults).selectedSort, .favorites)
     }
 
+    func testMixedNetworksNeverBecomeOneTravelLine() {
+        let points = [point(1000, network: "apple"), point(1020, network: "google"), point(1060, network: "apple"), point(1080, network: "google")]
+        let segments = HistoryAnalysis.sourceSegments(points)
+        XCTAssertEqual(segments.map { $0.points.count }, [2, 2])
+        XCTAssertTrue(segments.allSatisfy { Set($0.points.map { $0.network }).count == 1 })
+        XCTAssertEqual(HistoryAnalysis.gpx(points).components(separatedBy: "<trkseg>").count - 1, 2)
+    }
+
     private func point(_ timestamp: Int, network: String = "apple") -> HistoryPoint {
         HistoryPoint(latitude: 52.5163, longitude: 13.3777, accuracyM: 20, timestamp: timestamp, network: network)
     }

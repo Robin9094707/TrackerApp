@@ -33,6 +33,12 @@ enum HistoryAnalysis {
         return groups.enumerated().map { HistorySegment(id: $0.offset, points: $0.element) }
     }
 
+    /// Each network is its own observation stream; never invent travel between providers.
+    static func sourceSegments(_ points: [HistoryPoint]) -> [HistorySegment] {
+        let grouped = Dictionary(grouping: points) { ($0.network ?? "unknown").rjNormalizedProvider }
+        return grouped.keys.sorted().flatMap { segments(grouped[$0] ?? []) }.enumerated().map { HistorySegment(id: $0.offset, points: $0.element.points) }
+    }
+
     static func csv(_ points: [HistoryPoint]) -> String {
         func cell(_ value: String, protectFormula: Bool) -> String {
             // A shared address must never become a spreadsheet formula when opened in Excel.
@@ -48,7 +54,7 @@ enum HistoryAnalysis {
 
     static func gpx(_ points: [HistoryPoint]) -> String {
         let formatter = ISO8601DateFormatter()
-        let segments = segments(points).map { segment in
+        let segments = sourceSegments(points).map { segment in
             "<trkseg>" + segment.points.map { point in
                 "<trkpt lat=\"\(point.latitude)\" lon=\"\(point.longitude)\"><time>\(formatter.string(from: Date(timeIntervalSince1970: TimeInterval(point.timestamp))))</time></trkpt>"
             }.joined() + "</trkseg>"

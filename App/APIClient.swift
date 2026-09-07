@@ -5,11 +5,24 @@ final class APIClient {
     static let shared = APIClient()
     private(set) var baseURL: URL?
     private(set) var csrfToken: String = KeychainStore.get("csrf") ?? ""
+    private let transport: URLSession
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
+    private var historyCache: [String: (Date, HistoryResponse)] = [:]
+    private var historyGeneration = UUID()
+    private var historyTasks: [String: Task<HistoryResponse, Error>] = [:]
 
-    init() {
-        if let saved = UserDefaults.standard.string(forKey: "serverURL") { baseURL = URL(string: saved) }
+    func clearHistoryCache() {
+        historyGeneration = UUID()
+        historyTasks.values.forEach { $0.cancel() }
+        historyTasks.removeAll(); historyCache.removeAll()
+    }
+
+
+    init(transport: URLSession = .shared, baseURL: URL? = nil) {
+        self.transport = transport
+        if let baseURL { self.baseURL = baseURL; return }
+        if let saved = UserDefaults.standard.string(forKey: "serverURL") { self.baseURL = URL(string: saved) }
     }
 
     func configure(server: String) throws {
@@ -19,6 +32,7 @@ final class APIClient {
         guard let url = URL(string: text), let scheme = url.scheme?.lowercased(), ["https", "http"].contains(scheme), url.host != nil else {
             throw APIError.message("Die Serveradresse ist ungültig.")
         }
+        if baseURL != url { clearHistoryCache() }
         baseURL = url
         UserDefaults.standard.set(url.absoluteString, forKey: "serverURL")
     }
@@ -48,11 +62,46 @@ final class APIClient {
         try await request(path: "/api/mobile/v1/bootstrap")
     }
 
-    func history(tracker: String, days: Int) async throws -> HistoryResponse {
-        try await request(path: "/api/mobile/v1/history", query: [
-            URLQueryItem(name: "ref", value: tracker), URLQueryItem(name: "days", value: String(days)),
-            URLQueryItem(name: "limit", value: "1800"), URLQueryItem(name: "resolve_addresses", value: "0")
-        ])
+    func tracker(reference: String) async throws -> Tracker {
+        let response: SingleTrackerResponse = try await request(path: "/api/mobile/v1/tracker", query: [.init(name: "ref", value: reference)])
+        return response.tracker
+    }
+
+    func trackerCatalog() async throws -> [Tracker] {
+        let response: TrackerCatalogResponse = try await request(path: "/api/mobile/v1/trackers", query: [.init(name: "limit", value: "1000")])
+        return response.trackers
+    }
+
+    func history(tracker: String, days: Int, force: Bool = false) async throws -> HistoryResponse {
+        let key = "\(baseURL?.absoluteString ?? "")|\(csrfToken)|\(tracker)|\(days)"
+        if !force, let (date, response) = historyCache[key], Date().timeIntervalSince(date) < 45 { return response }
+        if let task = historyTasks[key] { return try await task.value }
+        let generation = historyGeneration
+        let task = Task<HistoryResponse, Error> {
+            try await self.request(path: "/api/mobile/v1/history", query: [
+                .init(name: "ref", value: tracker), .init(name: "days", value: String(days)),
+                .init(name: "limit", value: "2000"), .init(name: "resolve_addresses", value: "0"), .init(name: "observation_limit", value: "1")
+            ])
+        }
+        historyTasks[key] = task
+        defer { if generation == historyGeneration { historyTasks[key] = nil } }
+        let response = try await task.value
+        try Task.checkCancellation()
+        guard generation == historyGeneration else { throw CancellationError() }
+        if historyCache.count >= 8 { historyCache.removeAll() }
+        historyCache[key] = (Date(), response)
+        return response
+    }
+
+    func downloadBackup(name: String) async throws -> URL {
+        guard name == URL(fileURLWithPath: name).lastPathComponent, name.hasSuffix(".zip") else { throw APIError.message("Ungültiger Backup-Dateiname.") }
+        let data = try await raw(path: "/api/v2/backups/\(name)", method: "GET", json: nil, query: [])
+        guard data.starts(with: [0x50, 0x4b]) else { throw APIError.message("Der Server hat kein ZIP-Backup geliefert.") }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Backup-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent(name)
+        try data.write(to: file, options: [.atomic, .completeFileProtection])
+        return file
     }
 
     func capabilities() async throws -> CapabilityResponse {
@@ -73,6 +122,7 @@ final class APIClient {
     }
 
     func logout() async {
+        clearHistoryCache()
         _ = try? await requestJSON(path: "/api/logout", method: "POST", json: [:])
         if let baseURL {
             HTTPCookieStorage.shared.cookies(for: baseURL)?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
@@ -142,10 +192,12 @@ final class APIClient {
         components.path = "/" + ([basePath, cleanPath].filter { !$0.isEmpty }.joined(separator: "/"))
         if !query.isEmpty { components.queryItems = query }
         guard let url = components.url else { throw APIError.message("Ungültige API-URL.") }
-        var request = URLRequest(url: url, timeoutInterval: 120)
+        let slowOperation = path.contains("/backups") || path.contains("/cleanup")
+        let timeout: TimeInterval = slowOperation ? 180 : (path.hasSuffix("/history") ? 60 : 25)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         request.httpMethod = method.uppercased()
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("RJTracker-iOS/2.1", forHTTPHeaderField: "User-Agent")
+        request.setValue("RJTracker-iOS/2.2", forHTTPHeaderField: "User-Agent")
         if let json {
             guard JSONSerialization.isValidJSONObject(json) else { throw APIError.message("Ungültiger JSON-Body.") }
             request.httpBody = try JSONSerialization.data(withJSONObject: json)
@@ -159,7 +211,7 @@ final class APIClient {
         if (needsCSRF ?? writing), !csrfToken.isEmpty { request.setValue(csrfToken, forHTTPHeaderField: "X-CSRF-Token") }
 
         DebugLogger.shared.log("API \(request.httpMethod ?? "GET") \(url.path)")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await transport.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.message("Keine HTTP-Antwort erhalten.") }
         if let newCSRF = http.value(forHTTPHeaderField: "X-CSRF-Token"), !newCSRF.isEmpty { saveCSRF(newCSRF) }
         guard (200..<300).contains(http.statusCode) else {
@@ -171,6 +223,7 @@ final class APIClient {
         if let envelope = try? decoder.decode(APIMessage.self, from: data), envelope.status == "error" {
             throw APIError.message(envelope.message ?? "Die Aktion konnte nicht ausgeführt werden.")
         }
+        if let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let token = envelope["csrf_token"] as? String, !token.isEmpty { saveCSRF(token) }
         return data
     }
 
@@ -193,3 +246,5 @@ extension Notification.Name {
     static let apnsTokenAvailable = Notification.Name("apnsTokenAvailable")
 }
 
+
+struct SingleTrackerResponse: Decodable { let tracker: Tracker }

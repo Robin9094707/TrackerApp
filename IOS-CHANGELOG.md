@@ -1,3 +1,20 @@
+# iOS 2.2.0
+
+- Konto und Profil bearbeiten; Hauptadministrator kann Benutzer anlegen, bearbeiten, deaktivieren, löschen sowie Passwort, 2FA und Passkeys zurücksetzen.
+- Passwortwechsel, Authenticator-Einrichtung mit lokal erzeugtem QR-Code, 2FA-Bestätigung und einmalige Wiederherstellungscodes. Rotierende CSRF-Tokens aus Sicherheitsantworten werden übernommen.
+- Passkeys auflisten, umbenennen und entfernen. Neue Passkeys werden über die HTTPS-Website des gekoppelten Servers eingerichtet, weil die Registrierung an dessen Domain gebunden ist.
+- Backups erstellen, herunterladen/teilen, wiederherstellen und löschen. Wiederherstellung verlangt eine Bestätigung und nutzt das automatische Vorab-Backup des Servers.
+- Interne Freigaben an andere Benutzer erstellen, Rechte ändern, deaktivieren, entfernen sowie freigegebene Standorte und Verläufe ansehen und Ortung anfordern.
+- Google Guardian prüfen, Reparatur starten und Zugangsdaten neu einlesen.
+- Netzwerkvergleiche starten, Meldungen anfordern, Ergebnisse ansehen, beenden und löschen.
+- Speicherbereinigung nach Kategorie mit verbindlicher Servervorschau und ausdrücklicher Bestätigung.
+- Automatische Ortung global pausieren/fortsetzen und Recovery-Fälle als gefunden abschließen.
+- Aktualisieren lädt den Tracker-Katalog statt stets des vollständigen Bootstrap-Pakets. „Alle Tracker orten“ ist eine separate Menüaktion. Einzelortung bestätigt die Anfrage sofort nach Serverantwort und lädt Standorte gezielt im Hintergrund nach.
+- Verlauf startet mit 24 Stunden, merkt sich den Zeitraum und nutzt einen 45-Sekunden-Cache sowie gemeinsam verwendete laufende Abrufe. Ziehen lädt neu. Sortierung und Linienaufbereitung erfolgen einmal pro Datensatz/Netzfilter; die Meldungsliste lädt weitere Zeilen auf Wunsch.
+- Karten- und GPX-Linien werden je Ortungsnetz getrennt. Ungültige Punkte, Duplikate, große Lücken und unplausible Sprünge werden berücksichtigt. Ein auf die neuesten 2.000 Punkte begrenztes Serverergebnis wird ausdrücklich als Ausschnitt bezeichnet.
+
+Validierung: zusätzliche Unit-Tests für CSRF-Wechsel, History-Cache, gezielte Trackerabfrage und getrennte Netzverläufe; Simulatorprüfung für Konto/Sicherheit und Verlauf im IPA-Workflow. Der Buildstatus ist separat in GitHub Actions zu prüfen. Provider-Latenz und serverseitige Verlaufsauswertung bleiben vom jeweiligen Server/Ortungsnetz abhängig. Vollständige Metadaten werden im Vordergrund etwa alle zwei Minuten und bei gezieltem Aktualisieren entsprechender Seiten nachgeladen.
+
 # iOS 2.1.1
 
 - Filter und Sortierung über App-Neustarts speichern, einschließlich „Neueste zuerst“ und „Nächste zuerst“.
