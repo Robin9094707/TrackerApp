@@ -157,7 +157,7 @@ struct HistoryView: View {
                 }
             }
             ForEach(prepared.mapPoints) { point in
-                Annotation("Standortmeldung", coordinate: point.coordinate) {
+                Annotation("", coordinate: point.coordinate) {
                     Button { select(point) } label: {
                         Circle().fill((point.network ?? "unknown").rjProviderColor)
                             .frame(width: 8, height: 8).overlay(Circle().stroke(.white, lineWidth: 1.5))
@@ -173,14 +173,13 @@ struct HistoryView: View {
                     MapCircle(center: point.coordinate, radius: min(accuracy, 100_000)).foregroundStyle(.blue.opacity(0.1))
                         .stroke(.blue.opacity(0.25), lineWidth: 1)
                 }
-                Annotation("Ausgewählte Meldung", coordinate: point.coordinate) {
+                Annotation("", coordinate: point.coordinate) {
                     Circle().fill(.blue).frame(width: 18, height: 18)
                         .overlay(Circle().stroke(.white, lineWidth: 3)).shadow(color: .blue.opacity(0.4), radius: 8)
                 }
             }
         }
         .mapStyle(.standard(pointsOfInterest: .excludingAll))
-        .annotationTitles(.hidden)
         .frame(height: 310).clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(alignment: .topTrailing) {
             Button { playing = false; position = .automatic } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").rjGlassControl() }
