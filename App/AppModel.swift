@@ -85,7 +85,7 @@ final class AppModel {
         catalogTask?.cancel(); catalogTask = nil
         APIClient.shared.clearHistoryCache()
         sessionGeneration = UUID()
-        isRefreshing = false; isRefreshingTrackers = false; isLocatingAll = false
+        isRefreshing = false; isRefreshingTrackers = false; isRefreshingAlerts = false; isLocatingAll = false
         locatingRefs.removeAll()
         errorMessage = nil
         connectionState = .connecting
@@ -309,7 +309,7 @@ final class AppModel {
         catalogTask?.cancel(); catalogTask = nil
         APIClient.shared.clearHistoryCache()
         sessionGeneration = UUID()
-        isRefreshing = false; isRefreshingTrackers = false; isLocatingAll = false
+        isRefreshing = false; isRefreshingTrackers = false; isRefreshingAlerts = false; isLocatingAll = false
         locatingRefs.removeAll()
         await APIClient.shared.logout()
         bootstrap = nil
@@ -324,4 +324,3 @@ final class AppModel {
         connectionState = .disconnected
     }
 }
-
