@@ -123,7 +123,44 @@ final class TrackerTests: XCTestCase {
         XCTAssertEqual(HistoryAnalysis.gpx(points).components(separatedBy: "<trkseg>").count - 1, 2)
     }
 
+    func testHistorySimplificationPreservesCornersEndpointsAndOriginalReports() {
+        let original = (0..<500).map { i in
+            HistoryPoint(latitude: 52 + Double(min(i, 250)) * 0.00001,
+                         longitude: 13 + Double(max(0, i - 250)) * 0.00001,
+                         timestamp: 1000 + i * 2, network: "apple")
+        }
+        let prepared = HistoryAnalysis.prepare(original, networks: ["apple"])
+        XCTAssertEqual(prepared.points.count, 500)
+        XCTAssertLessThan(prepared.mapSegments.first?.points.count ?? 500, 20)
+        XCTAssertEqual(prepared.mapSegments.first?.points.first?.id, original.first?.id)
+        XCTAssertEqual(prepared.mapSegments.first?.points.last?.id, original.last?.id)
+        XCTAssertTrue(prepared.mapSegments.first?.points.contains(where: { $0.id == original[250].id }) == true)
+        XCTAssertEqual(prepared.mapPoints.count, 80)
+        XCTAssertEqual(prepared.indexByID[original[250].id], 250)
+        XCTAssertEqual(HistoryAnalysis.csv(prepared.points).components(separatedBy: "\r\n").count, 501)
+    }
+
+    func testHistoryTimeScrubbingHandlesIrregularGapsAndBounds() {
+        let samples = [point(1000), point(1010), point(8000)]
+        XCTAssertEqual(HistoryAnalysis.nearestIndex(to: 990, in: samples), 0)
+        XCTAssertEqual(HistoryAnalysis.nearestIndex(to: 1007, in: samples), 1)
+        XCTAssertEqual(HistoryAnalysis.nearestIndex(to: 7000, in: samples), 2)
+        XCTAssertEqual(HistoryAnalysis.nearestIndex(to: 9000, in: samples), 2)
+        XCTAssertEqual(HistoryAnalysis.nearestIndex(to: 1000, in: []), 0)
+    }
+
+    func testTimelineGroupsUseLocalCalendarAndKeepNetworkGaps() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 3600)!
+        let samples = [point(3600), point(86400), point(90000, network: "google")]
+        let prepared = HistoryAnalysis.prepare(samples, networks: ["apple", "google"], calendar: calendar)
+        XCTAssertEqual(prepared.days.map { $0.points.count }, [2, 1])
+        XCTAssertEqual(prepared.days.first?.points.first?.timestamp, 90000)
+        XCTAssertTrue(prepared.mapSegments.allSatisfy { $0.points.count == 1 })
+    }
+
     private func point(_ timestamp: Int, network: String = "apple") -> HistoryPoint {
         HistoryPoint(latitude: 52.5163, longitude: 13.3777, accuracyM: 20, timestamp: timestamp, network: network)
     }
 }
+

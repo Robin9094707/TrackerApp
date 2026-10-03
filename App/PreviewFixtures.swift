@@ -6,6 +6,8 @@ enum PreviewFixtures {
     static func response(path: String) -> Data? {
         let json: String
         switch path {
+        case "/api/mobile/v1/alerts": json = #"{"events":[],"unread_count":0,"event_count":0}"#
+        case "/api/mobile/v1/push": json = #"{"devices":[{"id":"demo-phone","label":"iPhone","enabled":true,"device_model":"iPhone","app_version":"3.0"}]}"#
         case "/api/account/profile": json = #"{"user":{"id":"main","username":"demo","display_name":"Demo","email":"","is_main_admin":true}}"#
         case "/api/security/2fa": json = #"{"two_factor":{"enabled":false}}"#
         case "/api/security/passkeys": json = #"{"passkeys":{"credentials":[]}}"#
@@ -47,3 +49,4 @@ enum PreviewFixtures {
     }
 }
 #endif
+

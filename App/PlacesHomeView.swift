@@ -34,7 +34,7 @@ struct PlacesHomeView: View {
                 }
             }
         }
-        .navigationTitle("Orte").navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Orte").navigationBarTitleDisplayMode(.inline)
         .toolbar {
             Menu {
                 Button("Ort speichern", systemImage: "star") { newPlace = true }
@@ -77,7 +77,7 @@ struct SavedPlaceDetailView: View {
             }
             Section { Button("Ort löschen", role: .destructive) { confirmDelete = true }.disabled(busy) }
         }
-        .navigationTitle(current.label).navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden).rjScreenChrome().navigationTitle(current.label).navigationBarTitleDisplayMode(.inline)
         .toolbar { Button("Bearbeiten") { edit = true } }
         .sheet(isPresented: $edit) { NavigationStack { PlaceEditorView(seed: location, suggestedName: current.label, existing: current) } }
         .confirmationDialog("Diesen gespeicherten Ort löschen?", isPresented: $confirmDelete) {
@@ -165,7 +165,7 @@ struct PlaceEditorView: View {
             }
             if let error { Section { Text(error).foregroundStyle(.red) } }
         }
-        .navigationTitle(geofence ? "Neuer Geofence" : "Ort speichern").navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden).rjScreenChrome().navigationTitle(geofence ? "Neuer Geofence" : "Ort speichern").navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() }.disabled(busy) }
             ToolbarItem(placement: .confirmationAction) {
@@ -189,3 +189,4 @@ struct PlaceEditorView: View {
         catch { self.error = error.localizedDescription }
     }
 }
+

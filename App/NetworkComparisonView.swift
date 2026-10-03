@@ -13,7 +13,7 @@ struct NetworkComparisonView: View {
             }
             if tests.isEmpty && error == nil { Text("Noch keine Vergleichstests").foregroundStyle(.secondary) }
             if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle("Netzwerkvergleich").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Netzwerkvergleich").navigationBarTitleDisplayMode(.inline)
         .task { await load() }.refreshable { await load() }
     }
     private func load() async { do { tests = try await APIClient.shared.requestJSON(path: "/api/comparison-tests")["tests"].rows; error = nil } catch { self.error = error.localizedDescription } }
@@ -34,7 +34,7 @@ struct ComparisonCreateView: View {
             NavigationLink("Auswahl prüfen & starten") {
                 ManagementForm(title: "Vergleich starten", path: "/api/comparison-tests", constants: ["name": .string(name), "trackers": .array(selected.sorted().map(JSONValue.string)), "confirmed": .bool(true)], explanation: "\(selected.count) ausgewählte Objekte. Der Test zeichnet neue Meldungen auf, bis du ihn beendest.", confirmation: "Diesen Netzwerkvergleich starten?")
             }.disabled(selected.isEmpty)
-        }.navigationTitle("Neuer Vergleich").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Neuer Vergleich").navigationBarTitleDisplayMode(.inline)
     }
 }
 struct ComparisonDetailView: View {
@@ -58,7 +58,7 @@ struct ComparisonDetailView: View {
             NavigationLink("Test löschen") { ManagementForm(title: "Vergleich löschen", path: "/api/comparison-tests/\(id)", method: "DELETE", constants: ["confirmed": .bool(true)], confirmation: "Vergleich inklusive aufgezeichneter Testergebnisse löschen?", destructive: true) }
             if busy { ProgressView() }
             if let message { Text(message).foregroundStyle(.secondary) }
-        }.navigationTitle("Vergleichsergebnis").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Vergleichsergebnis").navigationBarTitleDisplayMode(.inline)
         .task { await load() }.refreshable { await load() }
     }
     private func load() async { do { test = try await APIClient.shared.requestJSON(path: "/api/comparison-tests/\(id)")["test"] } catch { message = error.localizedDescription } }
@@ -67,3 +67,4 @@ struct ComparisonDetailView: View {
         do { _ = try await APIClient.shared.requestJSON(path: "/api/comparison-tests/\(id)/refresh", method: "POST", json: [:]); message = "Abrufe angefordert. Ergebnisse mit Ziehen aktualisieren." } catch { message = error.localizedDescription }
     }
 }
+

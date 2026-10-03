@@ -78,7 +78,7 @@ struct ManagementForm: View {
             if busy { ProgressView("Wird ausgeführt …") }
             if let error { Text(error).foregroundStyle(.red) }
         }
-        .disabled(busy).navigationTitle(title).navigationBarTitleDisplayMode(.inline)
+        .disabled(busy).scrollContentBackground(.hidden).rjScreenChrome().navigationTitle(title).navigationBarTitleDisplayMode(.inline)
         .confirmationDialog(confirmation, isPresented: $confirm, titleVisibility: .visible) {
             Button(title, role: destructive ? .destructive : nil) { Task { await submit() } }
         }
@@ -116,3 +116,4 @@ struct ManagementRows: View {
         }
     }
 }
+

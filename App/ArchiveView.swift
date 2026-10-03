@@ -27,7 +27,7 @@ struct ArchiveView: View {
                 }.padding(.vertical, 6)
             }
             if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle("Archiv & ausgeblendet").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Archiv & ausgeblendet").navigationBarTitleDisplayMode(.inline)
             .task { await load() }.refreshable { await load() }
     }
     private func load() async {
@@ -45,3 +45,4 @@ struct ArchiveView: View {
         } catch { self.error = error.localizedDescription }
     }
 }
+

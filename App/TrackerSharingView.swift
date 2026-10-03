@@ -47,7 +47,7 @@ struct TrackerSharingView: View {
             Section { Button("Gastfreigabe widerrufen", role: .destructive) { confirmRevoke = true }.disabled(busy) }
             if let error { Section { Text(error).foregroundStyle(.red) } }
         }
-        .navigationTitle("Objekt freigeben").navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Objekt freigeben").navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() }.disabled(busy) } }
         .disabled(busy)
         .interactiveDismissDisabled(busy)
@@ -74,3 +74,4 @@ struct TrackerSharingView: View {
         catch { self.error = error.localizedDescription }
     }
 }
+

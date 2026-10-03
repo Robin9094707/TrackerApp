@@ -2,30 +2,21 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Group {
             switch model.connectionState {
             case .restoring:
-                ZStack {
-                    RJGlassBackdrop()
-                    VStack(spacing: 14) {
-                        ProgressView()
-                            .controlSize(.large)
-                        Text("Verbindung wird wiederhergestellt …")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .rjCard()
-                    .padding(28)
-                }
+                RJLaunchView().transition(.opacity)
             case .disconnected, .connecting, .needsTwoFactor:
                 ConnectionView()
             case .connected:
-                MainTabView()
+                MainTabView().transition(.opacity)
             }
         }
         .tint(.blue)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.35), value: model.connectionState)
         .alert("RJ Tracker", isPresented: Binding(get: { model.connectionState != .connected && model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK") { model.errorMessage = nil }
         } message: {

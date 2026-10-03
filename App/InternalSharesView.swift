@@ -22,7 +22,7 @@ struct InternalSharesView: View {
                 }
             }
             if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle("Interne Freigaben").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Interne Freigaben").navigationBarTitleDisplayMode(.inline)
         .task { await load() }.refreshable { await load() }
     }
     private func load() async { do { snapshot = try await APIClient.shared.requestJSON(path: "/api/internal-shares", query: [.init(name: "history", value: "0")]); error = nil } catch { self.error = error.localizedDescription } }
@@ -59,7 +59,7 @@ struct InternalShareEditor: View {
             if busy { ProgressView() }
             if saved { Label("Freigabe gespeichert", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
             if let error { Text(error).foregroundStyle(.red) }
-        }.disabled(busy).navigationTitle("Freigaberechte").navigationBarTitleDisplayMode(.inline)
+        }.disabled(busy).scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Freigaberechte").navigationBarTitleDisplayMode(.inline)
         .task { if !share.identifier.isEmpty { for (key, _) in labels { permissions[key] = share["permissions"][key].boolValue ?? false }; active = share["active"].boolValue ?? true } }
         .confirmationDialog("Diese Standortdaten und Rechte für den gewählten Benutzer freigeben?", isPresented: $confirm, titleVisibility: .visible) { Button("Speichern") { Task { await save() } } }
     }
@@ -106,7 +106,7 @@ struct InternalShareDetail: View {
             NavigationLink("Freigabe entfernen") { ManagementForm(title: "Freigabe entfernen", path: "/api/internal-shares/\(share.identifier)", method: "DELETE", constants: ["confirmed": .bool(true)], confirmation: "Diese interne Freigabe für beide Beteiligten entfernen?", destructive: true) }
             if busy { ProgressView() }
             if let message { Text(message).foregroundStyle(.secondary) }
-        }.navigationTitle(share["label"].text).navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle(share["label"].text).navigationBarTitleDisplayMode(.inline)
         .task { await load(history: false) }.refreshable { await load(history: showHistory) }
     }
     private func load(history: Bool) async {
@@ -119,3 +119,4 @@ struct InternalShareDetail: View {
         do { let result = try await APIClient.shared.requestJSON(path: "/api/internal-shares/\(share.identifier)/locate", method: "POST", json: [:]); message = result["message"].stringValue ?? "Ortung angefordert. Zum Abrufen später aktualisieren." } catch { message = error.localizedDescription }
     }
 }
+

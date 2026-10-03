@@ -8,7 +8,79 @@ struct HistorySegment: Identifiable {
     let points: [HistoryPoint]
 }
 
+struct HistoryDay: Identifiable {
+    let date: Date
+    let points: [HistoryPoint]
+    var id: Date { date }
+}
+
+struct PreparedHistory {
+    var points: [HistoryPoint] = []
+    var mapSegments: [HistorySegment] = []
+    var mapPoints: [HistoryPoint] = []
+    var days: [HistoryDay] = []
+    var indexByID: [String: Int] = [:]
+}
+
 enum HistoryAnalysis {
+    /// Expensive sorting and map preparation happen once per response/filter change.
+    static func prepare(_ input: [HistoryPoint], networks: Set<String>, calendar: Calendar = .current) -> PreparedHistory {
+        let points = filtered(input, networks: networks)
+        let groups = Dictionary(grouping: points) { calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval($0.timestamp))) }
+        let days = groups.keys.sorted(by: >).map { HistoryDay(date: $0, points: Array((groups[$0] ?? []).reversed())) }
+        let mapSegments = sourceSegments(points).map { segment in
+            HistorySegment(id: segment.id, points: simplified(segment.points))
+        }
+        return PreparedHistory(points: points, mapSegments: mapSegments, mapPoints: sampled(points, limit: 80), days: days,
+                               indexByID: Dictionary(uniqueKeysWithValues: points.enumerated().map { ($0.element.id, $0.offset) }))
+    }
+
+    /// Preserve real turns and endpoints; rendering never modifies stored reports or exports.
+    static func simplified(_ points: [HistoryPoint], toleranceM: Double = 12) -> [HistoryPoint] {
+        guard points.count > 2 else { return points }
+        let origin = points[0]
+        let cosine = cos(origin.latitude * .pi / 180)
+        let xy = points.map { point -> (Double, Double) in
+            let lon = (point.longitude - origin.longitude + 540).truncatingRemainder(dividingBy: 360) - 180
+            return (lon * 111_320 * cosine, (point.latitude - origin.latitude) * 111_320)
+        }
+        var keep: Set<Int> = [0, points.count - 1]
+        var stack = [(0, points.count - 1)]
+        while let (start, end) = stack.popLast() {
+            guard end > start + 1 else { continue }
+            let (ax, ay) = xy[start]; let (bx, by) = xy[end]
+            let dx = bx - ax; let dy = by - ay; let squared = dx * dx + dy * dy
+            var maximum = toleranceM * toleranceM; var index: Int?
+            for i in (start + 1)..<end {
+                let (x, y) = xy[i]
+                let t = squared > 0 ? min(1, max(0, ((x - ax) * dx + (y - ay) * dy) / squared)) : 0
+                let ex = x - ax - t * dx; let ey = y - ay - t * dy
+                let distance = ex * ex + ey * ey
+                if distance > maximum { maximum = distance; index = i }
+            }
+            if let index { keep.insert(index); stack.append((start, index)); stack.append((index, end)) }
+        }
+        return keep.sorted().map { points[$0] }
+    }
+
+    static func sampled(_ points: [HistoryPoint], limit: Int) -> [HistoryPoint] {
+        guard limit > 1 else { return Array(points.prefix(max(0, limit))) }
+        guard points.count > limit else { return points }
+        return (0..<limit).map { points[Int((Double($0) * Double(points.count - 1) / Double(limit - 1)).rounded())] }
+    }
+
+    /// Time-based scrubbing uses binary search rather than scanning every report on each frame.
+    static func nearestIndex(to timestamp: Double, in points: [HistoryPoint]) -> Int {
+        guard !points.isEmpty else { return 0 }
+        var low = 0; var high = points.count
+        while low < high {
+            let middle = (low + high) / 2
+            if Double(points[middle].timestamp) < timestamp { low = middle + 1 } else { high = middle }
+        }
+        if low == 0 { return 0 }
+        if low == points.count { return points.count - 1 }
+        return timestamp - Double(points[low - 1].timestamp) <= Double(points[low].timestamp) - timestamp ? low - 1 : low
+    }
     static func filtered(_ points: [HistoryPoint], networks: Set<String>) -> [HistoryPoint] {
         var seen: Set<String> = []
         return points.filter {

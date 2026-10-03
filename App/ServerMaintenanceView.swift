@@ -25,7 +25,7 @@ struct BackupsManagementView: View {
                 }
             }
             if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle("Backups").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Backups").navigationBarTitleDisplayMode(.inline)
         .task { await load() }.refreshable { await load() }
     }
     private func load() async { do { backups = try await APIClient.shared.requestJSON(path: "/api/v2/backups")["backups"].rows; error = nil } catch { self.error = error.localizedDescription } }
@@ -58,7 +58,7 @@ struct GoogleRepairView: View {
             if let message { Text(message) }
             if let error { Text(error).foregroundStyle(.red) }
             DisclosureGroup("Weitere Statusdetails") { ManagementRows(value: runtime["guardian"]) }
-        }.navigationTitle("Google-Reparatur").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Google-Reparatur").navigationBarTitleDisplayMode(.inline)
         .task { await load() }.refreshable { await load() }
         .confirmationDialog("Google-Zugang auf dem Server prüfen bzw. neu laden?", isPresented: Binding(get: { operation != nil }, set: { if !$0 { operation = nil } }), titleVisibility: .visible) {
             if let operation { Button("Ausführen") { Task { await run(operation) } } }
@@ -103,7 +103,7 @@ struct StorageCleanupView: View {
             if busy { ProgressView("Server arbeitet …") }
             if let receipt { Text(receipt).foregroundStyle(.green) }
             if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle("Speicher bereinigen").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Speicher bereinigen").navigationBarTitleDisplayMode(.inline)
         .task { await load() }.refreshable { if !busy { await load() } }
         .confirmationDialog("Die in der Vorschau ausgewählten Daten endgültig entfernen?", isPresented: $confirm, titleVisibility: .visible) { Button("Bereinigen", role: .destructive) { Task { await execute() } } }
     }
@@ -122,3 +122,4 @@ struct StorageCleanupView: View {
         } catch { preview = nil; self.error = error.localizedDescription }
     }
 }
+

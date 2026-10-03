@@ -31,7 +31,7 @@ struct GroupsView: View {
                 }
             }
         }
-        .navigationTitle("Gruppen").navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Gruppen").navigationBarTitleDisplayMode(.inline)
         .toolbar { Button("Neue Gruppe", systemImage: "plus") { creating = true } }
         .task { await load() }
         .refreshable { await load() }
@@ -67,7 +67,7 @@ struct GroupObjectsView: View {
             ForEach(trackers) { tracker in
                 NavigationLink { TrackerDetailView(tracker: tracker) } label: { TrackerListRow(tracker: tracker) }
             }
-        }.navigationTitle(group.label).navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle(group.label).navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -86,7 +86,7 @@ struct GroupEditorView: View {
         Form {
             Section("Gruppe") { TextField("Name", text: $label); TextField("Symbol", text: $emoji) }
             if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle(group == nil ? "Neue Gruppe" : "Gruppe bearbeiten")
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle(group == nil ? "Neue Gruppe" : "Gruppe bearbeiten")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() }.disabled(busy) }
                 ToolbarItem(placement: .confirmationAction) { Button("Sichern") { Task { await save() } }.disabled(busy || label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || label.count > 80) }
@@ -120,7 +120,7 @@ struct GroupAssignmentView: View {
             }
             if loaded && groups.isEmpty { Text("Lege zuerst unter Ich → Gruppen eine Gruppe an.").foregroundStyle(.secondary) }
             if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle("Gruppen zuordnen")
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Gruppen zuordnen")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() }.disabled(busy) }
                 ToolbarItem(placement: .confirmationAction) { Button("Sichern") { Task { await save() } }.disabled(!loaded || busy || selected.count > 20) }
@@ -138,3 +138,4 @@ struct GroupAssignmentView: View {
         } catch { self.error = error.localizedDescription }
     }
 }
+

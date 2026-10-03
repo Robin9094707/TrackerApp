@@ -115,7 +115,7 @@ struct TrackerDetailView: View {
             }.buttonStyle(.plain).disabled(model.updatingRefs.contains(current.ref)).accessibilityLabel("Favorit umschalten")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 6)
+        .rjCard()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("tracker-detail-header")
     }
@@ -131,7 +131,7 @@ struct TrackerDetailView: View {
         Button { Task { await model.locate(current) } } label: {
             Label(model.isLocating(current) ? "Wird geortet …" : "Jetzt orten", systemImage: "location.fill")
                 .font(.headline).frame(maxWidth: .infinity, minHeight: 42)
-        }.buttonStyle(.borderedProminent).buttonBorderShape(.roundedRectangle(radius: 18))
+        }.buttonStyle(RJPrimaryButtonStyle())
             .disabled(model.isLocating(current) || model.isLocatingAll)
     }
 
@@ -143,7 +143,7 @@ struct TrackerDetailView: View {
         } label: {
             Label("Route", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
                 .font(.headline).frame(maxWidth: .infinity, minHeight: 42)
-        }.buttonStyle(.bordered).buttonBorderShape(.roundedRectangle(radius: 18)).disabled(current.validLocation == nil)
+        }.buttonStyle(RJSecondaryButtonStyle()).disabled(current.validLocation == nil)
     }
 
     private var information: some View {
@@ -341,3 +341,4 @@ struct TrackerAutomationView: View {
         }
     }
 }
+

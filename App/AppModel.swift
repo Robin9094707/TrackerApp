@@ -10,6 +10,7 @@ final class AppModel {
     private var catalogTask: Task<[Tracker], Error>?
     private var trackerRevision = 0
     var isRefreshingTrackers = false
+    var isRefreshingAlerts = false
     private let preferences: UserDefaults
     private var sessionGeneration = UUID()
     var connectionState: ConnectionState = .restoring
@@ -154,6 +155,22 @@ final class AppModel {
 
     func isLocating(_ tracker: Tracker) -> Bool { locatingRefs.contains(tracker.ref) }
     func isUpdatingNotification(_ tracker: Tracker) -> Bool { notificationRefs.contains(tracker.ref) }
+
+    func refreshAlerts(limit: Int = 150) async {
+        guard connectionState == .connected, !isRefreshingAlerts else { return }
+        if bootstrap == nil { await refresh(); return }
+        let generation = sessionGeneration
+        isRefreshingAlerts = true
+        defer { if generation == sessionGeneration { isRefreshingAlerts = false } }
+        do {
+            let alerts = try await APIClient.shared.alerts(limit: limit)
+            guard generation == sessionGeneration, connectionState == .connected, !Task.isCancelled else { return }
+            bootstrap?.alerts = alerts
+        } catch is CancellationError { } catch {
+            guard generation == sessionGeneration else { return }
+            errorMessage = error.localizedDescription
+        }
+    }
 
     func refreshTrackers() async {
         #if DEBUG

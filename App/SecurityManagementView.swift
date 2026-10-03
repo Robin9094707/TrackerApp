@@ -14,7 +14,7 @@ struct SecurityManagementView: View {
             }
             NavigationLink("Zwei-Faktor-Schutz") { TwoFactorManagementView() }
             NavigationLink("Passkeys verwalten") { PasskeyManagementView() }
-        }.navigationTitle("Sicherheit").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Sicherheit").navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -61,7 +61,7 @@ struct TwoFactorManagementView: View {
                     ], confirmation: "Zwei-Faktor-Schutz wirklich deaktivieren?", destructive: true) { status = $0["two_factor"] }
                 }
             }
-        }.navigationTitle("Zwei-Faktor-Schutz").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Zwei-Faktor-Schutz").navigationBarTitleDisplayMode(.inline)
         .task { await load() }.refreshable { await load() }
     }
     private func load() async { do { status = try await APIClient.shared.requestJSON(path: "/api/security/2fa")["two_factor"]; error = nil } catch { self.error = error.localizedDescription } }
@@ -97,7 +97,7 @@ struct PasskeyManagementView: View {
             }
             if credentials.isEmpty && error == nil { Text("Keine Passkeys registriert.").foregroundStyle(.secondary) }
             if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle("Passkeys").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Passkeys").navigationBarTitleDisplayMode(.inline)
         .task { await load() }.refreshable { await load() }
         .sheet(isPresented: $website, onDismiss: { Task { await load() } }) {
             if let url = APIClient.shared.baseURL { ServerSafariView(url: url).ignoresSafeArea() }
@@ -110,3 +110,4 @@ struct ServerSafariView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> SFSafariViewController { SFSafariViewController(url: url) }
     func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) { }
 }
+

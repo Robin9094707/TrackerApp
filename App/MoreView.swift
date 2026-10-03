@@ -43,7 +43,8 @@ struct MoreView: View {
                     .font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity)
             }.listRowBackground(Color.clear)
         }
-        .navigationTitle("Ich").navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Ich").navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.refresh() }
     }
 }
+

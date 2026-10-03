@@ -34,7 +34,7 @@ struct SystemStatusView: View {
                 LabeledContent("Registrierte iPhones", value: "\(model.bootstrap?.push?.activeDevices ?? 0)")
             }
         }
-        .navigationTitle("Serverzentrale").navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Serverzentrale").navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.refresh() }
     }
 }
@@ -64,7 +64,7 @@ struct PollingSettingsView: View {
             }
             if saved { Label("Intervalle gespeichert", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
         }
-        .navigationTitle("Ortungsintervalle").navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Ortungsintervalle").navigationBarTitleDisplayMode(.inline)
         .disabled(busy)
         .toolbar { Button("Sichern") { Task { await save() } }.disabled(busy || intervals.count != 3 || !providers.allSatisfy { intervals[$0]?.isValid(for: $0) == true }) }
         .task { await load() }
@@ -119,7 +119,7 @@ struct DiagnosticsView: View {
             }
             if report["checks"].arrayValue.isEmpty && !running { Text("Noch keine Prüfergebnisse. Starte eine Schnellprüfung.").foregroundStyle(.secondary) }
         }
-        .navigationTitle("System prüfen").navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("System prüfen").navigationBarTitleDisplayMode(.inline)
         .task(id: requestID) { await load(start: running) }
         .refreshable { if !running { await load(start: false) } }
     }
@@ -162,7 +162,7 @@ struct ServerStorageView: View {
                 }
             }
         }
-        .navigationTitle("Speicher").navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Speicher").navigationBarTitleDisplayMode(.inline)
         .task { await load() }.refreshable { await load() }
     }
     private func bytes(_ value: JSONValue) -> String { value.numberValue == nil ? "–" : ByteCountFormatter.string(fromByteCount: Int64(value.integer), countStyle: .file) }
@@ -171,3 +171,4 @@ struct ServerStorageView: View {
         do { data = try await APIClient.shared.requestJSON(path: "/api/v2/storage") } catch { self.error = error.localizedDescription }
     }
 }
+

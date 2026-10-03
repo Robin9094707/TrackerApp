@@ -1,3 +1,9 @@
+## iOS 3.0
+
+Der aktuelle IPA-Build heißt `RJ-Tracker-v3.0.0-unsigned-IPA`. Standard-Pushes bauen direkt die Release-IPA. Für gezielte Tests und einen Screenshot der Verlaufsansicht lässt sich beim manuellen Workflowstart `review` aktivieren. Die IPA benötigt wie bisher eine Signierung zum Installieren.
+
+Vor der Umgestaltung wurde `backup/pre-liquid-glass-2026-10-03` angelegt. Dieser Branch zeigt unverändert auf `73f46c4733b03968058168a9c3bbdec822e7de0d`. Ein späteres Rückgängigmachen sollte die Änderungen durch einen neuen Commit zurücknehmen, um neuere Arbeit nicht durch einen Force-Push zu überschreiben.
+
 # RJ Tracker — iOS owner app + Android share viewer
 
 Dieses Repository enthält zwei sauber getrennte mobile Clients für Universal Tag Studio / RJ Tracker:
@@ -80,3 +86,4 @@ TrackerApp/
 ### iOS 2.1.1
 
 Sortierung, Netzwerk-, Ansichts- und Gruppenfilter bleiben beim Neustart erhalten. Das Objektpanel verwendet in jeder Höhe einen deckenden Systemhintergrund. Der Asset-Katalog wird jetzt tatsächlich eingebunden; das neue Radar-/Pin-Icon wird durch `python3 Scripts/generate_app_icon.py` vor `xcodegen generate` reproduzierbar erzeugt. CI prüft den Icon-Eintrag und die kompilierten Assets in der fertigen App.
+

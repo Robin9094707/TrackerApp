@@ -16,8 +16,9 @@ struct GlobalPollingView: View {
                 }
             }
             if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle("Automatische Ortung").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Automatische Ortung").navigationBarTitleDisplayMode(.inline)
         .task { await load() }.refreshable { await load() }
     }
     private func load() async { do { enabled = try await APIClient.shared.requestJSON(path: "/api/polling/settings")["polling"]["enabled"].boolValue; error = nil } catch { self.error = error.localizedDescription } }
 }
+

@@ -58,6 +58,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             RJSectionTitle(title: "Benachrichtigungen", subtitle: "APNs und iOS-Berechtigungen", symbol: "bell.badge.fill")
             Divider()
+            NavigationLink { PushDevicesView() } label: { Label("Registrierte Push-Geräte", systemImage: "iphone.radiowaves.left.and.right") }
             LabeledContent("APNs Backend", value: model.bootstrap?.push?.serverConfigured == true ? "Bereit" : "Nicht vollständig")
             Button {
                 Task {
@@ -98,4 +99,5 @@ struct SettingsView: View {
         .buttonStyle(.plain)
     }
 }
+
 

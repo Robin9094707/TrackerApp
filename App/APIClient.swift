@@ -108,6 +108,18 @@ final class APIClient {
         try await request(path: "/api/mobile/v1/capabilities")
     }
 
+    func alerts(limit: Int = 150) async throws -> AlertSummary {
+        try await request(path: "/api/mobile/v1/alerts", query: [.init(name: "limit", value: String(min(500, max(1, limit))))])
+    }
+
+    func pushDevices() async throws -> PushDevicesResponse {
+        try await request(path: "/api/mobile/v1/push")
+    }
+
+    func removePushDevice(id: String) async throws {
+        _ = try await requestJSON(path: "/api/mobile/v1/push", method: "DELETE", json: ["device_id": id])
+    }
+
     func action(_ name: String, payload: [String: Any] = [:]) async throws -> JSONValue {
         var body = payload
         body["action"] = name
@@ -197,7 +209,7 @@ final class APIClient {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         request.httpMethod = method.uppercased()
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("RJTracker-iOS/2.2", forHTTPHeaderField: "User-Agent")
+        request.setValue("RJTracker-iOS/3.0", forHTTPHeaderField: "User-Agent")
         if let json {
             guard JSONSerialization.isValidJSONObject(json) else { throw APIError.message("Ungültiger JSON-Body.") }
             request.httpBody = try JSONSerialization.data(withJSONObject: json)

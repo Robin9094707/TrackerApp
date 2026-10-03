@@ -1,3 +1,16 @@
+# iOS 3.0.0 — 3. Oktober 2026
+
+- Einheitliche native Glass-Steuerelemente, gruppierte Listen und fein abgestimmte Inhaltskarten; transparente Kartensteuerung mit GlassEffectContainer auf iOS 26.
+- Animierte Verbindungsansicht und weicher Übergang zur App ohne künstliche Startverzögerung. Reduzierte Bewegung und größere Schrift bleiben unterstützt.
+- Verlauf: echte Zeitachse, Tagesfilter, Quellfilter, auswählbare Kartenpunkte, Schritte vor/zurück, variable Wiedergabegeschwindigkeit und serverseitig erkannte Aufenthalte.
+- Verlaufsvorbereitung außerhalb des Hauptthreads; geometrisch vereinfachte Kartenlinien und höchstens 80 repräsentative Kartenpunkte. Geladene Meldungen und CSV/GPX-Export bleiben vollständig innerhalb des ausdrücklich gekennzeichneten Serverausschnitts (maximal 2000 Meldungen).
+- Beim Aktualisieren bleiben Quellenauswahl, gewählter Punkt und Kartenausschnitt bestehen. Der Verlauf öffnet die Kartenleiste automatisch groß.
+- Native Push-Geräteübersicht (GET/DELETE mobile push); gezielter Meldungsabruf mit Suche und bis zu 500 Ereignissen. Keine Serveränderung beim bloßen Öffnen dieser Übersichten.
+- Rückwärts-Geokodierung wartet bei schnellen Auswahlwechseln kurz, um unnötige Anfragen zu vermeiden.
+- Version 3.0.0, Build 9; bestehende Bundle-ID, Keychain-Schlüssel, Einstellungen, Tracker und serverseitige Daten bleiben erhalten. Kein Datenbank- oder Speicherformatwechsel.
+- IPA-Workflow: zügiger Standardbuild; fokussierte Unit-Tests und ein Screenshot-Durchlauf optional über workflow_dispatch `review` oder Commit-Markierung `[review]`.
+- Wiederherstellungspunkt: Branch `backup/pre-liquid-glass-2026-10-03`, Commit `73f46c4733b03968058168a9c3bbdec822e7de0d`.
+
 # iOS 2.2.0
 
 - Konto und Profil bearbeiten; Hauptadministrator kann Benutzer anlegen, bearbeiten, deaktivieren, löschen sowie Passwort, 2FA und Passkeys zurücksetzen.
@@ -62,3 +75,4 @@ APNs still requires valid signing entitlements and an APNs-configured backend. A
 The GitHub workflow runs unit tests for API decoding, IDs, filtering, freshness, sorting, history segmentation and CSV/GPX export. Simulator UI tests exercise map/list selection, tracker details, saved places and dark appearance with larger text; screenshot attachments are exported as a workflow artifact. It then creates and validates a Release IPA with code signing disabled. The sample data exists only in Debug builds behind the `--ui-testing` launch argument; the Release IPA contains no demo dataset.
 
 Design references: [Apple's Liquid Glass adoption guide](https://developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass), [SwiftUI design session](https://developer.apple.com/videos/play/wwdc2025/323/).
+

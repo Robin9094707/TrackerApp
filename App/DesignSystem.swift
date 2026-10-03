@@ -6,16 +6,32 @@ import MapKit
 // MARK: - Visual language
 
 enum RJDesign {
-    static let corner: CGFloat = 22
+    static let corner: CGFloat = 26
     static let compactCorner: CGFloat = 20
     static let sheetCorner: CGFloat = 28
     static let controlSize: CGFloat = 46
     static let contentPadding: CGFloat = 16
 }
 
+private struct RJExpandInspectorKey: EnvironmentKey {
+    static let defaultValue: () -> Void = {}
+}
+extension EnvironmentValues {
+    var rjExpandInspector: () -> Void {
+        get { self[RJExpandInspectorKey.self] }
+        set { self[RJExpandInspectorKey.self] = newValue }
+    }
+}
+
 struct RJGlassBackdrop: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
-        Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
+        ZStack(alignment: .topTrailing) {
+            Color(uiColor: .systemGroupedBackground)
+            if !reduceTransparency {
+                LinearGradient(colors: [.blue.opacity(0.08), .cyan.opacity(0.035), .clear], startPoint: .topTrailing, endPoint: .bottomLeading)
+            }
+        }.ignoresSafeArea()
     }
 }
 
@@ -34,6 +50,8 @@ extension View {
         padding(RJDesign.contentPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: RJDesign.corner, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: RJDesign.corner, style: .continuous).stroke(Color.primary.opacity(0.045), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.035), radius: 12, y: 5)
     }
 
     func rjCompactCard() -> some View {
@@ -62,7 +80,77 @@ extension View {
 
     func rjGlassControl() -> some View {
         frame(width: RJDesign.controlSize, height: RJDesign.controlSize)
-            .rjGlass(in: Circle())
+            .modifier(RJInteractiveGlass())
+    }
+}
+
+private struct RJInteractiveGlass: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.background(Color(uiColor: .secondarySystemGroupedBackground), in: Circle())
+        } else if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: Circle())
+        } else {
+            content.background(.regularMaterial, in: Circle())
+        }
+    }
+}
+
+struct RJGlassControls<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 12) { content() }
+        } else { content() }
+    }
+}
+
+struct RJPrimaryButtonStyle: ButtonStyle {
+    @ViewBuilder
+    func makeBody(configuration: Configuration) -> some View {
+        if #available(iOS 26.0, *) {
+            configuration.label.padding(.horizontal, 16).padding(.vertical, 8)
+                .foregroundStyle(.white)
+                .glassEffect(.regular.tint(.blue).interactive(), in: Capsule())
+                .opacity(configuration.isPressed ? 0.75 : 1)
+        } else {
+            configuration.label.padding(.horizontal, 16).padding(.vertical, 8)
+                .foregroundStyle(.white).background(.blue, in: Capsule())
+                .opacity(configuration.isPressed ? 0.75 : 1)
+        }
+    }
+}
+
+struct RJSecondaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.padding(.horizontal, 16).padding(.vertical, 8)
+            .rjGlass(in: Capsule()).opacity(configuration.isPressed ? 0.65 : 1)
+    }
+}
+
+struct RJLaunchView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var appeared = false
+    var body: some View {
+        ZStack {
+            RJGlassBackdrop()
+            VStack(spacing: 22) {
+                Image(systemName: "airtag.radiowaves.forward.fill")
+                    .font(.system(size: 54, weight: .medium))
+                    .foregroundStyle(.blue.gradient)
+                    .frame(width: 120, height: 120)
+                    .rjGlass(in: RoundedRectangle(cornerRadius: 36, style: .continuous))
+                    .scaleEffect(appeared || reduceMotion ? 1 : 0.88)
+                VStack(spacing: 8) {
+                    Text("RJ Tracker").font(.largeTitle.bold())
+                    Text("Deine Dinge. Immer im Blick.").font(.subheadline).foregroundStyle(.secondary)
+                }
+                ProgressView("Verbinden …").font(.caption).padding(.top, 8)
+            }.opacity(appeared || reduceMotion ? 1 : 0)
+        }.onAppear {
+            withAnimation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.15)) { appeared = true }
+        }
     }
 }
 
@@ -260,7 +348,10 @@ final class ReverseGeocoder {
         inFlight[key] = task
         let result = await task.value
         inFlight[key] = nil
-        if let result, !result.isEmpty { cache[key] = result }
+        if let result, !result.isEmpty {
+            if cache.count >= 500 { cache.removeAll(keepingCapacity: true) }
+            cache[key] = result
+        }
         return result
     }
 
@@ -300,6 +391,8 @@ struct ResolvedAddressText: View {
             .task(id: taskKey) {
                 resolved = nil
                 guard supplied == nil, let location else { return }
+                do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+                guard !Task.isCancelled else { return }
                 let value = await ReverseGeocoder.shared.address(for: location)
                 guard !Task.isCancelled else { return }
                 resolved = value
@@ -458,4 +551,3 @@ extension Double {
         return "\(Int(self.rounded())) m"
     }
 }
-

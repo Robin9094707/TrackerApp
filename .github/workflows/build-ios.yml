@@ -7,6 +7,11 @@ on:
       - 'android/**'
       - '.github/workflows/build-android.yml'
   workflow_dispatch:
+    inputs:
+      review:
+        description: Run focused unit tests and capture the history screen
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -19,7 +24,7 @@ jobs:
   build:
     name: Build unsigned iOS IPA
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -49,7 +54,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          brew install xcodegen
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
           xcodegen --version
 
       - name: Generate Xcode project
@@ -65,7 +70,8 @@ jobs:
           plutil -lint App/Info.plist App/RJTracker.entitlements
           xcodebuild -project RJTracker.xcodeproj -scheme RJTracker -showBuildSettings >/dev/null
 
-      - name: Run iOS tests and capture simulator screens
+      - name: Optional focused review
+        if: inputs.review == true || contains(github.event.head_commit.message, '[review]')
         shell: bash
         run: |
           set -o pipefail
@@ -75,11 +81,13 @@ jobs:
             -configuration Debug -destination "platform=iOS Simulator,id=$SIM_ID" \
             -resultBundlePath RJ-Tracker-tests.xcresult \
             -parallel-testing-enabled NO \
+            -only-testing:RJTrackerTests \
+            -only-testing:RJTrackerUITests/testAccountSecurityAndHistory \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             2>&1 | tee RJ-Tracker-tests.log
 
       - name: Export simulator screenshots
-        if: always()
+        if: always() && (inputs.review == true || contains(github.event.head_commit.message, '[review]'))
         shell: bash
         run: |
           if [ -d RJ-Tracker-tests.xcresult ]; then
@@ -87,10 +95,10 @@ jobs:
           fi
 
       - name: Upload test results
-        if: always()
+        if: always() && (inputs.review == true || contains(github.event.head_commit.message, '[review]'))
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-Tracker-v2.2.0-tests-and-screenshots
+          name: RJ-Tracker-v3.0.0-tests-and-screenshots
           path: |
             RJ-Tracker-tests.log
             TestScreenshots
@@ -101,7 +109,6 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          rm -rf .github-derived
           xcodebuild \
             -project RJTracker.xcodeproj \
             -scheme RJTracker \
@@ -127,16 +134,19 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$APP/Info.plist"
           test -n "$(find "$APP" -name 'AppIcon*.png' -print -quit)"
           cp -R "$APP" Payload/
-          /usr/bin/zip -qry RJ-Tracker-v2.2.0-unsigned.ipa Payload
-          unzip -t RJ-Tracker-v2.2.0-unsigned.ipa
-          ls -lh RJ-Tracker-v2.2.0-unsigned.ipa
+          /usr/bin/zip -qry RJ-Tracker-v3.0.0-unsigned.ipa Payload
+          unzip -t RJ-Tracker-v3.0.0-unsigned.ipa
+          ls -lh RJ-Tracker-v3.0.0-unsigned.ipa
+          echo "### RJ Tracker 3.0.0" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "Unsigned IPA ready for sideload signing." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload IPA
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-Tracker-v2.2.0-unsigned-IPA
-          path: RJ-Tracker-v2.2.0-unsigned.ipa
+          name: RJ-Tracker-v3.0.0-unsigned-IPA
+          path: RJ-Tracker-v3.0.0-unsigned.ipa
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
@@ -145,8 +155,9 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-Tracker-v2.2.0-build-log
+          name: RJ-Tracker-v3.0.0-build-log
           path: RJ-Tracker-build.log
           if-no-files-found: ignore
           retention-days: 30
+
 

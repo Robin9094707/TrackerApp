@@ -350,10 +350,16 @@ struct HistoryResponse: Codable {
     var matchingTotal: Int?
     var stays: [JSONValue]?
     var places: [JSONValue]?
+    var observedPlaces: [JSONValue]?
+    var methodNote: String?
+    var timezone: String?
 
     enum CodingKeys: String, CodingKey {
         case status, tracker, summary, points, returned, stays, places
         case matchingTotal = "matching_total"
+        case observedPlaces = "observed_places"
+        case methodNote = "method_note"
+        case timezone
     }
 }
 

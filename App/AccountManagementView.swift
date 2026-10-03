@@ -18,7 +18,7 @@ struct AccountManagementView: View {
                 NavigationLink("Benutzer verwalten") { UsersManagementView() }
             }
             if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle("Konto & Sicherheit").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Konto & Sicherheit").navigationBarTitleDisplayMode(.inline)
         .task { await load() }.refreshable { await load() }
     }
     private func load() async { do { user = try await APIClient.shared.requestJSON(path: "/api/account/profile")["user"]; error = nil } catch { self.error = error.localizedDescription } }
@@ -39,7 +39,7 @@ struct UsersManagementView: View {
                 }
             }
             if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle("Benutzer").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Benutzer").navigationBarTitleDisplayMode(.inline)
         .task { await load() }.refreshable { await load() }
     }
     private func load() async { do { users = try await APIClient.shared.requestJSON(path: "/api/admin/users")["users"].rows; error = nil } catch { self.error = error.localizedDescription } }
@@ -64,6 +64,7 @@ struct UserEditorView: View {
                     NavigationLink("Benutzer endgültig löschen") { ManagementForm(title: "Benutzer löschen", path: path, method: "DELETE", constants: ["confirmed": .bool(true), "username": user["username"]], explanation: "Konto und private Tracker-Daten von \(user["username"].text) werden endgültig gelöscht.", confirmation: "\(user["username"].text) und sämtliche privaten Daten endgültig löschen?", destructive: true) }
                 }
             }
-        }.navigationTitle(existing ? user["username"].text : "Neuer Benutzer").navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle(existing ? user["username"].text : "Neuer Benutzer").navigationBarTitleDisplayMode(.inline)
     }
 }
+

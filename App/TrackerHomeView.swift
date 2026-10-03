@@ -24,7 +24,7 @@ struct TrackerHomeView: View {
             if sizeClass == .regular {
                 inspector
                     .frame(width: 380)
-                    .background(Color(uiColor: .systemGroupedBackground), in: RoundedRectangle(cornerRadius: 28))
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28))
                     .clipShape(RoundedRectangle(cornerRadius: 28))
                     .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
                     .padding(16)
@@ -35,7 +35,6 @@ struct TrackerHomeView: View {
                 .presentationDetents([.height(190), .medium, .large], selection: $detent)
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
-                .presentationBackground(Color(uiColor: .systemGroupedBackground))
                 .presentationBackgroundInteraction(.enabled(upThrough: .large))
                 .interactiveDismissDisabled()
         }
@@ -95,6 +94,7 @@ struct TrackerHomeView: View {
         }
         .ignoresSafeArea()
         .safeAreaInset(edge: .top, alignment: .trailing) {
+            RJGlassControls {
             VStack(spacing: 12) {
                 Menu {
                     Picker("Kartenansicht", selection: $mapAppearance) {
@@ -130,6 +130,7 @@ struct TrackerHomeView: View {
             .buttonStyle(.plain)
             .padding(.trailing, 16)
             .padding(.top, 8)
+            }
         }
     }
 
@@ -162,6 +163,7 @@ struct TrackerHomeView: View {
             NavigationStack { MoreView() }
                 .tabItem { Label("Ich", systemImage: "person.crop.circle") }.tag(3)
         }
+        .environment(\.rjExpandInspector, { detent = .large })
         .onChange(of: tab) { _, value in
             if value != 0 { detent = .large }
             else { detent = .medium }
@@ -199,6 +201,7 @@ struct TrackerHomeView: View {
 struct TrackerLibraryView: View {
     @Environment(AppModel.self) private var model
     let onSelect: (Tracker) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         @Bindable var model = model
@@ -243,8 +246,9 @@ struct TrackerLibraryView: View {
                 }
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: model.filteredTrackers.map(\.ref))
         .navigationTitle("Objekte")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $model.searchText, prompt: "Name, Adresse oder Notiz")
@@ -337,11 +341,11 @@ struct SyncStatusView: View {
     @Environment(AppModel.self) private var model
     var body: some View {
         HStack(spacing: 6) {
-            if model.isRefreshing { ProgressView().controlSize(.mini) }
+            if model.isRefreshing || model.isRefreshingTrackers { ProgressView().controlSize(.mini) }
             else { Image(systemName: model.refreshError == nil ? "checkmark.icloud" : "wifi.exclamationmark") }
             VStack(alignment: .leading, spacing: 2) {
                 if let date = model.lastRefresh {
-                    Text("\(model.trackers.count) Objekte · Stand \(date.formatted(date: .omitted, time: .shortened))")
+                    Text(model.isRefreshing || model.isRefreshingTrackers ? "Standorte werden aktualisiert …" : "\(model.trackers.count) Objekte · Stand \(date.formatted(date: .omitted, time: .shortened))")
                 } else { Text("Daten werden geladen …") }
                 if model.refreshError != nil { Text("Synchronisierung fehlgeschlagen. Letzter Stand wird angezeigt.").foregroundStyle(.orange) }
             }
@@ -349,6 +353,7 @@ struct SyncStatusView: View {
         }
         .font(.caption)
         .foregroundStyle(.secondary)
+        .padding(.vertical, 4)
         .accessibilityIdentifier("sync-status")
     }
 }
