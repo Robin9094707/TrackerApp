@@ -180,6 +180,7 @@ struct HistoryView: View {
             }
         }
         .mapStyle(.standard(pointsOfInterest: .excludingAll))
+        .annotationTitles(.hidden)
         .frame(height: 310).clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(alignment: .topTrailing) {
             Button { playing = false; position = .automatic } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").rjGlassControl() }
