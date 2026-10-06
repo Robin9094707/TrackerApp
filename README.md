@@ -1,89 +1,40 @@
-## iOS 3.0
+# RJ Tracker 4.0 · native iOS + API Backend 20
 
-Der aktuelle IPA-Build heißt `RJ-Tracker-v3.0.0-unsigned-IPA`. Standard-Pushes bauen direkt die Release-IPA. Für gezielte Tests und einen Screenshot der Verlaufsansicht lässt sich beim manuellen Workflowstart `review` aktivieren. Die IPA benötigt wie bisher eine Signierung zum Installieren.
+Native SwiftUI-/MapKit-App für Apple-, Google-, Samsung- und Fusion-Tracker. Android und der Android-Workflow wurden entfernt. Das Backend stellt die bisherigen Tracker-APIs sowie neue Import-, Geräte-, Passkey- und API-Key-Endpunkte bereit. Die Browseroberfläche unter `/` bietet ausschließlich Hauptadmin-Anmeldung, Statistik, Geräte-Abmeldung und Passwortverwaltung.
 
-Vor der Umgestaltung wurde `backup/pre-liquid-glass-2026-10-03` angelegt. Dieser Branch zeigt unverändert auf `73f46c4733b03968058168a9c3bbdec822e7de0d`. Ein späteres Rückgängigmachen sollte die Änderungen durch einen neuen Commit zurücknehmen, um neuere Arbeit nicht durch einen Force-Push zu überschreiben.
+## Dateien
 
-# RJ Tracker — iOS owner app + Android share viewer
+- `Backend/tracker_backend.py`: eigenständiges Python-Backend; keine separate Frontend-Datei erforderlich.
+- `Backend/requirements.txt`: aktuelle stabile Python-Abhängigkeiten, fest versioniert.
+- `App/`: nativer iOS-Client, iOS 17+, Liquid Glass ab iOS 26.
+- `docs/API-EDITION.md`: Einrichtung, API-Beispiele und Migration.
 
-Dieses Repository enthält zwei sauber getrennte mobile Clients für Universal Tag Studio / RJ Tracker:
+## Bestehendes Backend aktualisieren
 
-- **iOS:** bestehender nativer Owner-Client (SwiftUI/XcodeGen) im bisherigen Repository-Root.
-- **Android:** neuer nativer Gast-/Share-Client unter [`android/`](android/), der ausschließlich vorhandene `/shared/…`-Freigaben verwendet.
+Backend stoppen, bisherigen `data/`-Ordner sichern und die neue Python-Datei an die Stelle der alten legen. Dateiname darf beibehalten werden. Bestehende Umgebungsvariablen, Accounts, Tracker-Schlüssel, Historien, Fusionen und Benutzer weiterverwenden. Bei anderem Speicherort `ULTRA_TRACKER_DATA_DIR` ausdrücklich auf den bestehenden Ordner setzen.
 
-Die iOS-App wurde absichtlich nicht in einen neuen Ordner verschoben, damit der bestehende XcodeGen-/IPA-Build unverändert weiter funktioniert.
-
-## iOS 2.2 — Native Karte, Sicherheit und Verwaltung
-
-Die iOS-App bietet jetzt eine große MapKit-Karte mit nativem Schiebepanel, Favoriten, Quellenvergleich bei Fusionen, Namens-/Symbolbearbeitung, Kartenwahl für Orte und Geofences, Bewegungsalarme sowie einen abspielbaren Verlauf mit Netzfiltern und CSV-/GPX-Export. [Alle Neuerungen und technische Grenzen](IOS-CHANGELOG.md).
-
-Neu in 2.2: Konto, Benutzer, Passwort/2FA, Passkey-Verwaltung, interne Freigaben, Backups, Google-Reparatur, Netzwerkvergleich, Speicherbereinigung sowie schnellere gezielte Standortabrufe und überarbeitete Verläufe. Neue Passkeys werden auf der HTTPS-Serverwebsite registriert.
-
-Seit 2.1: Gruppenverwaltung, passwortgeschützte Gastfreigaben, Archiv und Wiederherstellung sowie eine Serverzentrale mit Ortungsintervallen, Diagnose und Speicherübersicht. Details und Grenzen stehen im [iOS-Changelog](IOS-CHANGELOG.md).
-
-Der iOS-Build prüft Logik und Bedienung mit Unit-/Simulator-Tests, speichert Bildschirmaufnahmen und erzeugt anschließend **RJ-Tracker-v2.2.0-unsigned.ipa**. Android bleibt davon unabhängig.
-
-## iOS — Build als IPA
-
-Der Workflow **Build RJ Tracker IPA** baut die bestehende iOS-App auf macOS/Xcode. Reine Änderungen unter `android/` starten diesen Workflow nicht mehr.
-
-Bei Erfolg entsteht die versionierte unsigned IPA. Die IPA kann anschließend mit einem eigenen Signing-Dienst bzw. Provisioning-Profil signiert werden.
-
-### iOS-Funktionen
-
-- SwiftUI, iOS 17+
-- Liquid Glass auf iOS 26+, Material-Fallback auf älteren unterstützten Versionen
-- Apple MapKit
-- Apple-, Google-, Samsung- und Fusion-Tracker
-- Tracker-Details, Live-Ortung, Locate-All und Verlauf
-- Geofences und gespeicherte Orte
-- Alert-Center und Recovery Guard
-- Push-Registrierung / lokale Benachrichtigungen
-- Provider-, Polling- und Serverstatus
-- Web-Studio für server-/browsergebundene Spezialfunktionen
-- Keychain für sensible Sitzungsdaten / CSRF
-
-Die iOS-App erwartet die Mobile-API des Universal-Tag-Studio-v19-Backends (`/api/mobile/v1/...`).
-
-## Android — RJ Tracker Share
-
-Der Android-Client liegt vollständig unter [`android/`](android/) und besitzt einen eigenen Workflow **Build RJ Tracker Android APK**.
-
-Er ist für Personen gedacht, die nur einen vom Besitzer erzeugten Gastlink bekommen, zum Beispiel Familienmitglieder. Er benötigt **keinen Owner-Login** und keine Apple-/Google-/Samsung-Zugangsdaten.
-
-### Android-Funktionen v1.0.0
-
-- Native Kotlin-/Jetpack-Compose-App mit Material 3 und Dynamic Color
-- Mehrere `/shared/…`-Links lokal speichern
-- Gast-Passwörter verschlüsselt im Android Keystore
-- Einzeltracker und Fusionen aus Apple, Google und Samsung
-- Bei Fusionen standardmäßig alle Quellen; einzelne Netze lokal ein-/ausblendbar
-- Neueste sichtbare Provider-Meldung als Hauptposition
-- Native MapLibre-Karte mit OpenFreeMap/OpenStreetMap
-- Genauigkeitskreis, Adresse, Zeitstempel und Provideranzeige
-- Manueller Ortungsbutton unter Beachtung des serverseitigen Cooldowns
-- Übergabe an installierte Android-Karten-/Navigationsapps
-- Einfügen per Text oder direkt über den Android Sharesheet
-
-Details: [`android/README.md`](android/README.md)
-
-## Repository-Struktur
-
-```text
-TrackerApp/
-├── App/                         # bestehende iOS-Quellen
-├── project.yml                  # bestehendes XcodeGen-Projekt
-├── android/                     # vollständig eigenständige Android-App
-│   ├── app/
-│   ├── build.gradle.kts
-│   └── settings.gradle.kts
-└── .github/workflows/
-    ├── build-ios.yml
-    └── build-android.yml
+```sh
+python3 -m pip install -r requirements.txt
+python3 tracker_backend.py
 ```
 
+Es wird keine neue Datenbank verlangt. Neue Gerätezugänge und API-Schlüssel werden ergänzend in `data/.client_access.json` gespeichert. Alte ESP32-Daten bleiben als inaktive Dateien erhalten; Firmware-Erstellung, Registrierung und Web-Flash stehen nicht mehr zur Verfügung. Alte Web-Tracker-/Freigabeseiten und Service Worker entfallen; Freigabe-Daten-APIs und MCP-OAuth bleiben für native Clients/Skripte verfügbar.
 
-### iOS 2.1.1
+## iOS
 
-Sortierung, Netzwerk-, Ansichts- und Gruppenfilter bleiben beim Neustart erhalten. Das Objektpanel verwendet in jeder Höhe einen deckenden Systemhintergrund. Der Asset-Katalog wird jetzt tatsächlich eingebunden; das neue Radar-/Pin-Icon wird durch `python3 Scripts/generate_app_icon.py` vor `xcodegen generate` reproduzierbar erzeugt. CI prüft den Icon-Eintrag und die kompilierten Assets in der fertigen App.
+Unter **Ich → Accounts, Import & Fusionen** Apple Account inklusive 2FA verbinden, Apple-Tracker-JSON oder Google-Secrets importieren, Samsung-Login-Link öffnen/teilen und die Rückleitungsadresse einfügen. Fusionen werden nativ aus vorhandenen Quellen eingerichtet. **Ich → Geräte & API-Schlüssel** verwaltet Sessions und Skriptzugriffe.
 
+Neue Passkeys und Passkey-Anmeldung starten direkt aus der App einen Sicherheitsdialog für die Serverdomain. Die Sicherheitsseite bietet keine Ortung. Der Rückkanal zur App nutzt einen einmaligen, an einen geheimen Verifier gebundenen Code. HTTPS ist dafür erforderlich; kein fest eingebauter Serverdomain-Entitlement nötig.
+
+## IPA-Build
+
+GitHub Actions baut bei Push nach `main` die Release-App und erzeugt `RJ-Tracker-v4.0.0-unsigned.ipa`. Standardmäßig laufen keine Simulator-/UI-Tests. Optionale bisherige Review-Tests bleiben auf ausdrücklichen Workflow-Input beschränkt.
+
+Die IPA ist **unsigniert** und muss für das iPhone mit einem geeigneten Profil signiert werden. APNs benötigt zusätzlich die bestehenden Servervariablen für Team-ID, Key-ID und `.p8` sowie passende App-Entitlements beim Signieren.
+
+## Rückkehr zum bisherigen Stand
+
+- `backup/before-api-only-2026-10-06`: ursprünglicher Repositorystand einschließlich Android.
+- `backup/ios-without-android-2026-10-06`: unmittelbar nach Android-Entfernung, vor iOS-/API-Umbau.
+
+Für Rollback den Snapshot wiederherstellen oder einen Revert-Commit erstellen; die neuen Dateien allein ersetzen kein Backup der privaten Serverdaten.

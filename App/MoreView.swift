@@ -25,7 +25,8 @@ struct MoreView: View {
             Section {
                 NavigationLink { SettingsView() } label: { Label("Einstellungen", systemImage: "gearshape") }
                 NavigationLink { SystemStatusView() } label: { Label("Serverzentrale", systemImage: "waveform.path.ecg") }
-                NavigationLink { WebStudioView() } label: { Label("Web Studio", systemImage: "safari") }
+                NavigationLink { ProviderSetupView() } label: { Label("Accounts, Import & Fusionen", systemImage: "plus.circle.fill") }
+                NavigationLink { ClientAccessView() } label: { Label("Geräte & API-Schlüssel", systemImage: "key.horizontal") }
             }
             Section("Server verwalten") {
                 NavigationLink { BackupsManagementView() } label: { Label("Backups & Wiederherstellung", systemImage: "externaldrive.badge.timemachine") }
@@ -47,4 +48,5 @@ struct MoreView: View {
         .refreshable { await model.refresh() }
     }
 }
+
 

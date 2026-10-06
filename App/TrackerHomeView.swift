@@ -219,7 +219,7 @@ struct TrackerLibraryView: View {
                     }
                 }
                 if model.filteredTrackers.isEmpty {
-                    ContentUnavailableView(model.trackers.isEmpty ? "Noch keine Objekte" : "Keine Treffer", systemImage: "airtag", description: Text(model.trackers.isEmpty ? "Füge Tracker in deinem Web Studio hinzu und aktualisiere diese Liste." : "Passe deine Suche oder Filter an."))
+                    ContentUnavailableView(model.trackers.isEmpty ? "Noch keine Objekte" : "Keine Treffer", systemImage: "airtag", description: Text(model.trackers.isEmpty ? "Füge unter Ich → Accounts, Import & Fusionen deine Tracker hinzu." : "Passe deine Suche oder Filter an."))
                 }
                 ForEach(model.filteredTrackers) { tracker in
                     Button { onSelect(tracker) } label: { TrackerListRow(tracker: tracker) }
@@ -357,3 +357,4 @@ struct SyncStatusView: View {
         .accessibilityIdentifier("sync-status")
     }
 }
+

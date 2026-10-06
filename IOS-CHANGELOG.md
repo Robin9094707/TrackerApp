@@ -1,3 +1,14 @@
+# iOS 4.0.0 · API Edition
+
+- Native Einrichtung von Apple Account mit 2FA, Apple-JSON-Import und Google-Secrets-Import.
+- Samsung-Login-Link in Safari öffnen oder an den Computer teilen; Rückleitungsadresse und PIN nativ speichern.
+- Fusionen aus Apple-, Google- und Samsung-Quellen direkt in der App verwalten.
+- Tracker lokal entfernen bzw. Provider-Quellen archivieren.
+- Passkey-Anmeldung und Registrierung mit eigenem Sicherheitsdialog und einmaligem App-Rückkanal.
+- Geräte-Sessions und begrenzte, widerrufbare API-Schlüssel verwalten.
+- Web Studio entfernt; Leermeldungen verweisen auf native Einrichtung.
+- Version 4.0.0 / Build 10; aktualisierte GitHub Actions.
+
 # iOS 3.0.0 — 3. Oktober 2026
 
 - Einheitliche native Glass-Steuerelemente, gruppierte Listen und fein abgestimmte Inhaltskarten; transparente Kartensteuerung mit GlassEffectContainer auf iOS 26.
@@ -75,4 +86,5 @@ APNs still requires valid signing entitlements and an APNs-configured backend. A
 The GitHub workflow runs unit tests for API decoding, IDs, filtering, freshness, sorting, history segmentation and CSV/GPX export. Simulator UI tests exercise map/list selection, tracker details, saved places and dark appearance with larger text; screenshot attachments are exported as a workflow artifact. It then creates and validates a Release IPA with code signing disabled. The sample data exists only in Debug builds behind the `--ui-testing` launch argument; the Release IPA contains no demo dataset.
 
 Design references: [Apple's Liquid Glass adoption guide](https://developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass), [SwiftUI design session](https://developer.apple.com/videos/play/wwdc2025/323/).
+
 

@@ -201,15 +201,16 @@ final class APIClient {
             throw APIError.message("Ungültige Server-URL.")
         }
         let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        components.path = "/" + ([basePath, cleanPath].filter { !$0.isEmpty }.joined(separator: "/"))
+        components.path = "/" + ([basePath, cleanPath.removingPercentEncoding ?? cleanPath].filter { !$0.isEmpty }.joined(separator: "/"))
         if !query.isEmpty { components.queryItems = query }
         guard let url = components.url else { throw APIError.message("Ungültige API-URL.") }
-        let slowOperation = path.contains("/backups") || path.contains("/cleanup")
+        let slowOperation = path.contains("/backups") || path.contains("/cleanup") || path.contains("/tools") || path.contains("/import") || path.contains("/auth/complete") || path == "/api/login"
         let timeout: TimeInterval = slowOperation ? 180 : (path.hasSuffix("/history") ? 60 : 25)
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         request.httpMethod = method.uppercased()
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("RJTracker-iOS/3.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("RJTracker-iOS/4.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("iPhone / iPad · RJ Tracker", forHTTPHeaderField: "X-RJ-Device-Label")
         if let json {
             guard JSONSerialization.isValidJSONObject(json) else { throw APIError.message("Ungültiger JSON-Body.") }
             request.httpBody = try JSONSerialization.data(withJSONObject: json)
@@ -260,3 +261,4 @@ extension Notification.Name {
 
 
 struct SingleTrackerResponse: Decodable { let tracker: Tracker }
+

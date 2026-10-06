@@ -104,6 +104,9 @@ struct ConnectionView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(model.serverURL.isEmpty || password.isEmpty || model.connectionState == .connecting)
+                Button { Task { do { try APIClient.shared.configure(server: model.serverURL); try await PasskeyBridge.shared.authenticate(); await model.start() } catch { model.errorMessage = error.localizedDescription } } } label: { Label("Mit Passkey anmelden", systemImage: "person.badge.key.fill") }
+                    .disabled(model.serverURL.isEmpty || model.connectionState == .connecting)
+                if let error = model.errorMessage { Text(error).font(.caption).foregroundStyle(.red) }
             } else {
                 inputField(symbol: "checkmark.shield.fill", title: "2FA-Code") {
                     TextField("2FA-Code", text: $code)
@@ -157,3 +160,4 @@ struct ConnectionView: View {
         .rjGlass(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
+

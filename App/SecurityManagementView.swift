@@ -75,13 +75,11 @@ struct TwoFactorManagementView: View {
 struct PasskeyManagementView: View {
     @State private var credentials: [JSONValue] = []
     @State private var error: String?
-    @State private var website = false
     var body: some View {
         List {
             Section {
-                Text("Vorhandene Passkeys hier umbenennen oder entfernen. Neue Passkeys werden auf der HTTPS-Website deines Servers eingerichtet, an deren Domain sie gebunden sind.").font(.subheadline).foregroundStyle(.secondary)
-                Button("Passkey auf der Website hinzufügen") { website = true }.disabled(APIClient.shared.baseURL?.scheme != "https")
-                Text("Dort gegebenenfalls anmelden und Einstellungen → Sicherheit → Passkeys öffnen.").font(.caption).foregroundStyle(.secondary)
+                Text("Passkeys werden sicher an deine HTTPS-Serverdomain gebunden. Der Sicherheitsdialog enthält ausschließlich Anmeldung und Einrichtung.").font(.subheadline).foregroundStyle(.secondary)
+                Button("Passkey hinzufügen") { Task { do { try await PasskeyBridge.shared.authenticate(enrollment: true); await load() } catch { self.error = error.localizedDescription } } }.disabled(APIClient.shared.baseURL?.scheme != "https")
             }
             ForEach(credentials, id: \.identifier) { key in
                 Section(key["label"].text) {
@@ -99,9 +97,7 @@ struct PasskeyManagementView: View {
             if let error { Text(error).foregroundStyle(.red) }
         }.scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Passkeys").navigationBarTitleDisplayMode(.inline)
         .task { await load() }.refreshable { await load() }
-        .sheet(isPresented: $website, onDismiss: { Task { await load() } }) {
-            if let url = APIClient.shared.baseURL { ServerSafariView(url: url).ignoresSafeArea() }
-        }
+
     }
     private func load() async { do { credentials = try await APIClient.shared.requestJSON(path: "/api/security/passkeys")["passkeys"]["credentials"].rows; error = nil } catch { self.error = error.localizedDescription } }
 }
@@ -110,4 +106,5 @@ struct ServerSafariView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> SFSafariViewController { SFSafariViewController(url: url) }
     func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) { }
 }
+
 
