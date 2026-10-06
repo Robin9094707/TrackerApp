@@ -4095,18 +4095,6 @@ def locate(payload):
     finally:
         stop_fcm_listener(receiver)
 
-def refresh_custom_google():
-    from NovaApi.ListDevices.nbe_list_devices import request_device_list
-    from ProtoDecoders.decoder import parse_device_list_protobuf
-    from SpotApi.UploadPrecomputedPublicKeyIds.upload_precomputed_public_key_ids import refresh_custom_trackers
-    payload=request_device_list()
-    if not payload:
-        raise RuntimeError("empty_device_response")
-    parsed=parse_device_list_protobuf(payload)
-    custom_count=sum(1 for device in parsed.deviceMetadata if str(device.information.deviceRegistration.fastPairModelId or "")=="003200")
-    refresh_custom_trackers(parsed)
-    return custom_count
-
 def refresh_fcm():
     from Auth.fcm_receiver import FcmReceiver
     receiver=FcmReceiver()
@@ -4163,16 +4151,6 @@ try:
     elif operation=="locate":
         located=locate(request)
         emit({"ok":True,**located})
-    elif operation=="register_custom_google":
-        quiet=io.StringIO()
-        with contextlib.redirect_stdout(quiet),contextlib.redirect_stderr(quiet):
-            registered=register_custom_google()
-        emit({"ok":True,**registered})
-    elif operation=="refresh_custom_google":
-        quiet=io.StringIO()
-        with contextlib.redirect_stdout(quiet),contextlib.redirect_stderr(quiet):
-            count=refresh_custom_google()
-        emit({"ok":True,"custom_count":count})
     elif operation=="refresh_fcm":
         quiet=io.StringIO()
         with contextlib.redirect_stdout(quiet),contextlib.redirect_stderr(quiet):
@@ -16789,17 +16767,6 @@ def mcp_tool_descriptor(name, title, description, schema, scopes=("trackers:read
         },
         "_meta": {"securitySchemes": schemes},
     }
-    if widget_accessible or widget:
-        descriptor["_meta"]["openai/widgetAccessible"] = True
-        descriptor["_meta"].setdefault("ui", {})["visibility"] = ["model", "app"]
-    if widget:
-        descriptor["_meta"]["ui"]["resourceUri"] = MCP_MAP_RESOURCE_URI
-        descriptor["_meta"].update({
-            # Retained for clients that still scan the pre-GA flat key.
-            "ui/resourceUri": MCP_MAP_RESOURCE_URI,
-            "openai/toolInvocation/invoking": "Tracker-Karte wird geladen …",
-            "openai/toolInvocation/invoked": "Tracker-Karte ist bereit",
-        })
     return descriptor
 
 
@@ -25990,8 +25957,8 @@ def storage_cleanup_candidates(category_bytes, policy):
         {"id": "address_cache", "label": "Adress-Cache leeren", "description": "Entfernt zwischengespeicherte Adressen. Sie werden bei Bedarf erneut aufgelöst.", "bytes": int(cache_plan["before_bytes"]), "items": int(cache_plan["entries"]), "auto_allowed": True, "kind": "Cache", "available": True, "blocked_reason": ""},
         {"id": "expired_access", "label": "Abgelaufene Zugriffe", "description": "Entfernt ausschließlich abgelaufene oder widerrufene Share- und OAuth-Datensätze. Aktive Freigaben und Tokens bleiben erhalten.", "bytes": 0, "items": expired_shares + expired_oauth, "auto_allowed": False, "kind": "Sicherheit", "available": True, "blocked_reason": ""},
         {"id": "legacy_leftovers", "label": "Verwaiste Update-Reste", "description": "Entfernt nur mindestens 30 Tage alte .corrupt-Dateien und redundante .bak-, .old-, .legacy- oder .disabled-Kopien, deren aktuelle Hauptdatei vorhanden ist.", "bytes": sum(row["bytes"] for row in legacy_rows), "items": len(legacy_rows), "auto_allowed": False, "kind": "Sicherheit", "available": True, "blocked_reason": ""},
-        {"id": "web_assets", "label": "Web-Flasher-Cache", "description": "Entfernt esptool-js; die Datei wird beim nächsten Flash erneut geladen.", "bytes": int(category_bytes.get("web_assets", 0)), "auto_allowed": False, "kind": "neu ladbar", "available": not bool(lab_busy), "blocked_reason": lab_busy},
-        {"id": "tracker_lab_toolchain", "label": "ESP-IDF-Toolchain", "description": "Entfernt die große ESP-IDF-Installation. Vor dem nächsten Firmware-Build muss sie erneut installiert werden.", "bytes": int(category_bytes.get("tracker_lab_toolchain", 0)), "auto_allowed": False, "kind": "Neuinstallation", "available": not bool(lab_busy), "blocked_reason": lab_busy},
+        {"id": "web_assets", "label": "Web-Flasher-Cache", "description": "Entfernt einen Cache aus der früheren Browser-Flasher-Version.", "bytes": int(category_bytes.get("web_assets", 0)), "auto_allowed": False, "kind": "neu ladbar", "available": not bool(lab_busy), "blocked_reason": lab_busy},
+        {"id": "tracker_lab_toolchain", "label": "ESP-IDF-Toolchain", "description": "Entfernt die große ESP-IDF-Installation. Firmware-Erstellung ist in der API Edition entfernt.", "bytes": int(category_bytes.get("tracker_lab_toolchain", 0)), "auto_allowed": False, "kind": "Neuinstallation", "available": not bool(lab_busy), "blocked_reason": lab_busy},
         {"id": "google_runtime", "label": "Google-Toolbundle", "description": "Entfernt nur erneut installierbare Google-Tools und deren Python-Umgebung; secrets.json und Tracker-Daten bleiben erhalten.", "bytes": int(category_bytes.get("google_runtime", 0)), "auto_allowed": False, "kind": "Neuinstallation", "available": not automatic_polling_enabled() and not google_busy, "blocked_reason": "Automatische Abrufe zuerst pausieren." if automatic_polling_enabled() else ("Google arbeitet gerade." if google_busy else "")},
     ]
     return rows
