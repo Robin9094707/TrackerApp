@@ -6,6 +6,10 @@ import UniformTypeIdentifiers
 struct HistorySegment: Identifiable {
     let id: Int
     let points: [HistoryPoint]
+    let coordinates: [CLLocationCoordinate2D]
+    init(id: Int, points: [HistoryPoint]) {
+        self.id = id; self.points = points; self.coordinates = points.map(\.coordinate)
+    }
 }
 
 struct HistoryDay: Identifiable {
@@ -20,19 +24,32 @@ struct PreparedHistory {
     var mapPoints: [HistoryPoint] = []
     var days: [HistoryDay] = []
     var indexByID: [String: Int] = [:]
+    var availableDays: [HistoryDay] = []
+    var medianAccuracy: Double?
+    var longestGap: TimeInterval = 0
+    var sourceCounts: [String: Int] = [:]
 }
 
 enum HistoryAnalysis {
     /// Expensive sorting and map preparation happen once per response/filter change.
-    static func prepare(_ input: [HistoryPoint], networks: Set<String>, calendar: Calendar = .current) -> PreparedHistory {
-        let points = filtered(input, networks: networks)
+    static func prepare(_ input: [HistoryPoint], networks: Set<String>, calendar: Calendar = .current, day: Date? = nil) -> PreparedHistory {
+        let allPoints = filtered(input, networks: networks)
+        let allGroups = Dictionary(grouping: allPoints) { calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval($0.timestamp))) }
+        let available = allGroups.keys.sorted(by: >).map { HistoryDay(date: $0, points: Array((allGroups[$0] ?? []).reversed())) }
+        let points = day.flatMap { allGroups[$0] } ?? allPoints
         let groups = Dictionary(grouping: points) { calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval($0.timestamp))) }
         let days = groups.keys.sorted(by: >).map { HistoryDay(date: $0, points: Array((groups[$0] ?? []).reversed())) }
         let mapSegments = sourceSegments(points).map { segment in
             HistorySegment(id: segment.id, points: simplified(segment.points))
         }
+        let accuracies = points.compactMap(\.accuracyM).filter { $0.isFinite && $0 > 0 }.sorted()
+        let middle = accuracies.count / 2
+        let median: Double? = accuracies.isEmpty ? nil : (accuracies.count.isMultiple(of: 2) ? (accuracies[middle - 1] + accuracies[middle]) / 2 : accuracies[middle])
+        let gap = zip(points, points.dropFirst()).map { TimeInterval($1.timestamp - $0.timestamp) }.max() ?? 0
+        let counts = Dictionary(grouping: points) { ($0.network ?? "unknown").rjNormalizedProvider }.mapValues(\.count)
         return PreparedHistory(points: points, mapSegments: mapSegments, mapPoints: sampled(points, limit: 80), days: days,
-                               indexByID: Dictionary(uniqueKeysWithValues: points.enumerated().map { ($0.element.id, $0.offset) }))
+                               indexByID: Dictionary(uniqueKeysWithValues: points.enumerated().map { ($0.element.id, $0.offset) }),
+                               availableDays: available, medianAccuracy: median, longestGap: gap, sourceCounts: counts)
     }
 
     /// Preserve real turns and endpoints; rendering never modifies stored reports or exports.
@@ -146,3 +163,4 @@ struct HistoryExportDocument: FileDocument {
     init(configuration: ReadConfiguration) throws { text = String(decoding: configuration.file.regularFileContents ?? Data(), as: UTF8.self) }
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: Data(text.utf8)) }
 }
+

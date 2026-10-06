@@ -10,8 +10,9 @@ struct RJTrackerApp: App {
         WindowGroup {
             RootView().environment(model)
                 .preferredColorScheme(appearance == "dark" ? .dark : appearance == "light" ? .light : nil)
-                .task { await model.start() }
+                .task { try? ImportStorage.prepare(); await model.start() }
         }
     }
 }
+
 

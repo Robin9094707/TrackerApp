@@ -1,3 +1,13 @@
+# iOS 4.1.0 · Import & Standortverlauf
+
+- JSON-Picker durch nativen iOS-Dokumentenpicker im Kopiermodus ersetzt; Dateitypen werden breit akzeptiert und danach inhaltlich geprüft.
+- Apple-Tracker und Google-Secrets auch aus eingefügtem JSON importieren oder als lokale JSON-Datei speichern.
+- Sichtbarer App-Ordner RJ Tracker/Imports mit Dateien-/Finder-Dateifreigabe, eigener Dateiliste und koordinierter Dateilesefunktion für Cloud-Anbieter.
+- Standortverlauf: Tageskarten mit Meldungszahlen, große Karte, Quellen-/Genauigkeitskennzahlen, getrennte Meldungs-/Übersichts-/Aufenthaltsansichten und lokale Zeitleistensuche.
+- Tagesfilter wirken auf Karte, Wiedergabe und Export; Quellen und beobachtete Genauigkeit sind eindeutig beschriftet.
+- Routencoordinaten und Kennzahlen werden einmal vorbereitet; Suche läuft außerhalb des Hauptthreads. Kein Neuzentrieren bei jedem Slider-Ereignis.
+- Version 4.1.0 / Build 11. Bestehende Backend-APIs und Daten bleiben kompatibel.
+
 # iOS 4.0.0 · API Edition
 
 - Native Einrichtung von Apple Account mit 2FA, Apple-JSON-Import und Google-Secrets-Import.

@@ -98,47 +98,134 @@ struct TrackerImportView: View {
     let provider: String
     @Environment(AppModel.self) private var model
     @State private var name = ""
-    @State private var content: Any?
-    @State private var filename = ""
+    @State private var file: JSONImportFile?
+    @State private var text = ""
+    @State private var localName = ""
+    @State private var source = 0
+    @State private var localFiles: [LocalImportFile] = []
     @State private var choose = false
     @State private var busy = false
+    @State private var reading = false
     @State private var replace = false
     @State private var confirm = false
     @State private var message = ""
+    @State private var failed = false
+
+    private var unavailable: Bool { busy || reading }
     var body: some View {
         Form {
-            Section(provider == "apple" ? "Apple-Tracker" : "Google-Zugang") {
-                if provider == "apple" { TextField("Eindeutiger Trackername", text: $name).autocorrectionDisabled(); Toggle("Vorhandenen Tracker ausdrücklich ersetzen", isOn: $replace) }
-                Button { choose = true } label: { Label(filename.isEmpty ? "JSON-Datei auswählen" : filename, systemImage: "doc.badge.plus") }
-                Text(provider == "apple" ? "Kompatible FindMy-Accessory-JSON mit Tracker-Schlüsseln. Daten und Historie anderer Tracker bleiben erhalten." : "Wähle die secrets.json aus GoogleFindMyTools. Sie bleibt privat auf deinem Server.").font(.caption).foregroundStyle(.secondary)
-                Button("Sicher importieren") { confirm = true }.disabled(content == nil || busy || (provider == "apple" && name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+            Section {
+                Label(provider == "apple" ? "Apple-Tracker hinzufügen" : "Google-Zugang einrichten", systemImage: "doc.badge.plus").font(.headline)
+                Text(provider == "apple" ? "Kompatible FindMy-Accessory-JSON mit Tracker-Schlüsseln importieren." : "Die secrets.json aus GoogleFindMyTools importieren.").font(.subheadline).foregroundStyle(.secondary)
+                Picker("Importquelle", selection: $source) {
+                    Text("Datei").tag(0); Text("Text einfügen").tag(1); Text("App-Ordner").tag(2)
+                }.pickerStyle(.segmented)
             }
-            if busy { ProgressView("Import läuft …") }
-            if !message.isEmpty { Text(message).textSelection(.enabled) }
+            if source == 0 {
+                Section("Dateien & iCloud Drive") {
+                    Button { choose = true } label: { Label("Datei auswählen", systemImage: "folder") }.disabled(unavailable)
+                    Text("Auch Dateien ohne erkannte JSON-Endung sind auswählbar. Der Inhalt wird nach dem Öffnen geprüft.").font(.caption).foregroundStyle(.secondary)
+                }
+            } else if source == 1 {
+                Section("JSON-Inhalt") {
+                    TextEditor(text: $text).font(.system(.caption, design: .monospaced)).frame(minHeight: 190)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
+                        .accessibilityLabel("JSON-Inhalt einfügen")
+                        .disabled(unavailable)
+                    PasteButton(payloadType: String.self) { values in
+                        if let value = values.first { text = value }
+                    }.disabled(unavailable)
+                    TextField("Dateiname, z. B. secrets.json", text: $localName).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Button("Inhalt prüfen & übernehmen") { acceptText(save: false) }.disabled(text.isEmpty || unavailable)
+                    Button("Als JSON im App-Ordner speichern") { acceptText(save: true) }.disabled(text.isEmpty || unavailable)
+                    Text("Speichern erstellt eine lokale JSON-Datei. Erst „Importieren“ sendet sie an deinen Server.").font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                Section("Auf meinem iPhone → RJ Tracker → Imports") {
+                    Text("In der Dateien-App Dateien in RJ Tracker oder dessen Ordner Imports kopieren. Am Computer ist der App-Ordner auch über die Dateifreigabe erreichbar.").font(.subheadline).foregroundStyle(.secondary)
+                    Button("Ordner neu einlesen", systemImage: "arrow.clockwise") { refreshFiles() }.disabled(unavailable)
+                    if localFiles.isEmpty {
+                        Label("Noch keine JSON-Dateien im App-Ordner", systemImage: "tray").foregroundStyle(.secondary)
+                    }
+                    ForEach(localFiles) { local in
+                        Button { Task { await read(local.url) } } label: {
+                            HStack {
+                                Image(systemName: "doc.text").foregroundStyle(.blue)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(local.url.lastPathComponent).foregroundStyle(.primary).lineLimit(2)
+                                    Text("\(ByteCountFormatter.string(fromByteCount: Int64(local.size), countStyle: .file)) · \(local.modified.formatted(date: .abbreviated, time: .shortened))")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }.disabled(unavailable)
+                    }
+                    Text("Schlüsseldateien sind vertraulich. Du kannst die lokale Kopie nach dem Import in der Dateien-App löschen.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if let file {
+                Section("Bereit zum Import") {
+                    Label(file.name, systemImage: "checkmark.seal.fill").foregroundStyle(.green).lineLimit(2)
+                    Text("Gültiges JSON · \(ByteCountFormatter.string(fromByteCount: Int64(file.data.count), countStyle: .file))").font(.caption).foregroundStyle(.secondary)
+                    if provider == "apple" {
+                        TextField("Eindeutiger Trackername", text: $name).autocorrectionDisabled()
+                        Toggle("Vorhandenen Tracker ausdrücklich ersetzen", isOn: $replace)
+                    }
+                    Button("Auf Server importieren", systemImage: "square.and.arrow.up") { confirm = true }
+                        .disabled(unavailable || (provider == "apple" && name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                }
+            }
+            if unavailable { ProgressView(reading ? "Datei wird geöffnet …" : "Import läuft …") }
+            if !message.isEmpty {
+                Section {
+                    Label(message, systemImage: failed ? "exclamationmark.circle" : "info.circle")
+                        .foregroundStyle(failed ? Color.orange : Color.secondary).textSelection(.enabled)
+                }
+            }
         }.rjListChrome().navigationTitle("JSON importieren").navigationBarTitleDisplayMode(.inline)
-        .fileImporter(isPresented: $choose, allowedContentTypes: [.json, .plainText], allowsMultipleSelection: false) { result in
-            do {
-                guard let url = try result.get().first else { return }
-                let access = url.startAccessingSecurityScopedResource(); defer { if access { url.stopAccessingSecurityScopedResource() } }
-                let values = try url.resourceValues(forKeys: [.fileSizeKey])
-                guard (values.fileSize ?? 0) <= 1_048_576 else { throw APIError.message("Maximal 1 MB pro JSON-Datei.") }
-                let data = try Data(contentsOf: url)
-                let parsed = try JSONSerialization.jsonObject(with: data)
-                guard parsed is [String: Any] || parsed is [Any] else { throw APIError.message("Die Datei enthält kein JSON-Objekt.") }
-                content = parsed; filename = url.lastPathComponent
-                if name.isEmpty { name = url.deletingPathExtension().lastPathComponent }
-                message = "Datei bereit. Zum Import bestätigen."
-            } catch { content = nil; message = error.localizedDescription }
+        .task { localName = provider == "google" ? "secrets.json" : "Tracker.json"; refreshFiles() }
+        .onChange(of: source) { _, _ in refreshFiles() }
+        .onChange(of: text) { _, _ in file = nil }
+        .sheet(isPresented: $choose) {
+            JSONDocumentPicker(onPick: { url in choose = false; Task { await read(url) } }, onCancel: { choose = false })
         }
-        .confirmationDialog(replace ? "Vorhandene Tracker-Schlüssel ersetzen?" : "Datei auf deinen Server importieren?", isPresented: $confirm, titleVisibility: .visible) { Button("Importieren", role: replace ? .destructive : nil) { Task { await upload() } } }
+        .confirmationDialog(replace ? "Vorhandene Tracker-Schlüssel ersetzen?" : "Datei auf deinen Server importieren?", isPresented: $confirm, titleVisibility: .visible) {
+            Button("Importieren", role: replace ? .destructive : nil) { Task { await upload() } }
+        }
+    }
+    private func refreshFiles() {
+        do { localFiles = try ImportStorage.files() }
+        catch { message = error.localizedDescription; failed = true }
+    }
+    private func accept(_ accepted: JSONImportFile) {
+        file = accepted; failed = false; message = "JSON bereit. Zum Import bestätigen."
+        if name.isEmpty { name = (accepted.name as NSString).deletingPathExtension }
+    }
+    private func acceptText(save: Bool) {
+        file = nil
+        do {
+            let accepted = JSONImportFile(name: localName.isEmpty ? "Import.json" : localName, data: Data(text.utf8))
+            _ = try accepted.object()
+            if save {
+                let url = try ImportStorage.save(accepted)
+                accept(JSONImportFile(name: url.lastPathComponent, data: accepted.data))
+                message = "\(url.lastPathComponent) in RJ Tracker/Imports gespeichert. Bereit zum Import."
+                refreshFiles()
+            } else { accept(accepted) }
+        } catch { message = error.localizedDescription; failed = true }
+    }
+    @MainActor private func read(_ url: URL) async {
+        reading = true; file = nil; failed = false; defer { reading = false }
+        do { let accepted = try await Task.detached(priority: .userInitiated) { try ImportStorage.read(url) }.value; accept(accepted) }
+        catch { message = error.localizedDescription; failed = true }
     }
     private func upload() async {
-        guard let content else { return }; busy = true; defer { busy = false }
+        guard let file else { return }; busy = true; defer { busy = false }
         do {
+            let content = try file.object()
             let r = try await APIClient.shared.requestJSON(path: "/api/v3/import", method: "POST", json: ["provider": provider, "name": name, "content": content, "replace": replace])
-            self.content = nil; filename = ""; message = r["message"].text
+            self.file = nil; text = ""; message = r["message"].stringValue ?? "Import abgeschlossen."; failed = false
             Haptics.success(); await model.refresh()
-        } catch { message = error.localizedDescription }
+        } catch { message = error.localizedDescription; failed = true }
     }
 }
 
