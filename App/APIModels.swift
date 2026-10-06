@@ -315,13 +315,35 @@ struct HistoryPoint: Codable, Identifiable, Hashable {
     var observedAtLocal: String?
     var network: String?
     var address: AddressInfo?
-    var id: String { "\(timestamp)-\(latitude)-\(longitude)-\(network ?? "unknown")" }
+    var reportID: String?
+    var batchID: String?
+    var receivedAt: Double?
+    var id: String { reportID.map { "\(network ?? "unknown"):\($0)" } ?? "\(timestamp)-\(latitude)-\(longitude)-\(accuracyM ?? 0)-\(network ?? "unknown")" }
     var coordinate: CLLocationCoordinate2D { .init(latitude: latitude, longitude: longitude) }
 
     enum CodingKeys: String, CodingKey {
         case latitude, longitude, timestamp, network, address
         case accuracyM = "accuracy_m"
         case observedAtLocal = "observed_at_local"
+        case reportID = "report_id"
+        case batchID = "batch_id"
+        case receivedAt = "received_at"
+    }
+}
+
+struct HistoryStreamResponse: Codable {
+    var status: String
+    var points: [HistoryPoint]
+    var nextCursor: String?
+    var hasMore: Bool
+    var matchingTotal: Int
+    var serverTime: Double
+    enum CodingKeys: String, CodingKey {
+        case status, points
+        case nextCursor = "next_cursor"
+        case hasMore = "has_more"
+        case matchingTotal = "matching_total"
+        case serverTime = "server_time"
     }
 }
 
@@ -437,4 +459,5 @@ indirect enum JSONValue: Codable, Hashable {
         return string
     }
 }
+
 

@@ -93,6 +93,13 @@ final class APIClient {
         return response
     }
 
+    func historyStream(tracker: String, days: Int, cursor: String?, replay: Bool) async throws -> HistoryStreamResponse {
+        var query = [URLQueryItem(name: "ref", value: tracker), .init(name: "days", value: String(days)),
+                     .init(name: "limit", value: "3000"), .init(name: "replay", value: replay ? "1" : "0")]
+        if let cursor { query.append(.init(name: "cursor", value: cursor)) }
+        return try await request(path: "/api/mobile/v1/history/stream", query: query)
+    }
+
     func downloadBackup(name: String) async throws -> URL {
         guard name == URL(fileURLWithPath: name).lastPathComponent, name.hasSuffix(".zip") else { throw APIError.message("Ungültiger Backup-Dateiname.") }
         let data = try await raw(path: "/api/v2/backups/\(name)", method: "GET", json: nil, query: [])

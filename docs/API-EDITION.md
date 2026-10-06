@@ -105,3 +105,14 @@ Das neue Passwort wird verdeckt abgefragt, Mindestlänge zehn Zeichen. Bestehend
 ## Validierung und Grenzen
 
 Syntax, Backend-Start, Login, Bootstrap, API-Katalog, Providerstatus und begrenzte Key-Rechte werden kurz geprüft. Der iOS-Workflow baut die Release-IPA ohne umfangreiche Testläufe. Echte Apple-/Google-/Samsung-Logins und Ortungen brauchen deine vorhandenen Zugangsdaten und werden nicht durch einen erfolgreichen Build bewiesen. APNs benötigt weiterhin Apple-Push-Key und gültige Signierung. Die erzeugte IPA ist unsigniert.
+
+
+## Backend 20.1 / iOS 4.2: vollständige Report-Historie
+
+Direkt die Python-Datei ersetzen und denselben `data/`-Ordner weiterverwenden. Keine separate Migration nötig. Report-ID, Batch-ID und Empfangszeit ergänzen bestehende Punktfelder. Bereits gespeicherte Historien bleiben lesbar; früher verworfene Reports können nur wieder aufgenommen werden, wenn der Provider sie erneut liefert.
+
+`GET /api/mobile/v1/history/stream?ref=apple:Tracker&days=7&limit=3000` liefert gespeicherte Originalreports, `matching_total`, `has_more` und `next_cursor`. Solange `has_more` wahr ist, denselben Abruf mit `cursor=<next_cursor>` wiederholen. Danach alle fünf Sekunden mit letztem Cursor und `replay=1` lesen; das kurze Überlappungsfenster schützt gleichzeitig veröffentlichte Batches. Clients deduplizieren über **network + report_id**, nicht über Koordinaten/Zeitstempel. Die Cursor sind an Referenz und Zeitraum gebunden und enthalten keine Schlüssel. Der Endpunkt verlangt den bestehenden Login bzw. einen API-Schlüssel mit read-Scope und löst selbst keine Provider-Abfrage aus.
+
+`received_at` bezeichnet die lokale erstmalige Speicherung; `timestamp` bleibt der ursprüngliche Beobachtungszeitpunkt. Der Stream sortiert nach Empfangsreihenfolge, damit nachgelieferte ältere Messungen ankommen. Darstellung und Export können anschließend nach `timestamp` sortieren. Fusionen liefern in diesem Endpunkt die unveränderten Reports ihrer verbundenen Quellen, unabhängig von der optimierten Fusion-Anzeige.
+
+`POST /api/polling/settings` mit `{"apple":{"interval_min":20,"interval_max":20}}` setzt die Apple-Abrufkadenz. Alte Standardfenster 20–30 Sekunden werden als 20 Sekunden behandelt; andere individuelle Einstellungen bleiben bestehen. Explizite Verlaufspausen, globale Pause und Fehler-Backoff werden beachtet. `apple_batch_reports_default` steuert die automatische Aufzeichnung unkonfigurierter Apple-Tracker. Bestehende Aufbewahrungsfristen bleiben verbindlich.

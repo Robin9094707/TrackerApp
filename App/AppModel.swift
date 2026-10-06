@@ -279,9 +279,9 @@ final class AppModel {
         var cycle = 0
         while !Task.isCancelled {
             guard connectionState == .connected else { return }
-            if cycle % 4 == 0 { await refresh() } else { await refreshTrackers() }
+            if cycle % 6 == 0 { await refresh() } else { await refreshTrackers() }
             cycle += 1
-            do { try await Task.sleep(for: .seconds(30)) }
+            do { try await Task.sleep(for: .seconds(20)) }
             catch { return }
         }
     }
@@ -324,3 +324,4 @@ final class AppModel {
         connectionState = .disconnected
     }
 }
+

@@ -19,6 +19,8 @@ struct HistoryDay: Identifiable {
 }
 
 struct PreparedHistory {
+    var revision = UUID()
+    var displayPoints: [HistoryPoint] = []
     var points: [HistoryPoint] = []
     var mapSegments: [HistorySegment] = []
     var mapPoints: [HistoryPoint] = []
@@ -32,24 +34,47 @@ struct PreparedHistory {
 
 enum HistoryAnalysis {
     /// Expensive sorting and map preparation happen once per response/filter change.
-    static func prepare(_ input: [HistoryPoint], networks: Set<String>, calendar: Calendar = .current, day: Date? = nil) -> PreparedHistory {
+    static func prepare(_ input: [HistoryPoint], networks: Set<String>, calendar: Calendar = .current, day: Date? = nil, detailed: Bool = false) -> PreparedHistory {
         let allPoints = filtered(input, networks: networks)
         let allGroups = Dictionary(grouping: allPoints) { calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval($0.timestamp))) }
         let available = allGroups.keys.sorted(by: >).map { HistoryDay(date: $0, points: Array((allGroups[$0] ?? []).reversed())) }
         let points = day.flatMap { allGroups[$0] } ?? allPoints
-        let groups = Dictionary(grouping: points) { calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval($0.timestamp))) }
+        let display = detailed ? points : compactReports(points)
+        let groups = Dictionary(grouping: display) { calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval($0.timestamp))) }
         let days = groups.keys.sorted(by: >).map { HistoryDay(date: $0, points: Array((groups[$0] ?? []).reversed())) }
         let mapSegments = sourceSegments(points).map { segment in
-            HistorySegment(id: segment.id, points: simplified(segment.points))
+            HistorySegment(id: segment.id, points: detailed ? segment.points : simplified(segment.points))
         }
         let accuracies = points.compactMap(\.accuracyM).filter { $0.isFinite && $0 > 0 }.sorted()
         let middle = accuracies.count / 2
         let median: Double? = accuracies.isEmpty ? nil : (accuracies.count.isMultiple(of: 2) ? (accuracies[middle - 1] + accuracies[middle]) / 2 : accuracies[middle])
         let gap = zip(points, points.dropFirst()).map { TimeInterval($1.timestamp - $0.timestamp) }.max() ?? 0
         let counts = Dictionary(grouping: points) { ($0.network ?? "unknown").rjNormalizedProvider }.mapValues(\.count)
-        return PreparedHistory(points: points, mapSegments: mapSegments, mapPoints: sampled(points, limit: 80), days: days,
-                               indexByID: Dictionary(uniqueKeysWithValues: points.enumerated().map { ($0.element.id, $0.offset) }),
+        return PreparedHistory(displayPoints: display, points: points, mapSegments: mapSegments, mapPoints: display, days: days,
+                               indexByID: Dictionary(uniqueKeysWithValues: display.enumerated().map { ($0.element.id, $0.offset) }),
                                availableDays: available, medianAccuracy: median, longestGap: gap, sourceCounts: counts)
+    }
+
+    /// Display-only grouping: storage, report identity and exports remain untouched.
+    static func compactReports(_ points: [HistoryPoint]) -> [HistoryPoint] {
+        var retained: [HistoryPoint] = []
+        for segment in sourceSegments(points) {
+            guard let first = segment.points.first else { continue }
+            retained.append(first)
+            var anchor = first
+            for point in segment.points.dropFirst() {
+                let distance = CLLocation(latitude: anchor.latitude, longitude: anchor.longitude)
+                    .distance(from: CLLocation(latitude: point.latitude, longitude: point.longitude))
+                if distance >= 50 || point.timestamp - anchor.timestamp >= 300 {
+                    retained.append(point); anchor = point
+                }
+            }
+            if let last = segment.points.last, last.id != anchor.id,
+               last.timestamp != anchor.timestamp || last.latitude != anchor.latitude || last.longitude != anchor.longitude {
+                retained.append(last)
+            }
+        }
+        return retained.sorted { $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp < $1.timestamp }
     }
 
     /// Preserve real turns and endpoints; rendering never modifies stored reports or exports.
@@ -114,7 +139,7 @@ enum HistoryAnalysis {
                 let seconds = point.timestamp - last.timestamp
                 let distance = CLLocation(latitude: last.latitude, longitude: last.longitude)
                     .distance(from: CLLocation(latitude: point.latitude, longitude: point.longitude))
-                if seconds > 1800 || seconds <= 0 || distance / Double(max(seconds, 1)) > 90 {
+                if seconds > 1800 || seconds < 0 || distance / Double(max(seconds, 1)) > 90 {
                     groups.append([point])
                 } else { groups[groups.count - 1].append(point) }
             } else { groups.append([point]) }
@@ -136,9 +161,9 @@ enum HistoryAnalysis {
         }
         let formatter = ISO8601DateFormatter()
         let rows = points.map { point in
-            [formatter.string(from: Date(timeIntervalSince1970: TimeInterval(point.timestamp))), String(point.latitude), String(point.longitude), point.accuracyM.map(String.init(describing:)) ?? "", point.network ?? "", point.address?.bestText ?? ""].enumerated().map { cell($0.element, protectFormula: $0.offset >= 4) }.joined(separator: ",")
+            [formatter.string(from: Date(timeIntervalSince1970: TimeInterval(point.timestamp))), String(point.latitude), String(point.longitude), point.accuracyM.map(String.init(describing:)) ?? "", point.network ?? "", point.address?.bestText ?? "", point.reportID ?? "", point.batchID ?? "", point.receivedAt.flatMap { $0 > 0 ? formatter.string(from: Date(timeIntervalSince1970: $0)) : nil } ?? ""].enumerated().map { cell($0.element, protectFormula: $0.offset >= 4) }.joined(separator: ",")
         }
-        return (["time_utc,latitude,longitude,accuracy_m,network,address"] + rows).joined(separator: "\r\n")
+        return (["time_utc,latitude,longitude,accuracy_m,network,address,report_id,batch_id,received_at_utc"] + rows).joined(separator: "\r\n")
     }
 
     static func gpx(_ points: [HistoryPoint]) -> String {

@@ -24,7 +24,7 @@ struct TrackerHomeView: View {
             if sizeClass == .regular {
                 inspector
                     .frame(width: 380)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28))
+                    .background(Color(uiColor: .systemGroupedBackground), in: RoundedRectangle(cornerRadius: 28))
                     .clipShape(RoundedRectangle(cornerRadius: 28))
                     .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
                     .padding(16)
@@ -35,6 +35,7 @@ struct TrackerHomeView: View {
                 .presentationDetents([.height(190), .medium, .large], selection: $detent)
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
+                .presentationBackground(Color(uiColor: .systemGroupedBackground))
                 .presentationBackgroundInteraction(.enabled(upThrough: .large))
                 .interactiveDismissDisabled()
         }
@@ -163,6 +164,9 @@ struct TrackerHomeView: View {
             NavigationStack { MoreView() }
                 .tabItem { Label("Ich", systemImage: "person.crop.circle") }.tag(3)
         }
+        .background(Color(uiColor: .systemGroupedBackground))
+        .toolbarBackground(Color(uiColor: .systemGroupedBackground), for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
         .environment(\.rjExpandInspector, { detent = .large })
         .onChange(of: tab) { _, value in
             if value != 0 { detent = .large }
@@ -248,6 +252,7 @@ struct TrackerLibraryView: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        .background(RJGlassBackdrop())
         .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: model.filteredTrackers.map(\.ref))
         .navigationTitle("Objekte")
         .navigationBarTitleDisplayMode(.inline)

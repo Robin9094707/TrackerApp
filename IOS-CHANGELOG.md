@@ -1,3 +1,14 @@
+# iOS 4.2.0 · Vollständige Reports & Live-Verlauf
+
+- Deckender Tracker-Panelhintergrund bei jeder Höhe und auf iPad; die Tracker-Liste bleibt beim Verkleinern klar.
+- Eindeutige Report-IDs erhalten mehrere Meldungen mit identischer Position und identischer Sekunde.
+- Standardansicht Übersichtlich und Einzelansicht Jeder Report; Gruppierung betrifft ausschließlich die Darstellung.
+- Automatisch paginierter Live-Verlauf mit fünf Sekunden Abgleich, Empfangscursor für nachträglich eintreffende ältere Reports und Originalreports im Export.
+- Native MKMapView mit Marker-Clustering statt tausenden einzelnen SwiftUI-Marker-Views; nur geänderte Marker werden ergänzt/entfernt.
+- Aufenthaltsorte zeigen Dauer, Reportzahl und Genauigkeit, reagieren auf Tages-/Quellenauswahl und lassen sich auf der Karte öffnen.
+- Apple-Abruf auf 20 Sekunden direkt unter Automatische Ortung einstellen. Provider-Neumeldungen bleiben vom Netz abhängig.
+- Backend 20.1.0, App 4.2.0 / Build 12. Direktes Update mit bestehendem data-Ordner, ohne zusätzliche Migrationsdatei.
+
 # iOS 4.1.0 · Import & Standortverlauf
 
 - JSON-Picker durch nativen iOS-Dokumentenpicker im Kopiermodus ersetzt; Dateitypen werden breit akzeptiert und danach inhaltlich geprüft.

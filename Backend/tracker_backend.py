@@ -1,4 +1,4 @@
-# Universal Tag Studio 19.0.0 · NATIVE iOS API + APNs BRIDGE + MOBILE PAIRING
+# Universal Tag Studio 20.1.0 · COMPLETE BATCH REPORTS + LIVE HISTORY API
 # Backward-compatible single-file upgrade. Existing data/ directory layout,
 # tracker IDs, histories, shares and provider sessions are intentionally
 # preserved. Google integration: leonboe1/GoogleFindMyTools (GPL-3.0).
@@ -255,7 +255,7 @@ SHARED_HISTORY_LIMIT = int(os.environ.get("ULTRA_TRACKER_SHARED_HISTORY_MAX_POIN
 SEVEN_HISTORY_LIMIT = int(os.environ.get("ULTRA_TRACKER_HISTORY_MAX_POINTS", "60000"))
 SESSION_HISTORY_LIMIT = int(os.environ.get("ULTRA_TRACKER_SESSION_MAX_POINTS", "120000"))
 APPLE_DEFAULT_INTERVAL_MIN = max(15, int(os.environ.get("ULTRA_TRACKER_APPLE_INTERVAL_MIN", "20")))
-APPLE_DEFAULT_INTERVAL_MAX = max(APPLE_DEFAULT_INTERVAL_MIN, int(os.environ.get("ULTRA_TRACKER_APPLE_INTERVAL_MAX", "30")))
+APPLE_DEFAULT_INTERVAL_MAX = max(APPLE_DEFAULT_INTERVAL_MIN, int(os.environ.get("ULTRA_TRACKER_APPLE_INTERVAL_MAX", "20")))
 # Kept as a compatibility field for older clients. The real Apple cadence is
 # now per tracker and comes from settings.polling.apple.
 HISTORY_POLL_INTERVAL_SECONDS = max(15, int(os.environ.get("ULTRA_TRACKER_HISTORY_POLL_SECONDS", "25")))
@@ -416,6 +416,7 @@ def default_polling_settings():
         "google": {"interval_min": GOOGLE_DEFAULT_INTERVAL_MIN, "interval_max": GOOGLE_DEFAULT_INTERVAL_MAX},
         "samsung": {"interval_min": SAMSUNG_DEFAULT_INTERVAL_MIN, "interval_max": SAMSUNG_DEFAULT_INTERVAL_MAX},
         "demand_driven": True,
+        "apple_batch_reports_default": True,
         "updated_ts": 0,
     }
 
@@ -425,6 +426,7 @@ def normalize_polling_settings(raw):
     defaults = default_polling_settings()
     result = {
         "demand_driven": bool(raw.get("demand_driven", True)),
+        "apple_batch_reports_default": str(raw.get("apple_batch_reports_default", True)).lower() not in {"false", "0", "off", "no"},
         "updated_ts": max(0, int(raw.get("updated_ts", 0) or 0)),
     }
     bounds = {"apple": (15, 300), "google": (30, 900), "samsung": (20, 600)}
@@ -439,6 +441,9 @@ def normalize_polling_settings(raw):
             maximum = max(minimum, min(upper, int(source.get("interval_max", fallback["interval_max"]) or fallback["interval_max"])))
         except (TypeError, ValueError):
             maximum = max(minimum, fallback["interval_max"])
+        # The old default window becomes a fixed twenty-second cadence.
+        if provider == "apple" and (minimum, maximum) == (20, 30):
+            maximum = 20
         result[provider] = {"interval_min": minimum, "interval_max": maximum}
     return result
 
@@ -1428,7 +1433,13 @@ def normalize_point(p):
         lon = float(p.get("lon"))
         ts = float(p.get("ts"))
         acc = float(p.get("acc", 0) or 0)
+        if not all(math.isfinite(value) for value in (lat, lon, ts, acc)) or not (-90 <= lat <= 90 and -180 <= lon <= 180) or ts <= 0:
+            return None
         point = {"lat": lat, "lon": lon, "acc": acc, "ts": ts}
+        if p.get("received_at") is not None:
+            received_at = float(p["received_at"])
+            if math.isfinite(received_at) and received_at >= 0:
+                point["received_at"] = received_at
         if p.get("confidence") is not None:
             point["confidence"] = int(p.get("confidence"))
         if p.get("status") is not None:
@@ -1582,6 +1593,11 @@ def history_direct_policy(provider, tracker_id, include_legacy=True):
         normalized = normalize_history_policy_row(raw, history_legacy_enabled(provider, tracker_id))
     else:
         normalized = normalize_history_policy_row({}, history_legacy_enabled(provider, tracker_id) if include_legacy else False)
+    # New/default Apple trackers collect all reports. An explicit pause from
+    # set_history_policy remains authoritative; no stored data is rewritten.
+    if str(provider) == "apple" and include_legacy and (not isinstance(raw, dict) or raw.get("migrated_from")):
+        if normalize_polling_settings(state.get("settings", {}).get("polling", {})).get("apple_batch_reports_default", True):
+            normalized["enabled"] = True
     retention = normalize_history_retention(normalized.get("mode"), normalized.get("days"), 7)
     return {
         "tracker_ref": ref,
@@ -1702,7 +1718,8 @@ def fusion_history_storage_policy(apple_name):
 
 
 def history_policy_max_points(provider, policy):
-    if policy.get("mode") == "forever" or policy.get("retention_seconds") is None:
+    if str(provider) == "apple" or policy.get("mode") == "forever" or policy.get("retention_seconds") is None:
+        # Keep every unique Apple report within the selected retention window.
         return None
     base = {"apple": SEVEN_HISTORY_LIMIT, "google": GOOGLE_HISTORY_LIMIT, "samsung": SAMSUNG_HISTORY_LIMIT}.get(str(provider), SEVEN_HISTORY_LIMIT)
     interval = {"apple": APPLE_DEFAULT_INTERVAL_MIN, "google": GOOGLE_DEFAULT_INTERVAL_MIN, "samsung": SAMSUNG_DEFAULT_INTERVAL_MIN}.get(str(provider), 30)
@@ -7330,6 +7347,8 @@ def geocoder_search_places(query, limit=5, country_codes=None):
 def update_location_cache(name, loc):
     ts = extract_ts(loc.timestamp)
     prev = state["locations"].get(name)
+    if prev and extract_ts(prev.timestamp) > ts:
+        return extract_ts(prev.timestamp)
     since = ts
     if prev:
         dist = haversine_distance(prev.latitude, prev.longitude, loc.latitude, loc.longitude)
@@ -7362,7 +7381,7 @@ def report_to_point(report):
             point["report_id"] = hashlib.sha256(payload_bytes).hexdigest()[:24]
         else:
             point["report_id"] = point_identity(point)
-        return point
+        return normalize_point(point)
     except Exception as exc:
         logger.debug("Report konnte nicht als Punkt gelesen werden: %s", exc)
         return None
@@ -7372,26 +7391,35 @@ def merge_unique_report_points(existing_points, report_points, retention_seconds
     existing = prune_points(existing_points, retention_seconds, max_points)
     existing_ids = {point_identity(p) for p in existing}
     added = 0
-    for point in sorted((p for p in report_points if p), key=lambda p: p["ts"]):
+    received_at = time.time()
+    cutoff = received_at - float(retention_seconds) if retention_seconds is not None else None
+    for raw in report_points:
+        point = normalize_point(raw) if isinstance(raw, dict) else None
+        if not point or (cutoff is not None and point["ts"] < cutoff):
+            continue
         pid = point_identity(point)
-        within_retention = retention_seconds is None or point["ts"] >= time.time() - float(retention_seconds)
-        if pid not in existing_ids and within_retention:
-            existing.append(point)
+        if pid not in existing_ids:
+            existing.append({**point, "received_at": received_at})
             existing_ids.add(pid)
             added += 1
-    return prune_points(existing, retention_seconds, max_points), added
+    existing.sort(key=lambda point: point["ts"])
+    if max_points is not None and int(max_points) > 0:
+        existing = existing[-int(max_points):]
+    return existing, added
 
 
-def add_persistent_history_points(name, report_points):
+def add_persistent_history_points(name, report_points, persist=True):
     capture_policy = history_capture_policy("apple", name)
     if not capture_policy.get("capture_enabled") and not fusion_profile_optimization_enabled(name):
         return 0
-    store = state["seven_day_history"].setdefault(name, {"points": []})
-    storage_policy = history_storage_policy("apple", name)
-    store["points"], added = merge_unique_report_points(
-        store.get("points", []), report_points, storage_policy.get("retention_seconds"), history_policy_max_points("apple", storage_policy)
-    )
-    save_json(SEVEN_HISTORY_FILE, "seven_day_history")
+    with state_lock:
+        store = state["seven_day_history"].setdefault(name, {"points": []})
+        storage_policy = history_storage_policy("apple", name)
+        store["points"], added = merge_unique_report_points(
+            store.get("points", []), report_points, storage_policy.get("retention_seconds"), history_policy_max_points("apple", storage_policy)
+        )
+        if persist and added:
+            save_json(SEVEN_HISTORY_FILE, "seven_day_history")
     return added
 
 
@@ -11232,20 +11260,9 @@ def build_recovery_pdf(name):
     return buffer
 
 def needs_full_report_history(name):
-    has_active_link = any(link.get("active") and link.get("device") == name for link in state["shared_links"].values())
-    has_active_test = (
-        any(test.get("status") == "active" and test.get("apple_name") == name for test in state.get("google_tests", {}).values())
-        or any(test.get("status") == "active" and test.get("apple_name") == name for test in state.get("fusion_tests", {}).values())
-        or any(test.get("status") == "running" and f"apple:{name}" in [str(target.get("ref") or "") for target in test.get("targets", []) if isinstance(target, dict)] for test in state.get("comparison_tests", {}).values() if isinstance(test, dict))
-    )
-    return bool(
-        state["seven_day_enabled"].get(name)
-        or recovery_mode_active(name)
-        or fusion_profile_optimization_enabled(name)
-        or name in state["recordings"]
-        or has_active_test
-        or (has_active_link and share_capture_required(name))
-    )
+    # Always request batches; pausing capture affects storage/scheduling, not
+    # how many valid reports a manual provider response can contain.
+    return name in state.get("accessories", {})
 
 
 def process_report_results(named_accessories, results, mode):
@@ -11262,14 +11279,16 @@ def process_report_results(named_accessories, results, mode):
             continue
         reports = list(raw) if isinstance(raw, (list, tuple, set)) else [raw]
         reports = [report for report in reports if report is not None]
-        reports.sort(key=lambda report: extract_ts(report.timestamp))
-        report_points = [point for point in (report_to_point(report) for report in reports) if point]
-        if not reports or not report_points:
+        valid = [(report, report_to_point(report)) for report in reports]
+        valid = sorted(((report, point) for report, point in valid if point), key=lambda pair: pair[1]["ts"])
+        batch_id = "a-" + uuid.uuid4().hex
+        report_points = [{**point, "batch_id": batch_id} for _, point in valid]
+        if not valid:
             register_report_sync(name, 0, 0, 0, 0, 0, mode)
             continue
-        latest = reports[-1]
+        latest = valid[-1][0]
         latest_ts = update_location_cache(name, latest)
-        history_added = add_persistent_history_points(name, report_points)
+        history_added = add_persistent_history_points(name, report_points, persist=False)
         recording_added = add_recording_points(name, report_points, now_ts)
         shared_added = add_shared_history_points(name, report_points)
         add_points_to_apple_tests(name, report_points)
@@ -11281,6 +11300,9 @@ def process_report_results(named_accessories, results, mode):
         total_added += history_added
 
         logger.info("Report-Sync %s: %d Reports empfangen, %d neue Verlaufspunkte gespeichert (%s)", name, len(report_points), history_added, mode)
+    if total_added:
+        with state_lock:
+            save_json(SEVEN_HISTORY_FILE, "seven_day_history")
     return total_received, total_added
 
 
@@ -11694,7 +11716,7 @@ def tracker_lab_active_job():
     return None
 
 APP_NAME = "Universal Tag Studio"
-APP_VERSION = "20.0.0 API EDITION"
+APP_VERSION = "20.1.0 API EDITION"
 
 
 OPTIMIZED_ROUTE_DEFAULT_POINTS = int(os.environ.get("ULTRA_TRACKER_ROUTE_MAX_DISPLAY_POINTS", "4200"))
@@ -16264,7 +16286,7 @@ def mcp_time_window(arguments):
     }
 
 
-def mcp_raw_history(model):
+def mcp_raw_history(model, raw_reports=False):
     provider = model.get("provider")
     tracker_id = model.get("id")
     if provider == "apple":
@@ -16274,14 +16296,21 @@ def mcp_raw_history(model):
     if provider == "samsung":
         return list(state.get("samsung_history", {}).get(tracker_id, {}).get("points", []))
     profile = state.get("fusion_profiles", {}).get(tracker_id, {})
+    if raw_reports:
+        # Bypass the fusion profile's display optimization entirely.
+        google_id, samsung_id = fusion_profile_source_ids(tracker_id, profile)
+        sources = [("apple", state.get("seven_day_history", {}).get(tracker_id, {})),
+                   ("google", state.get("google_history", {}).get(google_id, {})),
+                   ("samsung", state.get("samsung_history", {}).get(samsung_id, {}))]
+        return [{**point, "source": provider} for provider, store in sources for point in store.get("points", []) if isinstance(point, dict)]
     return list(fusion_profile_timeline_points(tracker_id, fusion_history_points(tracker_id, profile), profile))
 
 
-def mcp_history_internal_points(model, window):
+def mcp_history_internal_points(model, window, raw_reports=False):
     provider = str(model.get("provider") or "unknown")
-    raw = mcp_raw_history(model)
+    raw = mcp_raw_history(model, raw_reports=raw_reports)
     current = model.get("location")
-    if isinstance(current, dict):
+    if isinstance(current, dict) and (not raw_reports or not raw):
         raw.append({**current, "source": current.get("source") or provider})
     unique = {}
     for item in raw:
@@ -16294,7 +16323,7 @@ def mcp_history_internal_points(model, window):
         point = {**item, **normalized}
         point["source"] = str(point.get("source") or provider)
         point["provider"] = str(point.get("provider") or point["source"])
-        unique[str(point.get("report_id") or point_identity(point))] = point
+        unique[point["source"] + ":" + str(point.get("report_id") or point_identity(point))] = point
     return sorted(unique.values(), key=lambda point: float(point.get("ts", 0) or 0))
 
 
@@ -16628,7 +16657,7 @@ def mcp_tracker_history(model, arguments):
     except (TypeError, ValueError):
         raise MCPToolError("limit muss eine Zahl zwischen 1 und 2000 sein.")
     min_stay_minutes = float_range(arguments.get("min_stay_minutes"), 3, 1, 180)
-    points = mcp_history_internal_points(model, window)
+    points = mcp_history_internal_points(model, window, raw_reports=bool_from_any(arguments.get("raw_reports"), False))
     analysis_source = points if len(points) <= 25000 else downsample_route_points(points, 25000)
     analyzed, stays = build_stays(analysis_source, 70, min_stay_minutes * 60)
     observations = mcp_observation_clusters(analyzed, stays, int_range(arguments.get("observation_limit"), 20, 1, 50))
@@ -16666,6 +16695,9 @@ def mcp_tracker_history(model, arguments):
             "timestamp": int(float(point.get("ts", 0) or 0)),
             "observed_at_local": local_datetime(point.get("ts", 0)).isoformat(),
             "network": str(point.get("source") or model.get("provider") or "unknown"),
+            "report_id": str(point.get("report_id") or point_identity(point)),
+            "received_at": float(point.get("received_at", 0) or 0),
+            "batch_id": str(point.get("batch_id") or ""),
         }
         if point.get("quality") is not None:
             row["quality"] = point.get("quality")
@@ -22333,6 +22365,8 @@ def polling_settings_api():
     current = normalize_polling_settings(state.get("settings", {}).get("polling"))
     candidate = {**current}
     candidate["demand_driven"] = True
+    if "apple_batch_reports_default" in data:
+        candidate["apple_batch_reports_default"] = bool_from_any(data["apple_batch_reports_default"])
     candidate["updated_ts"] = int(time.time())
     for provider in ("apple", "google", "samsung"):
         incoming = data.get(provider)
@@ -26744,6 +26778,8 @@ def mobile_capabilities_api():
             "tracker_catalog": True,
             "fusion": True,
             "history": True,
+            "history_stream": True,
+            "complete_batch_reports": True,
             "geofences": True,
             "saved_places": True,
             "alerts": True,
@@ -26906,11 +26942,85 @@ def mobile_history_api():
         "include_points": bool_from_any(request.args.get("include_points"), True),
         "resolve_addresses": bool_from_any(request.args.get("resolve_addresses"), False),
         "observation_limit": request.args.get("observation_limit", 20),
+        "raw_reports": True,
     }
     try:
         model = mcp_resolve_tracker(reference)
         payload = mcp_tracker_history(model, arguments)
         return jsonify({"status": "ok", **payload})
+    except MCPToolError as exc:
+        return mobile_json_error(str(exc), 404 if exc.code == "not_found" else 400, exc.code)
+
+
+def mobile_history_stream_key(point):
+    return (float(point.get("received_at", 0) or 0), float(point["ts"]),
+            str(point.get("source") or "unknown"), str(point.get("report_id") or point_identity(point)))
+
+
+def mobile_report_public(point):
+    address = point.get("address") or address_from_cached(point["lat"], point["lon"])
+    return {
+        "report_id": str(point.get("report_id") or point_identity(point)),
+        "latitude": float(point["lat"]), "longitude": float(point["lon"]),
+        "accuracy_m": float(point.get("acc", 0) or 0), "timestamp": int(point["ts"]),
+        "observed_at_local": local_datetime(point["ts"]).isoformat(),
+        "network": str(point.get("source") or "unknown"),
+        "batch_id": str(point.get("batch_id") or ""),
+        "received_at": float(point.get("received_at", 0) or 0),
+        **({"address": mcp_public_address(address)} if address else {}),
+    }
+
+
+@app.route(f"{MOBILE_API_PREFIX}/history/stream", methods=["GET"])
+def mobile_history_stream_api():
+    """Cursor pages by receipt order: even newly received OLD reports reach clients.
+
+    Cursor scope includes tracker and period. Client deduplication is by report
+    ID + network. A small overlap protects concurrent publish order and retries.
+    This is a read endpoint; it never triggers a provider request.
+    """
+    try:
+        reference = str(request.args.get("ref") or "").strip()
+        if not reference:
+            raise MCPToolError("Tracker-Referenz fehlt.")
+        days = int_range(request.args.get("days"), 1, 1, 90)
+        limit = int_range(request.args.get("limit"), 3000, 1, 5000)
+        token = str(request.args.get("cursor") or "")
+        after = None
+        replay = bool_from_any(request.args.get("replay"), False)
+        if token:
+            try:
+                if len(token) > 1600:
+                    raise ValueError()
+                cursor = json.loads(base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)))
+                if cursor.get("ref") != reference or cursor.get("days") != days:
+                    raise ValueError()
+                key = cursor["key"]
+                if len(key) != 4 or not all(math.isfinite(float(v)) for v in key[:2]):
+                    raise ValueError()
+                after = (float(key[0]), float(key[1]), str(key[2]), str(key[3]))
+            except (ValueError, TypeError, KeyError, AttributeError):
+                raise MCPToolError("Ungültiger Verlaufscursor. Abruf ohne Cursor neu beginnen.")
+        model = mcp_resolve_tracker(reference)
+        now = time.time()
+        window = {"since_ts": int(now - days * 86400), "until_ts": int(now)}
+        with state_lock:
+            points = mcp_history_internal_points(model, window, raw_reports=True)
+        keyed = [(mobile_history_stream_key(point), point) for point in points]
+        # Replay one minute only on live refreshes, never while paging backlog.
+        # Distinct server threads can publish a previously stamped batch later.
+        overlap = [point for key, point in keyed if replay and after and after[0] > 0 and after[0] - 60 <= key[0] <= after[0]]
+        pending = sorted(((key, point) for key, point in keyed if after is None or key > after), key=lambda pair: pair[0])
+        page = pending[:limit]
+        has_more = len(pending) > len(page)
+        next_key = page[-1][0] if page else after
+        next_cursor = token
+        if next_key is not None:
+            next_cursor = base64.urlsafe_b64encode(json.dumps({"ref": reference, "days": days, "key": next_key}, separators=(",", ":")).encode()).decode().rstrip("=")
+        unique = {(str(point.get("source")), point_identity(point)): point for point in [*overlap, *(point for _, point in page)]}
+        return jsonify({"status": "ok", "points": [mobile_report_public(point) for point in unique.values()],
+                        "next_cursor": next_cursor or None, "has_more": has_more, "matching_total": len(points),
+                        "server_time": now, "refresh_after_seconds": 5, "retention": history_policy_public(model.get("provider"), model.get("id"))})
     except MCPToolError as exc:
         return mobile_json_error(str(exc), 404 if exc.code == "not_found" else 400, exc.code)
 
@@ -27121,7 +27231,7 @@ def access_register_client():
 
 def access_key_scope(path, method):
     # Explicit endpoint families: keys cannot manage users, passwords, backups or credentials.
-    if path in {'/api/v3/info', '/api/v3/schema', '/api/mobile/v1/session', '/api/mobile/v1/capabilities', '/api/mobile/v1/trackers', '/api/mobile/v1/tracker', '/api/mobile/v1/history', '/api/mobile/v1/alerts'} and method == 'GET':
+    if path in {'/api/v3/info', '/api/v3/schema', '/api/mobile/v1/session', '/api/mobile/v1/capabilities', '/api/mobile/v1/trackers', '/api/mobile/v1/tracker', '/api/mobile/v1/history', '/api/mobile/v1/history/stream', '/api/mobile/v1/alerts'} and method == 'GET':
         return 'read'
     if path == '/api/mobile/v1/locate' and method == 'POST':
         return 'locate'

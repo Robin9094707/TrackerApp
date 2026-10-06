@@ -321,7 +321,7 @@ struct TrackerAutomationView: View {
                     Button("Aufzeichnung pausieren") { perform("set_history", ["enabled": false]) }
                 }
             } header: { Text("Standortverlauf") } footer: {
-                Text("Eine kürzere Aufbewahrung kann bei der nächsten Server-Bereinigung ältere Punkte entfernen. Beim Pausieren wird kein Verlauf aktiv gelöscht.")
+                Text("Alle eindeutigen empfangenen Reports werden gespeichert. „Übersichtlich“ bündelt nur die Anzeige. Eine kürzere Aufbewahrung kann ältere Punkte entfernen. Pausieren löscht keinen bestehenden Verlauf.")
             }
             if let error { Section { Text(error).foregroundStyle(.red) } }
         }
@@ -341,4 +341,5 @@ struct TrackerAutomationView: View {
         }
     }
 }
+
 

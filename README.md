@@ -1,4 +1,4 @@
-# RJ Tracker 4.1 · native iOS + API Backend 20
+# RJ Tracker 4.2 · native iOS + API Backend 20.1
 
 Native SwiftUI-/MapKit-App für Apple-, Google-, Samsung- und Fusion-Tracker. Android und der Android-Workflow wurden entfernt. Das Backend stellt die bisherigen Tracker-APIs sowie neue Import-, Geräte-, Passkey- und API-Key-Endpunkte bereit. Die Browseroberfläche unter `/` bietet ausschließlich Hauptadmin-Anmeldung, Statistik, Geräte-Abmeldung und Passwortverwaltung.
 
@@ -34,15 +34,21 @@ Unter **Accounts, Import & Fusionen → Apple-Tracker-JSON / Google secrets.json
 
 Die App erstellt den Imports-Ordner beim ersten Start. Lokale Dateien werden erst nach ausdrücklicher Importbestätigung auf den eigenen Server übertragen; Dateigröße maximal 1 MB. Lokale Kopien vertraulicher Schlüssel können danach in Dateien gelöscht werden.
 
-### Standortverlauf
+### Standortverlauf und Batch-Reports
 
-Tagesauswahl und Quellenfilter gelten gemeinsam für Karte, Wiedergabe und CSV-/GPX-Export. Eine große Kartenansicht, Ort-/Quelle-/Uhrzeitsuche in der Zeitleiste und eine eigene Qualitätsübersicht machen Meldungen besser einsehbar. Die Suche betrifft nur die Meldungsliste; der Export enthält die gesamte Tages-/Quellenauswahl. Aufenthalte bleiben ausdrücklich als Serverauswertung des gesamten geladenen Zeitraums gekennzeichnet. Der Server liefert bis zu 2.000 aktuelle Meldungen pro Abruf; größere Ergebnisse sind sichtbar als Ausschnitt markiert.
+Backend 20.1 fragt Apple standardmäßig alle 20 Sekunden über `fetch_location_history` ab und speichert jeden eindeutigen Report eines Batches. Eine bewusst pausierte Aufzeichnung bleibt pausiert; neue Apple-Tracker und frühere Standardkonfigurationen sammeln automatisch. Bestehende individuelle Aufbewahrungsfristen bleiben gültig. Innerhalb dieser Frist begrenzt Apple die Speicherung nicht mehr auf eine feste Punktzahl. Providerfehler, langsame Antworten und die vorhandene globale Pause werden weiterhin berücksichtigt. Ein Abruf ist keine Garantie für neue Meldungen des Find-My-Netzes.
+
+Die iOS-App zeigt standardmäßig **Übersichtlich**: nahe Meldungen werden nur für die Darstellung gebündelt. **Jeder Report** enthält alle geladenen Originalreports, auch bei gleichem Zeitpunkt und gleicher Position. Die Karte bündelt überlappende Marker nativ beim Herauszoomen; die Liste enthält die einzelnen Reports mit ihrer ID. CSV/GPX exportieren die geladenen Originalreports der Tages-/Quellenauswahl. CSV enthält zusätzlich Report-ID, Batch-ID und Empfangszeit.
+
+Der geöffnete Verlauf übernimmt gespeicherte neue Reports alle fünf Sekunden über Cursor-Seiten. Auch ein später eingetroffener Report mit älterer Standortzeit wird berücksichtigt. Größere Historien werden automatisch nachgeladen; ein sichtbarer Ladehinweis bleibt bestehen, bis die Seiten geladen sind. Aufenthalte haben Datum, Dauer, Reportzahl und Genauigkeit und lassen sich direkt auf der Karte öffnen. Tages- und Quellenfilter schränken die Aufenthaltsliste ein; bei gemischten Aufenthalten beziehen sich die Kennzahlen weiterhin auf die serverseitige Auswertung über die beteiligten Quellen.
+
+Die Tracker-Ansicht hat in jeder Höhe einen deckenden Hintergrund. Die App benötigt für die vollständige Live-Historie dieses Backend 20.1; ältere Server funktionieren weiterhin mit dem ausdrücklich bezeichneten bisherigen Ausschnitt.
 
 Neue Passkeys und Passkey-Anmeldung starten direkt aus der App einen Sicherheitsdialog für die Serverdomain. Die Sicherheitsseite bietet keine Ortung. Der Rückkanal zur App nutzt einen einmaligen, an einen geheimen Verifier gebundenen Code. HTTPS ist dafür erforderlich; kein fest eingebauter Serverdomain-Entitlement nötig.
 
 ## IPA-Build
 
-GitHub Actions baut bei Push nach `main` die Release-App und erzeugt `RJ-Tracker-v4.1.0-unsigned.ipa`. Standardmäßig laufen keine Simulator-/UI-Tests. Optionale bisherige Review-Tests bleiben auf ausdrücklichen Workflow-Input beschränkt.
+GitHub Actions baut bei Push nach `main` die Release-App und erzeugt `RJ-Tracker-v4.2.0-unsigned.ipa`. Standardmäßig laufen keine Simulator-/UI-Tests. Optionale bisherige Review-Tests bleiben auf ausdrücklichen Workflow-Input beschränkt.
 
 Die IPA ist **unsigniert** und muss für das iPhone mit einem geeigneten Profil signiert werden. APNs benötigt zusätzlich die bestehenden Servervariablen für Team-ID, Key-ID und `.p8` sowie passende App-Entitlements beim Signieren.
 
