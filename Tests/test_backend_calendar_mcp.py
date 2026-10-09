@@ -4,6 +4,7 @@ import hashlib
 import html
 import json
 import os
+import sys
 from pathlib import Path
 import re
 import runpy
@@ -223,8 +224,14 @@ class BackendUpgradeTests(unittest.TestCase):
         self.assertEqual(diagnostics['tool_count'],len(catalog.json['tools']))
         self.assertEqual(self.client.get('/api/server/findmy').status_code,200)
         self.assertEqual(self.client.post('/api/server/findmy',json={'action':'update','confirmed':True}).status_code,403)
-        denied=self.client.post('/api/server/findmy',json={'action':'update','confirmed':True,'current_password':'wrong','version':'0.10.3'},headers=self.headers)
+        # The CI interpreter itself is not a venv; isolate the authentication
+        # guard from that separate deployment precondition.
+        with patch('sys.prefix',sys.base_prefix+'-test-venv'):
+            denied=self.client.post('/api/server/findmy',json={'action':'update','confirmed':True,'current_password':'wrong','version':'0.10.3'},headers=self.headers)
         self.assertEqual(denied.status_code,403)
+        with patch('sys.prefix',sys.base_prefix):
+            denied=self.client.post('/api/server/findmy',json={'action':'update','confirmed':True,'current_password':'Regression-Test-Password','version':'0.10.3'},headers=self.headers)
+        self.assertEqual(denied.status_code,409)
         with self.client.session_transaction() as s:s['admin_console']=True
         self.assertEqual(self.client.get('/api/server/findmy').status_code,200)
 
