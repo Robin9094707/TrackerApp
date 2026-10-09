@@ -1,4 +1,4 @@
-# Universal Tag Studio 20.1.0 · COMPLETE BATCH REPORTS + LIVE HISTORY API
+# Universal Tag Studio 20.2.0 · CALENDAR HISTORY + MCP CONTROL CENTER
 # Backward-compatible single-file upgrade. Existing data/ directory layout,
 # tracker IDs, histories, shares and provider sessions are intentionally
 # preserved. Google integration: leonboe1/GoogleFindMyTools (GPL-3.0).
@@ -11716,7 +11716,7 @@ def tracker_lab_active_job():
     return None
 
 APP_NAME = "Universal Tag Studio"
-APP_VERSION = "20.1.0 API EDITION"
+APP_VERSION = "20.2.0 API EDITION"
 
 
 OPTIMIZED_ROUTE_DEFAULT_POINTS = int(os.environ.get("ULTRA_TRACKER_ROUTE_MAX_DISPLAY_POINTS", "4200"))
@@ -15153,12 +15153,17 @@ def mcp_authorization_page(values, transaction, action_copy):
       </section>''' if guest_enabled else ""
     return f'''<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Universal Tag Studio verbinden</title><style>
     :root{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:light dark;--blue:#1677ee;--text:#121722;--muted:#5f6a7d;--line:#d9e2ef;--card:#fffffff2}}*{{box-sizing:border-box}}body{{min-height:100vh;margin:0;display:grid;place-items:center;padding:22px;background:radial-gradient(circle at 20% 0,#1677ee28,transparent 35%),#eef3fb;color:var(--text)}}main{{width:min(540px,100%);padding:28px;border:1px solid var(--line);border-radius:26px;background:var(--card);box-shadow:0 22px 70px #2030501f}}.icon{{width:58px;height:58px;display:grid;place-items:center;border-radius:18px;color:#fff;background:linear-gradient(145deg,#1677ee,#6d5dfc);font-size:30px}}h1{{font-size:24px;margin:18px 0 8px}}p,li,small{{color:var(--muted);line-height:1.5}}.tabs{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:20px 0 4px}}.tab{{min-height:44px;border:1px solid var(--line);border-radius:13px;background:transparent;color:inherit;font-weight:800;cursor:pointer}}.tab.active{{border-color:#1677ee88;background:#1677ee13;color:var(--blue)}}label{{display:block;margin:17px 0 7px;font-weight:750}}input{{width:100%;min-height:48px;padding:0 14px;border:1px solid #cbd6e5;border-radius:13px;background:#fff;color:#111;font-size:16px}}button.submit{{width:100%;min-height:50px;margin-top:16px;border:0;border-radius:14px;background:var(--blue);color:#fff;font-weight:850;font-size:15px;cursor:pointer}}.panel.hidden{{display:none}}.notice{{margin-top:16px;padding:12px 14px;border-radius:14px;background:#1677ee0d;border:1px solid #1677ee25}}small{{display:block;margin-top:14px}}@media(prefers-color-scheme:dark){{:root{{--text:#f4f6fb;--muted:#a7b2c4;--line:#2b3749;--card:#151c28f2}}body{{background:#0b101a}}input{{background:#0d131e;color:#fff;border-color:#354258}}}}
-    </style></head><body><main><div class="icon">⌖</div><h1>Universal Tag Studio verbinden</h1><p><strong>{client_label}</strong> kann als Besitzer oder mit einem einzelnen Freigabelink verbunden werden.</p><form method="post" autocomplete="off"><input type="hidden" name="transaction" value="{html.escape(transaction, quote=True)}"><input id="accessMode" type="hidden" name="access_mode" value="owner"><div class="tabs"><button type="button" class="tab active" data-mode="owner">Besitzer</button>{guest_tab}</div><section id="ownerPanel" class="panel"><p>{html.escape(action_copy)}</p><label for="password">Kontopasswort</label><input id="password" name="password" type="password" autocomplete="current-password" autofocus>{totp_field}<ul><li>Alle verbundenen Apple-, Google-, Samsung- und Fusion-Tracker dieses Benutzers</li><li>Schreibaktionen bleiben einzeln bestätigungspflichtig</li><li>Ein einheitlicher OAuth-Scope verhindert spätere Scope-Nachfragen</li></ul></section>{guest_panel}<button class="submit" type="submit">Sicher mit ChatGPT verbinden</button></form><div class="notice"><small>Rotierende Refresh-Tokens halten die Verbindung aktiv. Eine erneute Anmeldung ist nur nach Ablauf, Widerruf, Passwort- oder Zwei-Faktor-Änderung oder einer ungültig gewordenen Freigabe nötig.</small></div></main><script>(()=>{{const mode=document.getElementById('accessMode'),owner=document.getElementById('ownerPanel'),guest=document.getElementById('guestPanel'),password=document.getElementById('password'),totp=document.getElementById('totp_code'),link=document.getElementById('share_link'),sharePassword=document.getElementById('share_password');document.querySelectorAll('[data-mode]').forEach(button=>button.addEventListener('click',()=>{{const next=button.dataset.mode;mode.value=next;document.querySelectorAll('[data-mode]').forEach(item=>item.classList.toggle('active',item===button));owner?.classList.toggle('hidden',next!=='owner');guest?.classList.toggle('hidden',next!=='guest');if(password)password.required=next==='owner';if(totp)totp.required=next==='owner';if(link)link.required=next==='guest';if(sharePassword)sharePassword.required=next==='guest';(next==='owner'?password:link)?.focus()}}));password.required=true}})();</script></body></html>'''
+    </style></head><body><main><div class="icon">⌖</div><h1>Universal Tag Studio verbinden</h1><p><strong>{client_label}</strong> kann als Besitzer oder mit einem einzelnen Freigabelink verbunden werden.</p><form method="post" autocomplete="off"><input type="hidden" name="transaction" value="{html.escape(transaction, quote=True)}"><input id="accessMode" type="hidden" name="access_mode" value="owner"><div class="tabs"><button type="button" class="tab active" data-mode="owner">Besitzer</button>{guest_tab}</div><section id="ownerPanel" class="panel"><p>{html.escape(action_copy)}</p><label for="password">Master- / Kontopasswort</label><input id="password" name="password" type="password" autocomplete="current-password" autofocus>{totp_field}<ul><li>Alle verbundenen Apple-, Google-, Samsung- und Fusion-Tracker dieses Benutzers</li><li>Schreibaktionen bleiben einzeln bestätigungspflichtig</li><li>Ein einheitlicher OAuth-Scope verhindert spätere Scope-Nachfragen</li></ul></section>{guest_panel}<button class="submit" type="submit">Sicher mit ChatGPT verbinden</button></form><div class="notice"><small>Rotierende Refresh-Tokens halten die Verbindung aktiv. Eine erneute Anmeldung ist nur nach Ablauf, Widerruf, Passwort- oder Zwei-Faktor-Änderung oder einer ungültig gewordenen Freigabe nötig.</small></div></main><script>(()=>{{const mode=document.getElementById('accessMode'),owner=document.getElementById('ownerPanel'),guest=document.getElementById('guestPanel'),password=document.getElementById('password'),totp=document.getElementById('totp_code'),link=document.getElementById('share_link'),sharePassword=document.getElementById('share_password');document.querySelectorAll('[data-mode]').forEach(button=>button.addEventListener('click',()=>{{const next=button.dataset.mode;mode.value=next;document.querySelectorAll('[data-mode]').forEach(item=>item.classList.toggle('active',item===button));owner?.classList.toggle('hidden',next!=='owner');guest?.classList.toggle('hidden',next!=='guest');if(password)password.required=next==='owner';if(totp)totp.required=next==='owner';if(link)link.required=next==='guest';if(sharePassword)sharePassword.required=next==='guest';(next==='owner'?password:link)?.focus()}}));password.required=true}})();</script></body></html>'''
 
 
 @app.route("/oauth/authorize", methods=["GET", "POST"])
 @app.route("/t/<tenant_id>/oauth/authorize", methods=["GET", "POST"])
 def mcp_oauth_authorize(tenant_id=None):
+    def form_error(message, status=403):
+        page = mcp_authorization_page(transaction, request.form.get("transaction"), "Zugriff für ChatGPT autorisieren")
+        notice = '<p role="alert" style="color:#e5484d">' + html.escape(message) + '</p>'
+        page = page.replace('<form method="post"', notice + '<form method="post"', 1)
+        return Response(page, status=status, mimetype="text/html", headers={"Cache-Control": "no-store"})
     if not mcp_metadata_enabled():
         return mcp_oauth_error("temporarily_unavailable", "Der private MCP-Connector ist deaktiviert.", 503)
     if request.method == "GET":
@@ -15196,7 +15201,7 @@ def mcp_oauth_authorize(tenant_id=None):
         if share_link_status(link) != "active" or not verify_shared_password(link or {}, request.form.get("share_password")):
             register_share_failure(guest_key)
             mcp_audit_event("authorization_denied", status="error", client_id=transaction.get("client_id"), detail="share_rejected")
-            return mcp_oauth_error("access_denied", "Freigabelink oder Link-Passwort ist nicht gültig.", 403)
+            return form_error("Freigabelink oder Link-Passwort ist nicht gültig.")
         clear_share_failures(guest_key)
         grant_context = {"principal": "guest", "share_bindings": {link_id: mcp_share_binding(link_id, link)}}
     else:
@@ -15206,13 +15211,13 @@ def mcp_oauth_authorize(tenant_id=None):
         if not verify_app_password(request.form.get("password")):
             register_unlock_failure(key)
             mcp_audit_event("authorization_denied", status="error", client_id=transaction.get("client_id"), detail="password_rejected")
-            return mcp_oauth_error("access_denied", "Master-Passwort ist nicht korrekt.", 403)
+            return form_error("Master-Passwort ist nicht korrekt.")
         if two_factor_enabled(current_tenant_id()):
             valid, _method = verify_two_factor_code(current_tenant_id(), request.form.get("totp_code"), consume=True)
             if not valid:
                 register_unlock_failure(key)
                 mcp_audit_event("authorization_denied", status="error", client_id=transaction.get("client_id"), detail="two_factor_rejected")
-                return mcp_oauth_error("access_denied", "Zwei-Faktor- oder Wiederherstellungscode ist nicht korrekt.", 403)
+                return form_error("Zwei-Faktor- oder Wiederherstellungscode ist nicht korrekt.")
         clear_unlock_failures(key)
     client = state.get("mcp_oauth", {}).get("clients", {}).get(transaction.get("client_id"))
     if not isinstance(client, dict) or transaction.get("redirect_uri") not in (client.get("redirect_uris") or []):
@@ -16238,6 +16243,23 @@ def mcp_parse_timestamp(value, label):
 
 def mcp_time_window(arguments):
     arguments = arguments if isinstance(arguments, dict) else {}
+    selected_dates = arguments.get("dates")
+    if selected_dates:
+        if isinstance(selected_dates, str):
+            selected_dates = selected_dates.split(",")
+        if not isinstance(selected_dates, list) or len(selected_dates) > 3660:
+            raise MCPToolError("Höchstens 3660 Kalendertage auswählen.")
+        try:
+            dates = sorted(set(str(day).strip() for day in selected_dates))
+            if not all(re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) for day in dates):
+                raise ValueError("Invalid date")
+            bounds = [local_day_bounds(day) for day in dates]
+        except ValueError:
+            raise MCPToolError("Kalendertage müssen YYYY-MM-DD entsprechen.")
+        return {"period": "calendar_days", "dates": dates, "since_ts": int(bounds[0][0]),
+                "until_ts": int(bounds[-1][1]) - 1, "day_ranges": bounds,
+                "since_local": local_datetime(bounds[0][0]).isoformat(),
+                "until_local": local_datetime(bounds[-1][1] - 1).isoformat(), "timezone": APP_TIMEZONE_NAME}
     now = datetime.now(APP_TIMEZONE)
     period = str(arguments.get("period") or "last_7_days").strip().lower()
     requested_date = str(arguments.get("date") or "").strip()
@@ -16319,6 +16341,8 @@ def mcp_history_internal_points(model, window, raw_reports=False):
             continue
         timestamp = int(float(normalized.get("ts", 0) or 0))
         if not window["since_ts"] <= timestamp <= window["until_ts"]:
+            continue
+        if window.get("day_ranges") and not any(start <= timestamp < end for start, end in window["day_ranges"]):
             continue
         point = {**item, **normalized}
         point["source"] = str(point.get("source") or provider)
@@ -19919,7 +19943,7 @@ def mcp_endpoint(tenant_id=None):
 @app.route("/api/mcp/settings", methods=["GET", "POST", "DELETE"])
 def mcp_settings_api():
     if request.method == "GET":
-        return jsonify({"status": "ok", "mcp": mcp_public_state(), "audit": list(state.get("mcp_audit", []))[:50]})
+        return jsonify({"status": "ok", "mcp": mcp_public_state(), "audit": list(state.get("mcp_audit", []))[:50], "connections": mcp_connection_rows()})
     if request.method == "DELETE":
         mcp_revoke_grants("owner_revoke", keep_clients=False)
         return jsonify({"status": "ok", "mcp": mcp_public_state()})
@@ -26779,6 +26803,9 @@ def mobile_capabilities_api():
             "fusion": True,
             "history": True,
             "history_stream": True,
+            "history_calendar": True,
+            "mcp_management": True,
+            "clear_alerts": True,
             "complete_batch_reports": True,
             "geofences": True,
             "saved_places": True,
@@ -26935,6 +26962,8 @@ def mobile_history_api():
         else:
             requested_period = "last_90_days"
     arguments = {
+        "dates": request.args.get("dates"),
+        "date": request.args.get("date"),
         "period": requested_period,
         "since_ts": request.args.get("from") or request.args.get("since_ts"),
         "until_ts": request.args.get("to") or request.args.get("until_ts"),
@@ -26985,6 +27014,9 @@ def mobile_history_stream_api():
             raise MCPToolError("Tracker-Referenz fehlt.")
         days = int_range(request.args.get("days"), 1, 1, 90)
         limit = int_range(request.args.get("limit"), 3000, 1, 5000)
+        date_values = request.args.get("dates") or request.args.get("date")
+        window = mcp_time_window({"dates": date_values}) if date_values else None
+        scope = {"dates": window["dates"], "timezone": APP_TIMEZONE_NAME} if window else None
         token = str(request.args.get("cursor") or "")
         after = None
         replay = bool_from_any(request.args.get("replay"), False)
@@ -26993,7 +27025,7 @@ def mobile_history_stream_api():
                 if len(token) > 1600:
                     raise ValueError()
                 cursor = json.loads(base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)))
-                if cursor.get("ref") != reference or cursor.get("days") != days:
+                if cursor.get("ref") != reference or cursor.get("days") != days or cursor.get("scope") != scope:
                     raise ValueError()
                 key = cursor["key"]
                 if len(key) != 4 or not all(math.isfinite(float(v)) for v in key[:2]):
@@ -27003,7 +27035,7 @@ def mobile_history_stream_api():
                 raise MCPToolError("Ungültiger Verlaufscursor. Abruf ohne Cursor neu beginnen.")
         model = mcp_resolve_tracker(reference)
         now = time.time()
-        window = {"since_ts": int(now - days * 86400), "until_ts": int(now)}
+        window = window or {"since_ts": int(now - days * 86400), "until_ts": int(now)}
         with state_lock:
             points = mcp_history_internal_points(model, window, raw_reports=True)
         keyed = [(mobile_history_stream_key(point), point) for point in points]
@@ -27016,7 +27048,7 @@ def mobile_history_stream_api():
         next_key = page[-1][0] if page else after
         next_cursor = token
         if next_key is not None:
-            next_cursor = base64.urlsafe_b64encode(json.dumps({"ref": reference, "days": days, "key": next_key}, separators=(",", ":")).encode()).decode().rstrip("=")
+            next_cursor = base64.urlsafe_b64encode(json.dumps({"ref": reference, "days": days, "scope": scope, "key": next_key}, separators=(",", ":")).encode()).decode().rstrip("=")
         unique = {(str(point.get("source")), point_identity(point)): point for point in [*overlap, *(point for _, point in page)]}
         return jsonify({"status": "ok", "points": [mobile_report_public(point) for point in unique.values()],
                         "next_cursor": next_cursor or None, "has_more": has_more, "matching_total": len(points),
@@ -27032,10 +27064,13 @@ def mobile_alerts_api():
         limit = max(1, min(500, int(request.args.get("limit", "150"))))
     except ValueError:
         limit = 150
+    events = list(state.get("notification_events", []))
+    if bool_from_any(request.args.get("unread_only"), False):
+        events = [event for event in events if not event.get("acknowledged")]
     return jsonify({
         "status": "ok",
         "enabled": alerts.get("enabled", True),
-        "events": list(state.get("notification_events", []))[:limit],
+        "events": events[:limit],
         "event_count": len(state.get("notification_events", [])),
         "unread_count": sum(1 for event in state.get("notification_events", []) if not event.get("acknowledged")),
         "quiet_hours": alerts.get("quiet_hours", {}),
@@ -27158,6 +27193,22 @@ def mobile_action_api():
             state.setdefault("settings", {})["global_pause"] = paused
             save_json(SETTINGS_FILE, "settings")
             return jsonify({"status": "ok", "paused": paused, "polling": polling_public_state()})
+        if action in {"clear_events", "delete_event", "acknowledge_all_events"}:
+            with notification_lock:
+                events = state.get("notification_events", [])
+                if action == "clear_events":
+                    remaining = []
+                elif action == "delete_event":
+                    event_id = str(data.get("event_id") or "")
+                    if not event_id:
+                        raise MCPToolError("Ereignis-ID fehlt.")
+                    remaining = [row for row in events if str(row.get("id")) != event_id]
+                else:
+                    remaining = [{**row, "acknowledged": True} for row in events]
+                # Persist first, so a write failure never clears the live inbox.
+                atomic_write_json(NOTIFICATION_EVENTS_FILE, remaining)
+                state["notification_events"] = remaining
+            return jsonify(status="ok", removed_count=len(events) - len(remaining))
         if action == "acknowledge_event":
             event_id = str(data.get("event_id") or "")
             event = next((item for item in state.get("notification_events", []) if str(item.get("id")) == event_id), None)
@@ -27231,7 +27282,7 @@ def access_register_client():
 
 def access_key_scope(path, method):
     # Explicit endpoint families: keys cannot manage users, passwords, backups or credentials.
-    if path in {'/api/v3/info', '/api/v3/schema', '/api/mobile/v1/session', '/api/mobile/v1/capabilities', '/api/mobile/v1/trackers', '/api/mobile/v1/tracker', '/api/mobile/v1/history', '/api/mobile/v1/history/stream', '/api/mobile/v1/alerts'} and method == 'GET':
+    if path in {'/api/v3/info', '/api/v3/schema', '/api/mobile/v1/session', '/api/mobile/v1/capabilities', '/api/mobile/v1/trackers', '/api/mobile/v1/tracker', '/api/mobile/v1/history', '/api/mobile/v1/history/stream', '/api/mobile/v1/history/days', '/api/mobile/v1/alerts'} and method == 'GET':
         return 'read'
     if path == '/api/mobile/v1/locate' and method == 'POST':
         return 'locate'
@@ -27268,9 +27319,11 @@ def access_before_request():
             if request.method not in {'GET','HEAD'} and not hmac.compare_digest(str(request.headers.get('X-CSRF-Token') or ''), str(session.get('csrf_token') or 'missing')):
                 return jsonify(status='error', message='CSRF-Token fehlt.'), 403
         return
+    if path.startswith('/oauth/') or path.startswith('/.well-known/') or path == '/mcp' or re.match(r'^/t/[a-z0-9_-]+/(oauth/|\.well-known/|mcp$)', path):
+        return
     if session.get('admin_console'):
         allowed = {'/', '/admin', '/api/logout', '/api/security/password'}
-        if path not in allowed:
+        if path not in allowed and not path.startswith('/api/mcp/'):
             return jsonify(status='error', message='Diese Sitzung ist auf die Admin-Oberfläche beschränkt.'), 403
     if session.get('security_bridge'):
         allowed = {'/api/unlock', '/api/unlock/2fa', '/api/passkeys/auth/begin', '/api/passkeys/auth/finish', '/api/security/passkeys/register/begin', '/api/security/passkeys/register/finish'}
@@ -27463,7 +27516,7 @@ def api_remove_native_tracker(provider,tracker_id):
     return jsonify(status='ok',message='Quelle archiviert und aus Fusionen entfernt; Historie bleibt erhalten.')
 
 # A small security page is allowed for server-domain-bound passkeys. It exposes no tracker data.
-_SECURITY_STYLE = '<meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font:16px system-ui;background:#0b1220;color:#edf4ff;max-width:740px;margin:4vh auto;padding:22px}section{background:#182337;padding:24px;border-radius:22px;margin:18px 0}input,button,select{box-sizing:border-box;font:inherit;padding:12px;border-radius:12px;border:1px solid #415471;background:#0f192a;color:inherit;margin:5px;width:100%}button{background:#276edb;cursor:pointer}small{color:#a5b7d4}pre{white-space:pre-wrap}a{color:#a8ccff}</style>'
+_SECURITY_STYLE = '<meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font:16px system-ui;background:#0b1220;color:#edf4ff;max-width:740px;margin:4vh auto;padding:22px}section{background:#182337;padding:24px;border-radius:22px;margin:18px 0}input,button,select{box-sizing:border-box;font:inherit;padding:12px;border-radius:12px;border:1px solid #415471;background:#0f192a;color:inherit;margin:5px;width:100%}button{background:#276edb;cursor:pointer}input[type=checkbox]{width:auto;margin-right:10px}label{display:block;padding:10px 0}small{color:#a5b7d4}pre{white-space:pre-wrap}a{color:#a8ccff}</style>'
 _PASSKEY_HTML = '''<!doctype html><html lang="de"><head><title>RJ Tracker · Sichere Anmeldung</title>STYLE</head><body><h1>RJ Tracker · Passkey</h1><small>Nur Anmeldung und Passkey-Einrichtung. Keine Tracker oder Standortdaten.</small><section><input id="username" placeholder="Benutzername (optional)"><input id="password" type="password" placeholder="Passwort zur Einrichtung"><input id="code" placeholder="2FA-Code, falls aktiviert"><button id="go">Passkey verwenden</button><pre id="result"></pre></section><script>
 const q=new URLSearchParams(location.search),out=document.getElementById('result');let csrf='';
 const dec=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')+'='.repeat((4-s.length%4)%4)),c=>c.charCodeAt(0));
@@ -27535,14 +27588,18 @@ def passkey_bridge_exchange():
         if not user or not user.get('active',True) or row['generation']!=app_password_generation():return jsonify(status='error',message='Konto geändert.'),403
     return jsonify(finish_user_login(user))
 
-_ADMIN_HTML = '''<!doctype html><html lang="de"><head><title>RJ Tracker · Administration</title>STYLE</head><body><h1>RJ Tracker</h1><small>API Edition · Administration ohne Standortansicht</small><section id="login"><h2>Hauptadmin anmelden</h2><input id="pw" type="password" placeholder="Hauptpasswort"><input id="otp" placeholder="2FA- oder Wiederherstellungscode"><button id="signin">Anmelden</button></section><section id="tools" hidden><h2>Serverstatus</h2><pre id="stats"></pre><h2>Angemeldete Geräte</h2><div id="clients"></div><h2>Passwort eines Benutzers zurücksetzen</h2><select id="users"></select><input id="newpw" type="password" placeholder="Neues Passwort (mindestens 10 Zeichen)"><button id="reset">Passwort zurücksetzen</button><h2>Hauptpasswort ändern</h2><input id="current" type="password" placeholder="Aktuelles Passwort"><input id="master" type="password" placeholder="Neues Hauptpasswort"><button id="change">Hauptpasswort ändern</button><button id="logout">Abmelden</button></section><pre id="message"></pre><script>
+_ADMIN_HTML = '''<!doctype html><html lang="de"><head><title>RJ Tracker · Administration</title>STYLE</head><body><h1>RJ Tracker</h1><small>API Edition · Administration ohne Standortansicht</small><section id="login"><h2>Hauptadmin anmelden</h2><input id="pw" type="password" placeholder="Hauptpasswort"><input id="otp" placeholder="2FA- oder Wiederherstellungscode"><button id="signin">Anmelden</button></section><section id="tools" hidden><h2>Serverstatus</h2><pre id="stats"></pre><h2>Angemeldete Geräte</h2><div id="clients"></div><h2>ChatGPT / MCP</h2><input id="mcpbase" placeholder="Öffentliche HTTPS-Basisadresse"><label><input id="mcpenabled" type="checkbox">MCP aktiv</label><label><input id="mcpactions" type="checkbox">Besitzeraktionen erlauben</label><label><input id="mcpguests" type="checkbox">Freigabelinks erlauben</label><button id="mcpsave">MCP speichern</button><button id="mcpcheck">Verbindung prüfen</button><button id="mcpreconnect">Alle MCP-Verbindungen widerrufen / neu verbinden</button><pre id="mcpinfo"></pre><div id="mcpconnections"></div><h2>Passwort eines Benutzers zurücksetzen</h2><select id="users"></select><input id="newpw" type="password" placeholder="Neues Passwort (mindestens 10 Zeichen)"><button id="reset">Passwort zurücksetzen</button><h2>Hauptpasswort ändern</h2><input id="current" type="password" placeholder="Aktuelles Passwort"><input id="master" type="password" placeholder="Neues Hauptpasswort"><button id="change">Hauptpasswort ändern</button><button id="logout">Abmelden</button></section><pre id="message"></pre><script>
 let csrf='',pending=false;const message=document.getElementById('message');
 async function api(path,method='GET',body){const r=await fetch(path,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:body?JSON.stringify(body):undefined});const j=await r.json();if(!r.ok||j.status==='error')throw Error(j.message||'Zugriff verweigert');if(j.csrf_token)csrf=j.csrf_token;return j}
-async function load(){const j=await api('admin/api/status');csrf=j.csrf_token;document.getElementById('login').hidden=true;tools.hidden=false;stats.textContent='Version: '+j.version+'\\nBenutzer: '+j.user_count+'\\nAngemeldete Geräte: '+j.clients.length+'\\nAktive API-Schlüssel: '+j.key_count;clients.replaceChildren();for(const c of j.clients){const div=document.createElement('div'),b=document.createElement('button');div.textContent=c.label+' · '+c.user_id+' · '+(c.revoked?'Abgemeldet':'Aktiv');b.textContent='Gerät abmelden';b.disabled=c.revoked;b.onclick=()=>run(async()=>{await api('admin/api/clients/'+encodeURIComponent(c.id),'DELETE',{});await load()});div.append(b);clients.append(div)}users.replaceChildren();for(const u of j.users){if(u.id==='main')continue;const o=document.createElement('option');o.value=u.id;o.textContent=u.username;users.append(o)}}
+async function load(){const j=await api('admin/api/status');csrf=j.csrf_token;document.getElementById('login').hidden=true;tools.hidden=false;stats.textContent='Version: '+j.version+'\\nBenutzer: '+j.user_count+'\\nAngemeldete Geräte: '+j.clients.length+'\\nAktive API-Schlüssel: '+j.key_count;clients.replaceChildren();for(const c of j.clients){const div=document.createElement('div'),b=document.createElement('button');div.textContent=c.label+' · '+c.user_id+' · '+(c.revoked?'Abgemeldet':'Aktiv');b.textContent='Gerät abmelden';b.disabled=c.revoked;b.onclick=()=>run(async()=>{await api('admin/api/clients/'+encodeURIComponent(c.id),'DELETE',{});await load()});div.append(b);clients.append(div)}users.replaceChildren();for(const u of j.users){if(u.id==='main')continue;const o=document.createElement('option');o.value=u.id;o.textContent=u.username;users.append(o)}await loadMCP()}
 async function run(fn){try{await fn();message.textContent='Erfolgreich.'}catch(e){message.textContent=e.message}}
 signin.onclick=()=>run(async()=>{const j=await api(pending?'admin/api/2fa':'admin/api/login','POST',pending?{code:otp.value}:{pw:pw.value});if(j.status==='two_factor_required'){pending=true;message.textContent='2FA-Code eingeben und nochmals anmelden.';return}pw.value='';otp.value='';await load()});
 reset.onclick=()=>run(async()=>{if(!confirm('Passwort dieses Benutzers ersetzen?'))return;await api('admin/api/users/'+encodeURIComponent(users.value)+'/password','POST',{new_password:newpw.value});newpw.value=''});
 change.onclick=()=>run(async()=>{await api('api/security/password','POST',{current_password:current.value,new_password:master.value,confirm_password:master.value});current.value='';master.value=''});
+async function loadMCP(){const j=await api('api/mcp/settings'),m=j.mcp;mcpbase.value=m.public_base_url||'';mcpenabled.checked=m.enabled;mcpactions.checked=m.allow_actions;mcpguests.checked=m.allow_shared_access;mcpinfo.textContent='MCP-Link: '+m.endpoint+'\\nBereit: '+(m.ready?'Ja':'Nein')+'\\nAktive Verbindungen: '+m.active_grants;mcpconnections.replaceChildren();for(const c of j.connections||[]){const div=document.createElement('div'),b=document.createElement('button');div.textContent=c.client_name+' · '+c.principal+' · '+new Date(c.last_used_ts*1000).toLocaleString();b.textContent='Verbindung widerrufen';b.onclick=()=>run(async()=>{if(!confirm('Diese Verbindung sofort sperren?'))return;await api('api/mcp/connections/'+encodeURIComponent(c.id),'DELETE',{});await loadMCP()});div.append(b);mcpconnections.append(div)}}
+mcpsave.onclick=()=>run(async()=>{await api('api/mcp/settings','POST',{public_base_url:mcpbase.value,enabled:mcpenabled.checked,allow_actions:mcpactions.checked,allow_shared_access:mcpguests.checked});await loadMCP()});
+mcpcheck.onclick=()=>run(async()=>{const j=await api('api/mcp/diagnostics');mcpinfo.textContent=j.checks.map(c=>c.label+': '+(c.ok?'OK':c.detail)).join('\\n')});
+mcpreconnect.onclick=()=>run(async()=>{if(!confirm('Alle MCP-Verbindungen sperren? Danach den MCP-Link in ChatGPT neu verbinden und anmelden.'))return;await api('api/mcp/settings','DELETE',{});await loadMCP()});
 logout.onclick=()=>run(async()=>{await api('api/logout','POST',{});location.reload()});load().catch(()=>{});
 </script></body></html>'''.replace('STYLE',_SECURITY_STYLE)
 
@@ -27591,6 +27648,82 @@ def admin_console_reset(user_id):
     row.update(user_password_record(password));save_users_registry()
     audit_event('admin_password_reset',user_id,'Passwort in der Admin-Oberfläche zurückgesetzt')
     return jsonify(status='ok')
+
+
+
+# 20.2 is a read/view upgrade: established stores and token formats stay intact.
+@app.route(f"{MOBILE_API_PREFIX}/history/days", methods=["GET"])
+def mobile_history_days_api():
+    try:
+        model = mcp_resolve_tracker(str(request.args.get("ref") or ""))
+        with state_lock:
+            points = mcp_history_internal_points(model, {"since_ts": 0, "until_ts": int(time.time())}, raw_reports=True)
+        rows = {}
+        for point in points:
+            day = local_datetime(point["ts"]).date().isoformat()
+            row = rows.setdefault(day, {"date": day, "count": 0, "networks": set()})
+            row["count"] += 1
+            row["networks"].add(str(point.get("source") or "unknown"))
+        return jsonify(status="ok", timezone=APP_TIMEZONE_NAME, today=datetime.now(APP_TIMEZONE).date().isoformat(),
+                       days=[{**rows[day], "networks": sorted(rows[day]["networks"])} for day in sorted(rows, reverse=True)])
+    except MCPToolError as exc:
+        return mobile_json_error(str(exc), 404 if exc.code == "not_found" else 400, exc.code)
+
+
+def mcp_connection_rows():
+    """One row per authorization family; never expose tokens or share secrets."""
+    with mcp_lock:
+        store = state.get("mcp_oauth", {})
+        families = {}
+        for bucket in ("access_tokens", "refresh_tokens"):
+            for row in list(store.get(bucket, {}).values()):
+                if not mcp_token_still_valid(row):
+                    continue
+                family = str(row.get("family") or "")
+                if not family:
+                    continue
+                client_id = str(row.get("client_id") or "")
+                client = store.get("clients", {}).get(client_id, {})
+                public = families.setdefault(family, {"id": family, "client_id": client_id,
+                    "client_name": str(client.get("client_name") or "ChatGPT")[:100],
+                    "principal": mcp_grant_principal(row), "issued_ts": int(row.get("issued_ts", 0)),
+                    "expires_ts": 0, "last_used_ts": 0, "scopes": list(row.get("scopes") or [])})
+                public["expires_ts"] = max(public["expires_ts"], int(row.get("expires_ts", 0)))
+                public["last_used_ts"] = max(public["last_used_ts"], int(row.get("last_used_ts", 0)))
+        return sorted(families.values(), key=lambda row: row["last_used_ts"], reverse=True)
+
+
+@app.route("/api/mcp/connections/<connection_id>", methods=["DELETE"])
+def mcp_delete_connection_api(connection_id):
+    with mcp_lock:
+        store = state.setdefault("mcp_oauth", default_mcp_oauth_store())
+        found = False
+        for bucket in ("access_tokens", "refresh_tokens", "used_refresh_tokens"):
+            for key, row in list(store.get(bucket, {}).items()):
+                if isinstance(row, dict) and hmac.compare_digest(str(row.get("family") or ""), connection_id):
+                    store[bucket].pop(key, None)
+                    found = True
+        if not found:
+            return jsonify(status="error", message="Verbindung nicht gefunden."), 404
+        mcp_save_oauth()
+    mcp_audit_event("connection_revoked", detail="single_authorization_family")
+    return jsonify(status="ok", connections=mcp_connection_rows(), mcp=mcp_public_state())
+
+
+@app.route("/api/mcp/diagnostics", methods=["GET"])
+def mcp_diagnostics_api():
+    mcp = mcp_public_state()
+    base = mcp_external_base_url(False)
+    checks = [
+        {"label": "MCP aktiviert", "ok": mcp["enabled"], "detail": "MCP in den Einstellungen aktivieren."},
+        {"label": "Öffentliche HTTPS-Adresse", "ok": bool(base.startswith("https://")), "detail": "HTTPS-Basisadresse konfigurieren."},
+        {"label": "Eigenes Master-Passwort", "ok": mcp["secure_password"], "detail": "Eigenes Passwort unter Sicherheit festlegen."},
+        {"label": "OAuth-Anmeldeseite", "ok": "mcp_oauth_authorize" in app.view_functions, "detail": "OAuth-Route fehlt."},
+    ]
+    return jsonify(status="ok", ready=all(row["ok"] for row in checks), checks=checks,
+        endpoint=mcp["endpoint"], authorization_url=base+"/oauth/authorize",
+        metadata_url=base+"/.well-known/oauth-authorization-server",
+        note="Lokale Konfiguration geprüft. Die Erreichbarkeit deiner öffentlichen Domain prüft ChatGPT beim Verbinden.")
 
 
 if __name__ == "__main__":

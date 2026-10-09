@@ -1,11 +1,13 @@
 import SwiftUI
+import UserNotifications
 
 struct AlertsView: View {
     @Environment(AppModel.self) private var model
-    @State private var unreadOnly = false
+    @State private var unreadOnly = true
     @State private var busy = false
     @State private var search = ""
-    @State private var limit = 150
+    @State private var limit = 50
+    @State private var confirmClear = false
     private var events: [AlertEvent] {
         (model.bootstrap?.alerts?.events ?? []).filter { (!unreadOnly || $0.acknowledged != true) && (search.isEmpty || (($0.title ?? "") + " " + ($0.body ?? "")).localizedCaseInsensitiveContains(search)) }.sorted { ($0.ts ?? 0) > ($1.ts ?? 0) }
     }
@@ -33,11 +35,12 @@ struct AlertsView: View {
                     }.padding(.vertical, 6)
                 }
                 .swipeActions {
+                    Button(role: .destructive) { Task { await mutate("delete_event", payload: ["event_id": event.id]) } } label: { Label("Löschen", systemImage: "trash") }
                     Button { Task { await acknowledge([event]) } } label: { Label("Gelesen", systemImage: "checkmark") }.tint(.blue)
                 }
             }
-            if (model.bootstrap?.alerts?.eventCount ?? 0) > (model.bootstrap?.alerts?.events?.count ?? 0), limit < 500 {
-                Button("Ältere Meldungen laden") { limit = 500; Task { await model.refreshAlerts(limit: limit) } }.disabled(model.isRefreshingAlerts)
+            if (unreadOnly ? (model.bootstrap?.alerts?.unreadCount ?? 0) : (model.bootstrap?.alerts?.eventCount ?? 0)) > (model.bootstrap?.alerts?.events?.count ?? 0), limit < 500 {
+                Button("Ältere Meldungen laden") { limit = 500; Task { await model.refreshAlerts(limit: limit, unreadOnly: unreadOnly) } }.disabled(model.isRefreshingAlerts)
             }
             Section {
                 NavigationLink { SettingsView() } label: { Label("Mitteilungen einrichten", systemImage: "gearshape") }
@@ -45,12 +48,28 @@ struct AlertsView: View {
         }
         .scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Meldungen").navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            Button { Task { await acknowledge(events.filter { $0.acknowledged != true }) } } label: { Image(systemName: "checkmark.circle") }
-                .disabled(busy || !events.contains { $0.acknowledged != true }).accessibilityLabel("Angezeigte Meldungen als gelesen markieren")
+            Menu {
+                Button("Alle als gelesen markieren", systemImage: "checkmark.circle") {
+                    Task { await mutate("acknowledge_all_events") }
+                }
+                Button("Alle Meldungen leeren", systemImage: "trash", role: .destructive) { confirmClear = true }
+            } label: { Image(systemName: "ellipsis.circle") }.disabled(busy)
         }
+        .confirmationDialog("Alle gespeicherten Meldungen löschen?", isPresented: $confirmClear, titleVisibility: .visible) {
+            Button("Alle Meldungen leeren", role: .destructive) { Task { await mutate("clear_events") } }
+        } message: { Text("Benachrichtigungseinstellungen und Standortverläufe bleiben erhalten.") }
         .searchable(text: $search, prompt: "Meldungen durchsuchen")
-        .task { await model.refreshAlerts(limit: limit) }
-        .refreshable { await model.refreshAlerts(limit: limit) }
+        .onChange(of: unreadOnly) { _, _ in limit = 50; Task { await model.refreshAlerts(limit: limit, unreadOnly: unreadOnly) } }
+        .task { await model.refreshAlerts(limit: limit, unreadOnly: unreadOnly) }
+        .refreshable { await model.refreshAlerts(limit: limit, unreadOnly: unreadOnly) }
+    }
+    private func mutate(_ action: String, payload: [String: Any] = [:]) async {
+        guard !busy else { return }; busy = true; defer { busy = false }
+        do {
+            _ = try await APIClient.shared.action(action, payload: payload)
+            if action == "clear_events" { UNUserNotificationCenter.current().removeAllDeliveredNotifications() }
+            await model.refreshAlerts(limit: limit, unreadOnly: unreadOnly)
+        } catch { model.errorMessage = error.localizedDescription }
     }
     private func acknowledge(_ events: [AlertEvent]) async {
         guard !busy else { return }
@@ -61,7 +80,7 @@ struct AlertsView: View {
                 if let index = model.bootstrap?.alerts?.events?.firstIndex(where: { $0.id == event.id }) { model.bootstrap?.alerts?.events?[index].acknowledged = true }
                 model.bootstrap?.alerts?.unreadCount = max(0, (model.bootstrap?.alerts?.unreadCount ?? 0) - 1)
             }
-            await model.refreshAlerts(limit: limit)
+            await model.refreshAlerts(limit: limit, unreadOnly: unreadOnly)
         } catch { model.errorMessage = error.localizedDescription }
     }
 }

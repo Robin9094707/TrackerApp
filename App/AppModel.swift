@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UserNotifications
 
 @MainActor
 @Observable
@@ -156,16 +157,17 @@ final class AppModel {
     func isLocating(_ tracker: Tracker) -> Bool { locatingRefs.contains(tracker.ref) }
     func isUpdatingNotification(_ tracker: Tracker) -> Bool { notificationRefs.contains(tracker.ref) }
 
-    func refreshAlerts(limit: Int = 150) async {
+    func refreshAlerts(limit: Int = 150, unreadOnly: Bool = false) async {
         guard connectionState == .connected, !isRefreshingAlerts else { return }
         if bootstrap == nil { await refresh(); return }
         let generation = sessionGeneration
         isRefreshingAlerts = true
         defer { if generation == sessionGeneration { isRefreshingAlerts = false } }
         do {
-            let alerts = try await APIClient.shared.alerts(limit: limit)
+            let alerts = try await APIClient.shared.alerts(limit: limit, unreadOnly: unreadOnly)
             guard generation == sessionGeneration, connectionState == .connected, !Task.isCancelled else { return }
             bootstrap?.alerts = alerts
+            try? await UNUserNotificationCenter.current().setBadgeCount(alerts.unreadCount ?? 0)
         } catch is CancellationError { } catch {
             guard generation == sessionGeneration else { return }
             errorMessage = error.localizedDescription

@@ -72,14 +72,15 @@ final class APIClient {
         return response.trackers
     }
 
-    func history(tracker: String, days: Int, force: Bool = false) async throws -> HistoryResponse {
-        let key = "\(baseURL?.absoluteString ?? "")|\(csrfToken)|\(tracker)|\(days)"
+    func history(tracker: String, days: Int, dates: [String] = [], force: Bool = false) async throws -> HistoryResponse {
+        let key = "\(baseURL?.absoluteString ?? "")|\(csrfToken)|\(tracker)|\(days)|\(dates.sorted().joined(separator: ","))"
         if !force, let (date, response) = historyCache[key], Date().timeIntervalSince(date) < 45 { return response }
         if let task = historyTasks[key] { return try await task.value }
         let generation = historyGeneration
         let task = Task<HistoryResponse, Error> {
             try await self.request(path: "/api/mobile/v1/history", query: [
                 .init(name: "ref", value: tracker), .init(name: "days", value: String(days)),
+                .init(name: "dates", value: dates.isEmpty ? nil : dates.sorted().joined(separator: ",")),
                 .init(name: "limit", value: "2000"), .init(name: "resolve_addresses", value: "0"), .init(name: "observation_limit", value: "1")
             ])
         }
@@ -93,11 +94,16 @@ final class APIClient {
         return response
     }
 
-    func historyStream(tracker: String, days: Int, cursor: String?, replay: Bool) async throws -> HistoryStreamResponse {
+    func historyStream(tracker: String, days: Int, dates: [String] = [], cursor: String?, replay: Bool) async throws -> HistoryStreamResponse {
         var query = [URLQueryItem(name: "ref", value: tracker), .init(name: "days", value: String(days)),
                      .init(name: "limit", value: "3000"), .init(name: "replay", value: replay ? "1" : "0")]
+        if !dates.isEmpty { query.append(.init(name: "dates", value: dates.sorted().joined(separator: ","))) }
         if let cursor { query.append(.init(name: "cursor", value: cursor)) }
         return try await request(path: "/api/mobile/v1/history/stream", query: query)
+    }
+
+    func historyCalendar(tracker: String) async throws -> HistoryCalendarResponse {
+        try await request(path: "/api/mobile/v1/history/days", query: [.init(name: "ref", value: tracker)])
     }
 
     func downloadBackup(name: String) async throws -> URL {
@@ -115,8 +121,8 @@ final class APIClient {
         try await request(path: "/api/mobile/v1/capabilities")
     }
 
-    func alerts(limit: Int = 150) async throws -> AlertSummary {
-        try await request(path: "/api/mobile/v1/alerts", query: [.init(name: "limit", value: String(min(500, max(1, limit))))])
+    func alerts(limit: Int = 150, unreadOnly: Bool = false) async throws -> AlertSummary {
+        try await request(path: "/api/mobile/v1/alerts", query: [.init(name: "limit", value: String(min(500, max(1, limit)))), .init(name: "unread_only", value: unreadOnly ? "1" : "0")])
     }
 
     func pushDevices() async throws -> PushDevicesResponse {

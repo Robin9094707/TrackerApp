@@ -29,6 +29,7 @@ struct MoreView: View {
                 NavigationLink { ClientAccessView() } label: { Label("Geräte & API-Schlüssel", systemImage: "key.horizontal") }
             }
             Section("Server verwalten") {
+                NavigationLink { MCPManagementView() } label: { Label("ChatGPT / MCP", systemImage: "bubble.left.and.text.bubble.right") }
                 NavigationLink { BackupsManagementView() } label: { Label("Backups & Wiederherstellung", systemImage: "externaldrive.badge.timemachine") }
                 NavigationLink { NetworkComparisonView() } label: { Label("Netzwerkvergleich", systemImage: "chart.bar.xaxis") }
                 NavigationLink { GoogleRepairView() } label: { Label("Google-Reparatur", systemImage: "wrench.and.screwdriver") }

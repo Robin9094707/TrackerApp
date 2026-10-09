@@ -11,6 +11,23 @@ struct HistoryView: View {
     @AppStorage("historyEveryReport") private var detailed = false
     @State private var response: HistoryResponse?
     @State private var loadedDays: Int?
+    @State private var calendarResponse: HistoryCalendarResponse?
+    @State private var selectedDates: Set<String> = []
+    @State private var draftDates: Set<String> = []
+    @State private var showCalendar = false
+    @State private var dateSearch = ""
+    @State private var loadedScope = ""
+    @State private var selectionMode = "today"
+    private var historyCalendar: Calendar { HistoryCalendar.calendar(timezone: calendarResponse?.timezone ?? TimeZone.current.identifier) }
+    private var todayKey: String { HistoryCalendar.key(Date(), calendar: historyCalendar) }
+    private var requestDates: [String] {
+        if selectionMode == "today" { return [todayKey] }
+        return selectedDates.isEmpty ? [todayKey] : selectedDates.sorted()
+    }
+    private var dateScope: String { requestDates.joined(separator: ",") }
+    private var matchingStoredDays: [StoredHistoryDay] {
+        (calendarResponse?.days ?? []).filter { dateSearch.isEmpty || $0.date.contains(dateSearch) || dayTitle($0.date).localizedCaseInsensitiveContains(dateSearch) }
+    }
     @State private var prepared = PreparedHistory()
     @State private var timelineLimit = 60
     @State private var loadID = UUID()
@@ -80,8 +97,8 @@ struct HistoryView: View {
                         }.rjCard()
                     }
                     if response != nil {
-                        if let loadedDays, loadedDays != days {
-                            Label("Angezeigt: letzter erfolgreich geladener Zeitraum (\(loadedDays) Tage).", systemImage: "clock.badge.exclamationmark")
+                        if loadedDays != nil, loadedScope != dateScope {
+                            Label("Angezeigt: letzter erfolgreich geladener Zeitraum.", systemImage: "clock.badge.exclamationmark")
                                 .font(.footnote).foregroundStyle(.orange)
                         }
                         sourceFilters
@@ -90,7 +107,7 @@ struct HistoryView: View {
                         }.pickerStyle(.segmented)
                         Text(detailed ? "Alle empfangenen Reports, auch am selben Ort und zur selben Sekunde. Dichte Kartenpunkte werden beim Zoomen aufgefächert." : "Nahe Meldungen werden für die Ansicht gebündelt. Alle Originalreports bleiben gespeichert und lassen sich einzeln anzeigen.")
                             .font(.caption).foregroundStyle(.secondary)
-                        if !prepared.availableDays.isEmpty { dayPicker }
+                        // Exact day selection is loaded by the server, including non-adjacent days.
                         if points.isEmpty {
                             ContentUnavailableView("Keine Standortpunkte", systemImage: "clock", description: Text("Für diesen Zeitraum und diese Netzwerkauswahl liegen keine Meldungen vor."))
                         } else {
@@ -121,7 +138,7 @@ struct HistoryView: View {
         }
         .rjScreenChrome()
         .navigationTitle("Standortverlauf").navigationBarTitleDisplayMode(.inline)
-        .task(id: "\(days)-\(scenePhase)") {
+        .task(id: "\(dateScope)-\(scenePhase)") {
             if scenePhase == .active { await watchHistory() }
         }
         .onChange(of: detailed) { _, _ in Task { await prepare(preserveSelection: true) } }
@@ -130,6 +147,7 @@ struct HistoryView: View {
             do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
             await filterTimeline()
         }
+        .sheet(isPresented: $showCalendar) { calendarSheet }
         .sheet(isPresented: $fullscreen) {
             NavigationStack {
                 VStack(spacing: 8) {
@@ -170,13 +188,95 @@ struct HistoryView: View {
     }
 
     private var periodPicker: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             Text(tracker.name).font(.title2.bold())
-            Text("Orte, Zeitpunkte und Quellen auf einen Blick.").font(.subheadline).foregroundStyle(.secondary)
-            Picker("Zeitraum", selection: $days) {
-                Text("24 h").tag(1); Text("7 T.").tag(7); Text("14 T.").tag(14); Text("30 T.").tag(30); Text("90 T.").tag(90)
-            }.pickerStyle(.segmented).padding(.top, 4)
-        }
+            HStack {
+                Label(selectionMode == "today" ? "Heute" : "\(requestDates.count) Kalendertage", systemImage: "calendar")
+                    .font(.headline)
+                Spacer()
+                Button("Tage auswählen") { draftDates = Set(requestDates); showCalendar = true }
+                    .buttonStyle(.bordered).buttonBorderShape(.capsule)
+            }
+            Text(selectionMode == "today" ? "Ab Mitternacht bis jetzt · \(calendarResponse?.timezone ?? historyCalendar.timeZone.identifier)" : requestDates.map(dayTitle).joined(separator: " · "))
+                .font(.caption).foregroundStyle(.secondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    Button("Heute") { selectionMode = "today"; selectedDates = [todayKey]; selectedDay = nil }
+                    Button("Gestern") {
+                        selectionMode = "custom"
+                        if let yesterday = historyCalendar.date(byAdding: .day, value: -1, to: Date()) {
+                            selectedDates = [HistoryCalendar.key(yesterday, calendar: historyCalendar)]
+                        }
+                        selectedDay = nil
+                    }
+                    ForEach([7, 14, 30, 90], id: \.self) { count in
+                        Button("\(count) Tage") {
+                            days = count; selectionMode = "custom"; selectedDay = nil
+                            selectedDates = HistoryCalendar.range(days: count, now: Date(), calendar: historyCalendar)
+                        }
+                    }
+                }.buttonStyle(.bordered).buttonBorderShape(.capsule).font(.caption)
+            }
+            if calendarResponse == nil {
+                Text("Kalender wird geladen. Für die Tagesauswahl Backend 20.2 verwenden.").font(.caption).foregroundStyle(.secondary)
+            }
+        }.rjCard()
+    }
+
+    private func dayTitle(_ key: String) -> String {
+        guard let date = HistoryCalendar.date(key, calendar: historyCalendar) else { return key }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "de_DE")
+        formatter.timeZone = historyCalendar.timeZone
+        formatter.dateFormat = "EEE, dd. MMM yyyy"
+        return formatter.string(from: date)
+    }
+
+    private var calendarSheet: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Wähle einen oder mehrere vollständige Tage. Heute zeigt alle Meldungen ab 00:00 Uhr bis jetzt.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    Button("Nur heute") { draftDates = [todayKey] }
+                    Button("Alle gespeicherten Tage") { draftDates = Set(calendarResponse?.days.map(\.date) ?? [todayKey]) }
+                    Button("Auswahl leeren") { draftDates = [] }
+                    if !(calendarResponse?.days.contains { $0.date == todayKey } ?? false) {
+                        calendarDayRow(key: todayKey, detail: "Heute · noch keine Meldungen")
+                    }
+                }
+                Section("Gespeicherte Tage (\(calendarResponse?.days.count ?? 0))") {
+                    ForEach(matchingStoredDays) { day in
+                        calendarDayRow(key: day.date, detail: "\(day.count) Meldungen · " + day.networks.map(\.rjProviderName).joined(separator: " · "))
+                    }
+                }
+            }.rjListChrome().navigationTitle("Kalendertage")
+                .searchable(text: $dateSearch, prompt: "Datum oder Wochentag")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { showCalendar = false } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Anzeigen (\(draftDates.count))") {
+                            selectedDates = draftDates; selectedDay = nil
+                            selectionMode = draftDates == Set([todayKey]) ? "today" : "custom"
+                            showCalendar = false
+                        }.disabled(draftDates.isEmpty)
+                    }
+                }
+        }.presentationDetents([.large])
+    }
+    private func calendarDayRow(key: String, detail: String) -> some View {
+        Button {
+            if draftDates.contains(key) { draftDates.remove(key) } else { draftDates.insert(key) }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: draftDates.contains(key) ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(draftDates.contains(key) ? Color.blue : Color.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(dayTitle(key)).foregroundStyle(.primary)
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+            }.padding(.vertical, 4)
+        }.buttonStyle(.plain).accessibilityValue(draftDates.contains(key) ? "Ausgewählt" : "")
     }
 
     private var sourceFilters: some View {
@@ -476,7 +576,7 @@ struct HistoryView: View {
         if stopPlayback { playing = false }
         let oldPoint = preserveSelection ? selectedPoint : nil
         let wasAtLatest = followLatest && selectedIndex >= points.count - 1
-        let input = response?.points ?? []; let networks = enabledNetworks; let calendar = Calendar.current
+        let input = response?.points ?? []; let networks = enabledNetworks; let calendar = historyCalendar
         if !preserveSelection { selectedDay = nil }
         let day = selectedDay; let detailed = detailed
         let work = Task.detached(priority: .userInitiated) { HistoryAnalysis.prepare(input, networks: networks, calendar: calendar, day: day, detailed: detailed) }
@@ -512,7 +612,7 @@ struct HistoryView: View {
             else { Image(systemName: liveError == nil ? "dot.radiowaves.left.and.right" : "wifi.exclamationmark").foregroundStyle(liveError == nil ? Color.green : Color.orange) }
             VStack(alignment: .leading, spacing: 3) {
                 Text(receiving && !caughtUp ? "Alle Reports werden nachgeladen …" : "Live-Verlauf").font(.caption.weight(.semibold))
-                if !streamSupported { Text("Für alle Einzelreports bitte Backend 20.1 aktualisieren.").font(.caption).foregroundStyle(.orange) }
+                if !streamSupported { Text("Für den Kalender-Verlauf bitte Backend 20.2 aktualisieren.").font(.caption).foregroundStyle(.orange) }
                 else if let liveError { Text(liveError).font(.caption).foregroundStyle(.orange) }
                 else if let lastLiveSync { Text("Synchronisiert \(lastLiveSync.formatted(date: .omitted, time: .standard)) · Prüfung alle 5 Sekunden").font(.caption2).foregroundStyle(.secondary) }
             }
@@ -520,7 +620,10 @@ struct HistoryView: View {
         }.padding(.horizontal, 4)
     }
     @MainActor private func watchHistory() async {
-        if loadedDays != days {
+        do { calendarResponse = try await APIClient.shared.historyCalendar(tracker: tracker.ref) }
+        catch { liveError = "Kalender nicht verfügbar. Backend 20.2 prüfen." }
+        guard !Task.isCancelled else { return }
+        if loadedScope != dateScope {
             streamCursor = nil; caughtUp = false; reportIDs = []; followLatest = true
         }
         await load(force: response != nil)
@@ -539,11 +642,12 @@ struct HistoryView: View {
         guard !receiving, streamSupported else { return }
         receiving = true; defer { receiving = false }
         let requestedDays = days
+        let requestedDates = requestDates; let requestedScope = dateScope
         do {
             var more = true
             while more, !Task.isCancelled {
-                let page = try await APIClient.shared.historyStream(tracker: tracker.ref, days: requestedDays, cursor: streamCursor, replay: caughtUp)
-                guard requestedDays == days, !Task.isCancelled else { return }
+                let page = try await APIClient.shared.historyStream(tracker: tracker.ref, days: requestedDays, dates: requestedDates, cursor: streamCursor, replay: caughtUp)
+                guard requestedScope == dateScope, !Task.isCancelled else { return }
                 let previousCount = response?.points.count ?? 0
                 if response == nil { response = HistoryResponse(status: "ok", tracker: tracker, points: []) }
                 var merged = Dictionary(uniqueKeysWithValues: (response?.points ?? []).map { ($0.id, $0) })
@@ -551,8 +655,7 @@ struct HistoryView: View {
                 for point in page.points {
                     if merged[point.id] != point { changed = true; merged[point.id] = point }
                 }
-                let cutoff = Int(Date().timeIntervalSince1970) - requestedDays * 86400
-                response?.points = merged.values.filter { $0.timestamp >= cutoff }
+                response?.points = merged.values.filter { requestedDates.contains(HistoryCalendar.key(Date(timeIntervalSince1970: Double($0.timestamp)), calendar: historyCalendar)) }
                 reportIDs = Set((response?.points ?? []).map(\.id))
                 response?.matchingTotal = page.matchingTotal
                 let discovered = Set(page.points.map { ($0.network ?? "unknown").rjNormalizedProvider })
@@ -571,28 +674,28 @@ struct HistoryView: View {
         catch APIError.http(let status, _) where status == 404 {
             streamSupported = false; liveError = nil
         } catch {
-            if requestedDays == days, !Task.isCancelled { liveError = "Aktualisierung fehlgeschlagen. Gespeicherter Stand bleibt sichtbar." }
+            if requestedScope == dateScope, !Task.isCancelled { liveError = "Aktualisierung fehlgeschlagen. Gespeicherter Stand bleibt sichtbar." }
         }
     }
     @MainActor private func load(force: Bool = false) async {
         let id = UUID(); loadID = id
         loading = response == nil; error = nil
         let requestedDays = days
+        let requestedDates = requestDates; let requestedScope = dateScope
         defer { if loadID == id { loading = false } }
         do {
-            var loaded = try await APIClient.shared.history(tracker: tracker.ref, days: requestedDays, force: force)
-            guard !Task.isCancelled, requestedDays == days, loadID == id else { return }
-            let preserve = loadedDays == requestedDays && response != nil
+            var loaded = try await APIClient.shared.history(tracker: tracker.ref, days: requestedDays, dates: requestedDates, force: force)
+            guard !Task.isCancelled, requestedScope == dateScope, loadID == id else { return }
+            let preserve = loadedScope == requestedScope && response != nil
             let originalIDs = reportIDs
             if preserve {
-                let cutoff = Int(Date().timeIntervalSince1970) - requestedDays * 86400
                 var merged = Dictionary(uniqueKeysWithValues: (response?.points ?? []).map { ($0.id, $0) })
                 for point in loaded.points {
                     if var existing = merged[point.id] {
                         if let address = point.address { existing.address = address; merged[point.id] = existing }
                     } else { merged[point.id] = point }
                 }
-                loaded.points = merged.values.filter { $0.timestamp >= cutoff }
+                loaded.points = merged.values.filter { requestedDates.contains(HistoryCalendar.key(Date(timeIntervalSince1970: Double($0.timestamp)), calendar: historyCalendar)) }
             } else {
                 enabledNetworks = Set(loaded.points.map { ($0.network ?? "unknown").rjNormalizedProvider })
                 timelineLimit = 60
@@ -601,11 +704,11 @@ struct HistoryView: View {
             enabledNetworks.formUnion(discovered.subtracting(Set(networks)))
             networks = Array(discovered).sorted()
             reportIDs = Set(loaded.points.map(\.id))
-            loadedDays = requestedDays; response = loaded
+            loadedDays = requestedDays; loadedScope = requestedScope; response = loaded
             if !preserve || originalIDs != reportIDs { await prepare(preserveSelection: preserve, stopPlayback: !preserve) }
         } catch is CancellationError { }
         catch {
-            guard !Task.isCancelled, requestedDays == days, loadID == id else { return }
+            guard !Task.isCancelled, requestedScope == dateScope, loadID == id else { return }
             self.error = error.localizedDescription
         }
     }

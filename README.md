@@ -1,4 +1,6 @@
-# RJ Tracker 4.2 · native iOS + API Backend 20.1
+# RJ Tracker 4.3 · native iOS + API Backend 20.2
+
+Neu: vollständige Kalendertage und freie Mehrfachauswahl, Benachrichtigungen leeren, native MCP-Verwaltung sowie MCP-Kontrollen im Admin-Bereich. [Update-Anleitung und Kompatibilität](docs/UPGRADE-4.3.md).
 
 Native SwiftUI-/MapKit-App für Apple-, Google-, Samsung- und Fusion-Tracker. Android und der Android-Workflow wurden entfernt. Das Backend stellt die bisherigen Tracker-APIs sowie neue Import-, Geräte-, Passkey- und API-Key-Endpunkte bereit. Die Browseroberfläche unter `/` bietet ausschließlich Hauptadmin-Anmeldung, Statistik, Geräte-Abmeldung und Passwortverwaltung.
 
@@ -48,7 +50,7 @@ Neue Passkeys und Passkey-Anmeldung starten direkt aus der App einen Sicherheits
 
 ## IPA-Build
 
-GitHub Actions baut bei Push nach `main` die Release-App und erzeugt `RJ-Tracker-v4.2.0-unsigned.ipa`. Standardmäßig laufen keine Simulator-/UI-Tests. Optionale bisherige Review-Tests bleiben auf ausdrücklichen Workflow-Input beschränkt.
+GitHub Actions baut bei Push nach `main` die Release-App und erzeugt `RJ-Tracker-v4.3.0-unsigned.ipa`. Standardmäßig laufen keine Simulator-/UI-Tests. Optionale bisherige Review-Tests bleiben auf ausdrücklichen Workflow-Input beschränkt.
 
 Die IPA ist **unsigniert** und muss für das iPhone mit einem geeigneten Profil signiert werden. APNs benötigt zusätzlich die bestehenden Servervariablen für Team-ID, Key-ID und `.p8` sowie passende App-Entitlements beim Signieren.
 

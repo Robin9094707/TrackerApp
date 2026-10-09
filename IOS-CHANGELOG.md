@@ -1,3 +1,15 @@
+# 4.3.0 · Calendar History & ChatGPT Control Center
+
+- History defaults to today from local midnight, using the server timezone. Select one day, arbitrary multiple days, or all stored dates, including those older than 90 days.
+- Today/yesterday/7/14/30/90 shortcuts use calendar dates; DST days can contain 23 or 25 hours. Cursor pages remain scoped to the date selection and include late-arriving old reports.
+- New native ChatGPT/MCP management screen: HTTPS address, enable/disable, owner/guest permissions, MCP link sharing, configuration diagnostics, authorization families, individual/bulk revocation and setup instructions.
+- OAuth authentication includes a master/account password field and optional 2FA. Incorrect credentials return the HTML form with an inline error for retry.
+- Alerts default to unread, fetch unread events on the server, and offer bulk acknowledgment, individual deletion and clearing the complete inbox. Clearing also removes this app’s delivered iOS notifications.
+- Admin console now manages MCP settings and authorizations while remaining separate from tracker data.
+- Existing store paths, schema, tracker IDs, provider credentials, shares and history formats are retained. No destructive migration is added. Existing OAuth grants survive an update unless settings/passwords are changed or they are explicitly revoked.
+- 11 focused backend regression tests cover existing-format stores, DST, day boundaries, non-adjacent dates, calendar indexing, pagination/late reports, notification preservation, CSRF, isolated revocation, disabling/re-enabling, admin restrictions and the OAuth/PKCE round trip.
+- Bundle ID and Keychain identifiers remain unchanged; update the app with the same signing identity to retain its local data.
+
 # iOS 4.2.0 · Vollständige Reports & Live-Verlauf
 
 - Deckender Tracker-Panelhintergrund bei jeder Höhe und auf iPad; die Tracker-Liste bleibt beim Verkleinern klar.
