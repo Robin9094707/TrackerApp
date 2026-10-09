@@ -1,4 +1,4 @@
-# Universal Tag Studio 20.3.0 · MCP DISCOVERY + FINDMY MAINTENANCE
+# Universal Tag Studio 20.3.1 · MCP ENDPOINT COMPATIBILITY + FINDMY MAINTENANCE
 # Backward-compatible single-file upgrade. Existing data/ directory layout,
 # tracker IDs, histories, shares and provider sessions are intentionally
 # preserved. Google integration: leonboe1/GoogleFindMyTools (GPL-3.0).
@@ -11725,7 +11725,7 @@ def tracker_lab_active_job():
     return None
 
 APP_NAME = "Universal Tag Studio"
-APP_VERSION = "20.3.0 API EDITION"
+APP_VERSION = "20.3.1 API EDITION"
 
 
 OPTIMIZED_ROUTE_DEFAULT_POINTS = int(os.environ.get("ULTRA_TRACKER_ROUTE_MAX_DISPLAY_POINTS", "4200"))
@@ -14720,7 +14720,7 @@ def mcp_json_response(payload, status=200, headers=None):
     response.headers["Cache-Control"] = "no-store"
     for key, value in (headers or {}).items():
         response.headers[key] = value
-    if str(request.path or "").rstrip("/").endswith("/mcp"):
+    if request.endpoint == "mcp_endpoint" or str(request.path or "").rstrip("/").endswith("/mcp"):
         mcp_apply_cors(response)
     return response
 
@@ -19831,9 +19831,13 @@ def mcp_rpc_result(request_id, result):
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
-@app.route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"])
-@app.route("/t/<tenant_id>/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"])
+@app.route("/", methods=["POST", "DELETE", "OPTIONS"])
+@app.route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"], strict_slashes=False)
+@app.route("/t/<tenant_id>/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"], strict_slashes=False)
 def mcp_endpoint(tenant_id=None):
+    # Saved connectors/proxies may send JSON-RPC to the domain root. Dispatch
+    # directly: redirects can discard the bearer header or the request body.
+    # All aliases share the canonical OAuth resource and every security check.
     # ChatGPT can fetch an MCP App template from its isolated browser sandbox.
     # Complete the CORS preflight before OAuth; the following POST still needs
     # the normal bearer grant and is subject to every existing security check.
@@ -19902,7 +19906,7 @@ def mcp_endpoint(tenant_id=None):
             result = {}
         elif method == "tools/list":
             result = {"tools": mcp_tools(grant)}
-            mcp_audit_event("tools_discovered", client_id=grant.get("client_id"), detail=str(len(result["tools"])))
+            mcp_audit_event("tools_discovered", client_id=grant.get("client_id"), detail=f"tools={len(result['tools'])};path={request.path}")
         elif method == "tools/call":
             tool_name = str(params.get("name") or "")
             tool_arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
@@ -20108,7 +20112,7 @@ def check_auth():
         "/.well-known/openid-configuration",
     }
     tenant_mcp_public = bool(re.match(r"^/t/[a-z0-9][a-z0-9_-]{0,63}/(?:mcp(?:/|$)|oauth(?:/|$)|\.well-known(?:/|$))", request.path))
-    if request.path in public_paths or tenant_mcp_public or request.path.startswith("/oauth/") or request.path.startswith("/shared/") or request.path.startswith("/api/shared/") or request.path.startswith("/recovery/") or request.path.startswith("/api/recovery-share/") or request.path.startswith("/api/shortcut/") or request.path.startswith("/api/password-reset/") or request.endpoint in ["index", "unlock", "unlock_two_factor", "mobile_pair_api", "mobile_pair_two_factor_api", "passkey_auth_begin_api", "passkey_auth_finish_api", "static", "favicon", "password_reset_request_api"]:
+    if request.endpoint == "mcp_endpoint" or request.path in public_paths or tenant_mcp_public or request.path.startswith("/oauth/") or request.path.startswith("/shared/") or request.path.startswith("/api/shared/") or request.path.startswith("/recovery/") or request.path.startswith("/api/recovery-share/") or request.path.startswith("/api/shortcut/") or request.path.startswith("/api/password-reset/") or request.endpoint in ["index", "unlock", "unlock_two_factor", "mobile_pair_api", "mobile_pair_two_factor_api", "passkey_auth_begin_api", "passkey_auth_finish_api", "static", "favicon", "password_reset_request_api"]:
         return
     if not session.get("app_unlocked"):
         return jsonify({"status": "locked"}), 401
@@ -27394,7 +27398,7 @@ def access_before_request():
             if request.method not in {'GET','HEAD'} and not hmac.compare_digest(str(request.headers.get('X-CSRF-Token') or ''), str(session.get('csrf_token') or 'missing')):
                 return jsonify(status='error', message='CSRF-Token fehlt.'), 403
         return
-    if path.startswith('/oauth/') or path.startswith('/.well-known/') or path == '/mcp' or re.match(r'^/t/[a-z0-9_-]+/(oauth/|\.well-known/|mcp$)', path):
+    if request.endpoint == 'mcp_endpoint' or path.startswith('/oauth/') or path.startswith('/.well-known/') or path == '/mcp' or re.match(r'^/t/[a-z0-9_-]+/(oauth/|\.well-known/|mcp$)', path):
         return
     if session.get('admin_console'):
         allowed = {'/', '/admin', '/api/logout', '/api/security/password'}
@@ -27686,6 +27690,10 @@ logout.onclick=()=>run(async()=>{await api('api/logout','POST',{});location.relo
 @app.route('/')
 @app.route('/admin')
 def index():
+    # An SSE fallback on a root MCP URL must receive a protocol response, not
+    # the HTML administration page. Normal browser navigation stays intact.
+    if request.path == '/' and 'text/event-stream' in request.headers.get('Accept', ''):
+        return mcp_endpoint()
     return Response(_ADMIN_HTML,mimetype='text/html',headers={'Cache-Control':'no-store'})
 
 @app.route('/admin/api/login',methods=['POST'])
@@ -27800,6 +27808,11 @@ def mcp_diagnostics_api():
         {"label": "Eigenes Master-Passwort", "ok": mcp["secure_password"], "detail": "Eigenes Passwort unter Sicherheit festlegen."},
         {"label": "OAuth-Anmeldeseite", "ok": "mcp_oauth_authorize" in app.view_functions, "detail": "OAuth-Route fehlt."},
     ]
+    endpoint_routes = list(app.url_map.iter_rules("mcp_endpoint"))
+    root_alias = any(rule.rule == "/" and "POST" in rule.methods for rule in endpoint_routes)
+    checks.append({"label": "MCP-Endpunkt und Root-Kompatibilität", "ok": root_alias,
+        "detail": "POST / und POST /mcp verwenden dieselbe OAuth-Prüfung." if root_alias else "Root-MCP-Route fehlt."})
+    discovery = next((row for row in state.get("mcp_audit", []) if row.get("action") == "tools_discovered" and row.get("status") == "ok"), None)
     catalog = []
     try:
         catalog = mcp_tools({"principal": "owner", "scopes": mcp_scopes_supported()})
@@ -27816,7 +27829,7 @@ def mcp_diagnostics_api():
         checks.append({"label": "Tool-Erkennung", "ok": False, "detail": str(exc)[:300]})
     return jsonify(status="ok", ready=all(row["ok"] for row in checks), checks=checks,
         protocols=list(MCP_PROTOCOL_VERSIONS), tool_count=len(catalog),
-        endpoint=mcp["endpoint"], authorization_url=base+"/oauth/authorize",
+        endpoint=mcp["endpoint"], root_compatibility=root_alias, last_discovery=discovery, authorization_url=base+"/oauth/authorize",
         metadata_url=base+"/.well-known/oauth-authorization-server",
         note="Lokale Konfiguration geprüft. Die Erreichbarkeit deiner öffentlichen Domain prüft ChatGPT beim Verbinden.")
 

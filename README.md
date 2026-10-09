@@ -1,4 +1,6 @@
-# RJ Tracker 4.4 · native iOS + API Backend 20.3
+# RJ Tracker 4.4.1 · native iOS + API Backend 20.3.1
+
+Fix 4.4.1: MCP-Tool-Erkennung auch bei POST an die Domainwurzel und mit abschließendem Slash. Vorhandene Daten bleiben erhalten; die App zeigt die letzte erfolgreiche Erkennung. [Update 4.4.1](docs/UPGRADE-4.4.1.md).
 
 Neu in 4.4: reparierte MCP-Discovery, sichtbarer Tool-Katalog, FindMy.py-Paketverwaltung, vollständiges Löschen importierter Apple-Tracker und erweiterte API-Werkzeuge. [Update 4.4](docs/UPGRADE-4.4.md).
 

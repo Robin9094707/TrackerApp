@@ -160,6 +160,11 @@ class BackendUpgradeTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/mobile/v1/trackers').status_code,403)
 
     def test_oauth_html_auth_and_pkce_exchange(self):
+        for endpoint in ('/mcp', '/', '/mcp/'):
+            with self.subTest(endpoint=endpoint):
+                self.oauth_html_auth_and_pkce_exchange(endpoint)
+
+    def oauth_html_auth_and_pkce_exchange(self, endpoint):
         public=APP.test_client()
         redirect='http://localhost/callback'
         reg=public.post('/oauth/register',json={'redirect_uris':[redirect],'client_name':'Regression ChatGPT'})
@@ -182,14 +187,14 @@ class BackendUpgradeTests(unittest.TestCase):
             'redirect_uri':redirect,'code':callback['code'][0],'code_verifier':verifier,'resource':params['resource']})
         self.assertEqual(token.status_code,200,token.json)
         self.assertIn('refresh_token',token.json)
-        rpc=public.post('/mcp',json={'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-11-25','clientInfo':{'name':'test','version':'1'},'capabilities':{}}},headers={'Authorization':'Bearer '+token.json['access_token']})
+        rpc=public.post(endpoint,json={'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-11-25','clientInfo':{'name':'test','version':'1'},'capabilities':{}}},headers={'Authorization':'Bearer '+token.json['access_token']})
         self.assertEqual(rpc.status_code,200,rpc.json)
         self.assertIn('result',rpc.json)
         self.assertNotIn('Mcp-Session-Id',rpc.headers)
         headers={'Authorization':'Bearer '+token.json['access_token'],'MCP-Protocol-Version':'2025-11-25'}
-        initialized=public.post('/mcp',json={'jsonrpc':'2.0','method':'notifications/initialized'},headers=headers)
+        initialized=public.post(endpoint,json={'jsonrpc':'2.0','method':'notifications/initialized'},headers=headers)
         self.assertEqual(initialized.status_code,202)
-        catalog=public.post('/mcp',json={'jsonrpc':'2.0','id':2,'method':'tools/list'},headers=headers)
+        catalog=public.post(endpoint,json={'jsonrpc':'2.0','id':2,'method':'tools/list'},headers=headers)
         self.assertEqual(catalog.status_code,200,catalog.json)
         tools=catalog.json['result']['tools'];self.assertGreater(len(tools),10)
         self.assertEqual(len({t['name'] for t in tools}),len(tools))
@@ -198,9 +203,39 @@ class BackendUpgradeTests(unittest.TestCase):
             self.assertEqual(tool['securitySchemes'],tool['_meta']['securitySchemes'])
             self.assertEqual(len(tool['securitySchemes']),1)
             self.assertTrue(set(tool['securitySchemes'][0]['scopes']).issubset({'trackers:read'}))
-        call=public.post('/mcp',json={'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':'list_tracker_catalog','arguments':{}}},headers=headers)
+        call=public.post(endpoint,json={'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':'list_tracker_catalog','arguments':{}}},headers=headers)
         self.assertEqual(call.status_code,200,call.json)
         self.assertFalse(call.json['result'].get('isError'))
+
+    def test_root_mcp_requires_bearer_and_preserves_admin_html(self):
+        public=APP.test_client()
+        body={'jsonrpc':'2.0','id':1,'method':'tools/list'}
+        for client in (public,self.client):
+            for path in ('/','/mcp','/mcp/'):
+                r=client.post(path,json=body)
+                self.assertEqual(r.status_code,401,(path,r.get_data(as_text=True)))
+                self.assertIn('/.well-known/oauth-protected-resource/mcp',r.headers['WWW-Authenticate'])
+                self.assertEqual(r.headers['Cache-Control'],'no-store')
+        self.assertEqual(public.get('/').mimetype,'text/html')
+        self.assertEqual(public.get('/admin').mimetype,'text/html')
+        self.assertEqual(public.get('/',headers={'Accept':'text/event-stream'}).status_code,405)
+        token=self.issue('root-security')[0]
+        headers={'Authorization':'Bearer '+token,'Origin':'https://chatgpt.com'}
+        r=public.post('/',json=body,headers=headers)
+        self.assertEqual(r.status_code,200,r.json)
+        self.assertEqual(r.headers['Access-Control-Allow-Origin'],'https://chatgpt.com')
+        preflight=public.options('/',headers={'Origin':'https://chatgpt.com','Access-Control-Request-Method':'POST'})
+        self.assertEqual(preflight.status_code,204)
+        self.assertIn('Authorization',preflight.headers['Access-Control-Allow-Headers'])
+        headers['Origin']='https://untrusted.example'
+        self.assertEqual(public.post('/',json=body,headers=headers).status_code,403)
+        headers.pop('Origin')
+        self.assertEqual(public.post('/',json={'jsonrpc':'1.0'},headers=headers).status_code,400)
+        diagnostic=self.client.get('/api/mcp/diagnostics').json
+        self.assertTrue(diagnostic['root_compatibility'])
+        self.assertIn('path=/',diagnostic['last_discovery']['detail'])
+        self.assertEqual(self.client.post('/api/mcp/settings',json={'enabled':False},headers=self.headers).status_code,200)
+        self.assertEqual(public.post('/',json=body,headers=headers).status_code,503)
 
     def test_mcp_new_protocol_discovery_and_old_grants(self):
         token=self.issue('version-probe')[0]

@@ -1,3 +1,10 @@
+# iOS 4.4.1 · MCP-Endpunktkorrektur
+
+- MCP-POST an `/`, `/mcp` und `/mcp/` nutzt denselben abgesicherten Handler. Behebt die im Serverlog nachgewiesene 405-Antwort nach erfolgreichem OAuth.
+- Diagnose zeigt die letzte erfolgreiche Tool-Erkennung; Einrichtung nennt den vollständigen MCP-Link.
+- Backend 20.3.1; App 4.4.1 / Build 15. Keine Änderung vorhandener Datenformate.
+- 17 fokussierte Backend-Prüfungen; keine zusätzlichen Simulator-Testreihen.
+
 # iOS 4.4.0 · MCP-Discovery & Serververwaltung
 
 - MCP-Discovery: stateless Transport ohne fiktive Session-ID, revisionsabhängige Complete-Antworten, eindeutige OAuth-Security-Metadaten, nach erteilten Berechtigungen gefilterter Katalog. Granulare Altverbindungen bleiben gültig.

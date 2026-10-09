@@ -55,6 +55,11 @@ struct MCPManagementView: View {
                         if check["ok"].boolValue != true { Text(check["detail"].text).font(.caption) }
                     }
                     Text(diagnostic["note"].text).font(.caption).foregroundStyle(.secondary)
+                    if let ts = diagnostic["last_discovery"]["ts"].numberValue, ts > 0 {
+                        LabeledContent("Tools erfolgreich erkannt", value: Date(timeIntervalSince1970: ts).rjTimelineText)
+                        Text(diagnostic["last_discovery"]["detail"].text)
+                            .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                    }
                 }
             }
             Section("Aktive OAuth-Verbindungen (\(connections.count))") {
@@ -109,6 +114,8 @@ struct MCPManagementView: View {
                         Section("MCP-Link") {
                             Text(endpoint).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                             ShareLink(item: endpoint) { Label("Link kopieren", systemImage: "doc.on.doc") }
+                            Text("Verwende den vollständigen Link einschließlich /mcp. Die Basisadresse allein kann bei der Tool-Erkennung zu „Method Not Allowed“ führen.")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                         Section("Mit ChatGPT verbinden") {
                             Text("1. Öffne in ChatGPT die Verwaltung für Apps bzw. eigene MCP-Verbindungen.")

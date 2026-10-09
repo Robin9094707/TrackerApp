@@ -109,7 +109,7 @@ jobs:
         if: always() && (inputs.review == true || contains(github.event.head_commit.message, '[review]'))
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-v4.4.0-tests-and-screenshots
+          name: RJ-Tracker-v4.4.1-tests-and-screenshots
           path: |
             RJ-Tracker-tests.log
             TestScreenshots
@@ -145,10 +145,10 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$APP/Info.plist"
           test -n "$(find "$APP" -name 'AppIcon*.png' -print -quit)"
           cp -R "$APP" Payload/
-          /usr/bin/zip -qry RJ-Tracker-v4.4.0-unsigned.ipa Payload
-          unzip -t RJ-Tracker-v4.4.0-unsigned.ipa
-          ls -lh RJ-Tracker-v4.4.0-unsigned.ipa
-          echo "### RJ Tracker 4.4.0" >> "$GITHUB_STEP_SUMMARY"
+          /usr/bin/zip -qry RJ-Tracker-v4.4.1-unsigned.ipa Payload
+          unzip -t RJ-Tracker-v4.4.1-unsigned.ipa
+          ls -lh RJ-Tracker-v4.4.1-unsigned.ipa
+          echo "### RJ Tracker 4.4.1" >> "$GITHUB_STEP_SUMMARY"
           echo "Commit: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
           echo "Unsigned IPA ready for sideload signing." >> "$GITHUB_STEP_SUMMARY"
 
@@ -156,8 +156,8 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-v4.4.0-unsigned-IPA
-          path: RJ-Tracker-v4.4.0-unsigned.ipa
+          name: RJ-Tracker-v4.4.1-unsigned-IPA
+          path: RJ-Tracker-v4.4.1-unsigned.ipa
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
@@ -166,7 +166,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-v4.4.0-build-log
+          name: RJ-Tracker-v4.4.1-build-log
           path: RJ-Tracker-build.log
           if-no-files-found: ignore
           retention-days: 30
