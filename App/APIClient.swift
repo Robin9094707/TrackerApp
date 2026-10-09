@@ -207,7 +207,8 @@ final class APIClient {
         }
         var upload: Data?
         let boundary = "RJTracker-" + UUID().uuidString
-        if encoding == "Datei" {
+        let read = ["GET", "HEAD"].contains(method)
+        if encoding == "Datei" && !read {
             guard let fileData, fileData.count <= 20 * 1024 * 1024 else { throw APIError.message("Datei fehlt oder ist größer als 20 MB.") }
             let fields = Array(form.keys) + [fileField, fileName]
             guard fields.allSatisfy({ !$0.contains("\r") && !$0.contains("\n") && !$0.contains("\"") }), !fileField.isEmpty else {
@@ -220,7 +221,6 @@ final class APIClient {
             data.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(fileField)\"; filename=\"\(fileName)\"\r\nContent-Type: application/octet-stream\r\n\r\n".utf8))
             data.append(fileData); data.append(Data("\r\n--\(boundary)--\r\n".utf8)); upload = data
         }
-        let read = ["GET", "HEAD"].contains(method)
         let data = try await raw(path: parts.path, method: method, json: !read && encoding == "JSON" ? values : nil,
                                  query: parts.queryItems ?? [], form: !read && encoding == "Formular" ? form : nil,
                                  multipart: upload, boundary: boundary)

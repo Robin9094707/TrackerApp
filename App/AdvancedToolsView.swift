@@ -107,6 +107,7 @@ struct AdvancedToolsView: View {
                         parameterNames = route.arguments ?? []; parameters = [:]
                         method = route.methods.contains("GET") ? "GET" : (route.methods.first ?? "POST")
                         requestBody = "{}"; output = ""; resultFile = nil
+                        encoding = "JSON"; upload = nil
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
@@ -138,6 +139,11 @@ struct AdvancedToolsView: View {
         .rjListChrome()
         .navigationTitle("API-Werkzeuge")
         .task { await loadRoutes() }
+        .onChange(of: selectedPath) { _, path in
+            if let route = selectedRoute, path.components(separatedBy: "?").first != route.path {
+                selectedRoute = nil; parameterNames = []; parameters = [:]
+            }
+        }
         .refreshable { await loadRoutes() }
         .confirmationDialog("Serveraktion ausführen?", isPresented: $confirm, titleVisibility: .visible) {
             Button("\(method) ausführen", role: method == "DELETE" ? .destructive : nil) { Task { await run() } }
