@@ -35,6 +35,7 @@ struct MCPManagementView: View {
                 }
                 Button("In ChatGPT einrichten", systemImage: "link.badge.plus") { showSetup = true }
                 Button("Konfiguration prüfen", systemImage: "stethoscope") { Task { await check() } }
+                NavigationLink { MCPToolCatalogView() } label: { Label("Verfügbare ChatGPT-Tools", systemImage: "square.grid.2x2") }
             }
             Section("Server & Berechtigungen") {
                 TextField("Öffentliche HTTPS-Basisadresse", text: $base).keyboardType(.URL)
@@ -71,6 +72,7 @@ struct MCPManagementView: View {
                         if let ts = connection["expires_ts"].numberValue {
                             Text("Gültig bis: " + Date(timeIntervalSince1970: ts).rjTimelineText).font(.caption).foregroundStyle(.secondary)
                         }
+                        Text("Berechtigungen: " + connection["scopes"].rows.map(\.text).joined(separator: ", ")).font(.caption).foregroundStyle(.secondary)
                         Button("Verbindung widerrufen", role: .destructive) { revokeID = connection.identifier; confirmRevoke = true }
                     }.padding(.vertical, 4)
                 }

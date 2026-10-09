@@ -10,6 +10,8 @@ import runpy
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
+import zipfile
 from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -182,5 +184,85 @@ class BackendUpgradeTests(unittest.TestCase):
         rpc=public.post('/mcp',json={'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-11-25','clientInfo':{'name':'test','version':'1'},'capabilities':{}}},headers={'Authorization':'Bearer '+token.json['access_token']})
         self.assertEqual(rpc.status_code,200,rpc.json)
         self.assertIn('result',rpc.json)
+        self.assertNotIn('Mcp-Session-Id',rpc.headers)
+        headers={'Authorization':'Bearer '+token.json['access_token'],'MCP-Protocol-Version':'2025-11-25'}
+        initialized=public.post('/mcp',json={'jsonrpc':'2.0','method':'notifications/initialized'},headers=headers)
+        self.assertEqual(initialized.status_code,202)
+        catalog=public.post('/mcp',json={'jsonrpc':'2.0','id':2,'method':'tools/list'},headers=headers)
+        self.assertEqual(catalog.status_code,200,catalog.json)
+        tools=catalog.json['result']['tools'];self.assertGreater(len(tools),10)
+        self.assertEqual(len({t['name'] for t in tools}),len(tools))
+        for tool in tools:
+            self.assertEqual(tool['inputSchema']['type'],'object')
+            self.assertEqual(tool['securitySchemes'],tool['_meta']['securitySchemes'])
+            self.assertEqual(len(tool['securitySchemes']),1)
+            self.assertTrue(set(tool['securitySchemes'][0]['scopes']).issubset({'trackers:read'}))
+        call=public.post('/mcp',json={'jsonrpc':'2.0','id':3,'method':'tools/call','params':{'name':'list_tracker_catalog','arguments':{}}},headers=headers)
+        self.assertEqual(call.status_code,200,call.json)
+        self.assertFalse(call.json['result'].get('isError'))
+
+    def test_mcp_new_protocol_discovery_and_old_grants(self):
+        token=self.issue('version-probe')[0]
+        for version in M['MCP_PROTOCOL_VERSIONS']:
+            headers={'Authorization':'Bearer '+token,'MCP-Protocol-Version':version,'Mcp-Method':'tools/list'}
+            r=self.client.post('/mcp',json={'jsonrpc':'2.0','id':1,'method':'tools/list'},headers=headers)
+            self.assertEqual(r.status_code,200,r.json)
+            self.assertGreater(len(r.json['result']['tools']),10)
+            if version=='2026-07-28':self.assertEqual(r.json['result']['resultType'],'complete')
+        wrong=self.client.post('/mcp',json={'jsonrpc':'2.0','id':1,'method':'tools/list','params':{'_meta':{'io.modelcontextprotocol/protocolVersion':'2025-11-25'}}},headers={'Authorization':'Bearer '+token,'MCP-Protocol-Version':'2026-07-28'})
+        self.assertEqual(wrong.status_code,400)
+        unsupported=self.client.post('/mcp',json={'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'future'}},headers={'Authorization':'Bearer '+token})
+        self.assertEqual(unsupported.json['result']['protocolVersion'],'2025-11-25')
+
+    def test_native_catalog_and_findmy_admin_guard(self):
+        catalog=self.client.get('/api/mcp/tools')
+        self.assertEqual(catalog.status_code,200)
+        self.assertGreater(len(catalog.json['tools']),30)
+        diagnostics=self.client.get('/api/mcp/diagnostics').json
+        self.assertTrue(diagnostics['checks'][-1]['ok'])
+        self.assertEqual(diagnostics['tool_count'],len(catalog.json['tools']))
+        self.assertEqual(self.client.get('/api/server/findmy').status_code,200)
+        self.assertEqual(self.client.post('/api/server/findmy',json={'action':'update','confirmed':True}).status_code,403)
+        denied=self.client.post('/api/server/findmy',json={'action':'update','confirmed':True,'current_password':'wrong','version':'0.10.3'},headers=self.headers)
+        self.assertEqual(denied.status_code,403)
+        with self.client.session_transaction() as s:s['admin_console']=True
+        self.assertEqual(self.client.get('/api/server/findmy').status_code,200)
+
+    def test_findmy_preflight_failure_keeps_current_package_and_data(self):
+        worker=M['findmy_update_worker']; glob=worker.__globals__
+        old=json.dumps(STATE['google_history'],sort_keys=True)
+        def pip(args):
+            if args[0]=='download':Path(args[args.index('--dest')+1],'test.whl').write_bytes(b'test')
+        lock=M['_findmy_update_lock'];lock.acquire()
+        with patch.dict(glob,{'findmy_run_pip':pip}),patch('subprocess.run') as run:
+            run.return_value.returncode=1
+            worker('0.10.3')
+        self.assertFalse(lock.locked())
+        self.assertEqual(M['_findmy_update']['phase'],'error')
+        self.assertEqual(json.dumps(STATE['google_history'],sort_keys=True),old)
+
+    def test_apple_removal_cleans_links_alarms_and_keeps_other_providers(self):
+        name='delete-test';ref='apple:'+name
+        (M['ACC_DIR']/(name+'.json')).write_text('{}')
+        STATE['accessories'][name]=object()
+        STATE['seven_day_history'][name]={'enabled':True,'points':[self.point('2026-10-08')]}
+        STATE['notification_settings']['trackers'][ref]={'found':{'enabled':True}}
+        STATE['notification_events']=[{'id':'removed','tracker_ref':ref},{'id':'kept','tracker_ref':'google:test'}]
+        STATE['geofences']['removal-fence']={'id':'removal-fence','enabled':True,'tracker_refs':[ref]}
+        before=copy.deepcopy(STATE['google_history'])
+        self.assertEqual(self.client.delete('/api/v3/trackers/apple/'+name).status_code,403)
+        lock=M['fetch_lock'];lock.acquire()
+        try:self.assertEqual(self.client.delete('/api/v3/trackers/apple/'+name,headers=self.headers).status_code,409)
+        finally:lock.release()
+        r=self.client.delete('/api/v3/trackers/apple/'+name,headers=self.headers)
+        self.assertEqual(r.status_code,200,r.json)
+        self.assertNotIn(name,STATE['accessories']);self.assertNotIn(name,STATE['seven_day_history'])
+        self.assertNotIn(ref,STATE['notification_settings']['trackers'])
+        self.assertFalse(STATE['geofences']['removal-fence']['enabled'])
+        self.assertEqual([e['id'] for e in STATE['notification_events']],['kept'])
+        self.assertEqual(STATE['google_history'],before)
+        with zipfile.ZipFile(M['BACKUPS_DIR']/r.json['backup']) as backup:
+            self.assertIn('accessories/'+name+'.json',backup.namelist())
+        self.assertEqual(self.client.delete('/api/v3/trackers/apple/'+name,headers=self.headers).status_code,404)
 
 if __name__=='__main__':unittest.main()

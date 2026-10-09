@@ -1,4 +1,4 @@
-# Universal Tag Studio 20.2.0 · CALENDAR HISTORY + MCP CONTROL CENTER
+# Universal Tag Studio 20.3.0 · MCP DISCOVERY + FINDMY MAINTENANCE
 # Backward-compatible single-file upgrade. Existing data/ directory layout,
 # tracker IDs, histories, shares and provider sessions are intentionally
 # preserved. Google integration: leonboe1/GoogleFindMyTools (GPL-3.0).
@@ -69,6 +69,7 @@ from findmy import (
     LoginState,
     TrustedDeviceSecondFactorMethod,
 )
+FINDMY_RUNTIME_VERSION = package_version("FindMy")
 try:
     from findmy import FixedRollingKeyPairAccessory
 except ImportError:
@@ -11273,6 +11274,8 @@ def process_report_results(named_accessories, results, mode):
     now_ts = int(time.time())
     total_received = total_added = 0
     for name, accessory in named_accessories:
+        if state.get("accessories", {}).get(name) is not accessory:
+            continue
         raw = results.get(accessory)
         if raw is None:
             register_report_sync(name, 0, 0, 0, 0, 0, mode)
@@ -11405,6 +11408,8 @@ def fetch_from_apple(device_names, trigger="manual"):
             register_sync_batch(received_total, stored_total, len(named_accessories), sync_mode)
             duration_ms = int((time.monotonic() - started_monotonic) * 1000)
             for name, _accessory in named_accessories:
+                if name not in state.get("accessories", {}):
+                    continue
                 stats = state["report_stats"].setdefault("devices", {}).setdefault(name, {})
                 batch_received = int(stats.get("last_received", 0) or 0) if int(stats.get("last_sync_ts", 0) or 0) >= started_ts else 0
                 stats.update({
@@ -11444,6 +11449,8 @@ def fetch_from_apple(device_names, trigger="manual"):
             duration_ms = int((time.monotonic() - started_monotonic) * 1000)
             error_code = type(exc).__name__
             for name, _accessory in named_accessories:
+                if name not in state.get("accessories", {}):
+                    continue
                 stats = state["report_stats"].setdefault("devices", {}).setdefault(name, {})
                 stats.update({
                     "last_sync_ts": int(time.time()),
@@ -11474,6 +11481,8 @@ def fetch_from_apple(device_names, trigger="manual"):
             with state_lock:
                 for name, _accessory in named_accessories:
                     state.setdefault("apple_inflight", set()).discard(name)
+                    if name not in state.get("accessories", {}):
+                        continue
                     next_due = apple_schedule_next(name, base_ts=poll_started.get(name, started_ts))
                     stats = state.setdefault("report_stats", {}).setdefault("devices", {}).setdefault(name, {})
                     result = str(stats.get("last_result") or "empty")
@@ -11716,7 +11725,7 @@ def tracker_lab_active_job():
     return None
 
 APP_NAME = "Universal Tag Studio"
-APP_VERSION = "20.2.0 API EDITION"
+APP_VERSION = "20.3.0 API EDITION"
 
 
 OPTIMIZED_ROUTE_DEFAULT_POINTS = int(os.environ.get("ULTRA_TRACKER_ROUTE_MAX_DISPLAY_POINTS", "4200"))
@@ -16799,11 +16808,9 @@ def mcp_error_result(message, code="tool_error"):
 
 
 def mcp_security_scheme(scopes):
-    legacy = list(dict.fromkeys(str(scope) for scope in scopes if scope))
-    schemes = [{"type": "oauth2", "scopes": [MCP_UNIFIED_SCOPE]}]
-    if legacy != [MCP_UNIFIED_SCOPE]:
-        schemes.append({"type": "oauth2", "scopes": legacy})
-    return schemes
+    # A single OAuth scheme makes discovery unambiguous. Enforcement still
+    # accepts previously issued granular grants; it is not derived from metadata.
+    return [{"type": "oauth2", "scopes": list(dict.fromkeys(scopes))}]
 
 
 def mcp_tool_descriptor(name, title, description, schema, scopes=("trackers:read",), read_only=True, widget=False, widget_accessible=False, idempotent=None, destructive=False, open_world=False):
@@ -16813,7 +16820,6 @@ def mcp_tool_descriptor(name, title, description, schema, scopes=("trackers:read
         "title": title,
         "description": description,
         "inputSchema": schema,
-        "outputSchema": {"type": "object", "additionalProperties": True},
         "securitySchemes": schemes,
         "annotations": {
             "readOnlyHint": bool(read_only),
@@ -17581,7 +17587,7 @@ def mcp_call_guest_tool(name, arguments, grant):
 
 def mcp_tools(grant=None):
     if mcp_grant_principal(grant) == "guest":
-        return mcp_guest_tools()
+        return mcp_catalog_for_grant(mcp_guest_tools(), grant)
     provider_property = {"type": "string", "enum": ["all", "apple", "google", "samsung", "fusion"], "default": "all"}
     live_properties = {
         "refresh": {"type": "boolean", "default": True, "description": "Vor der Antwort einen Live-Abruf in allen zugehörigen Netzen versuchen."},
@@ -17847,13 +17853,29 @@ def mcp_tools(grant=None):
                 "type": "object", "properties": {"tracker": {"type": "string"}, "enabled": {"type": "boolean"}, "retention": {"type": "string", "enum": ["7_days", "14_days", "30_days", "90_days", "custom", "forever"], "description": "Optional; ohne Angabe bleibt die bestehende Frist unverändert."}, "custom_days": {"type": "integer", "minimum": HISTORY_RETENTION_MIN_DAYS, "maximum": HISTORY_RETENTION_MAX_DAYS}, "confirmed": {"type": "boolean"}}, "required": ["tracker", "enabled", "confirmed"], "additionalProperties": False,
             }, scopes=("trackers:read", "trackers:write"), read_only=False, idempotent=True),
             mcp_tool_descriptor("upsert_saved_place", "Gespeicherten Ort anlegen oder bearbeiten", "Legt nach Bestätigung einen privaten Ort an oder ändert anhand seiner ID Label, Symbol, Mittelpunkt, Radius und Notiz. Geofence-Alarme bleiben getrennt.", {
-                "type": "object", "properties": {"place_id": {"type": "string"}, "label": {"type": "string", "minLength": 1, "maxLength": 100}, "emoji": {"type": "string", "maxLength": 16}, "latitude": {"type": "number", "minimum": -90, "maximum": 90}, "longitude": {"type": "number", "minimum": -180, "maximum": 180}, "radius_m": {"type": "number", "minimum": 20, "maximum": 100000}, "note": {"type": "string", "maxLength": 240}, "confirmed": {"type": "boolean"}}, "required": ["confirmed"], "anyOf": [{"required": ["place_id"]}, {"required": ["label", "latitude", "longitude"]}], "additionalProperties": False,
+                "type": "object", "properties": {"place_id": {"type": "string"}, "label": {"type": "string", "minLength": 1, "maxLength": 100}, "emoji": {"type": "string", "maxLength": 16}, "latitude": {"type": "number", "minimum": -90, "maximum": 90}, "longitude": {"type": "number", "minimum": -180, "maximum": 180}, "radius_m": {"type": "number", "minimum": 20, "maximum": 100000}, "note": {"type": "string", "maxLength": 240}, "confirmed": {"type": "boolean"}}, "required": ["confirmed"], "additionalProperties": False,
             }, scopes=("trackers:read", "trackers:write"), read_only=False, idempotent=True),
             mcp_tool_descriptor("delete_saved_place", "Gespeicherten Ort löschen", "Löscht nach ausdrücklicher Bestätigung genau einen gespeicherten Ort. Geofences, Tracker und Verläufe bleiben erhalten.", {
                 "type": "object", "properties": {"place": {"type": "string"}, "confirmed": {"type": "boolean"}}, "required": ["place", "confirmed"], "additionalProperties": False,
             }, scopes=("trackers:read", "trackers:write"), read_only=False, destructive=True, idempotent=True),
         ])
-    return tools
+    return mcp_catalog_for_grant(tools, grant)
+
+
+def mcp_catalog_for_grant(tools, grant):
+    granted = set(grant.get("scopes") or []) if grant is not None else set(mcp_scopes_supported())
+    unified = MCP_UNIFIED_SCOPE in granted
+    result = []
+    for descriptor in tools:
+        required = set(descriptor["securitySchemes"][0]["scopes"])
+        if not unified and not required.issubset(granted):
+            continue
+        if unified:
+            schemes = [{"type": "oauth2", "scopes": [MCP_UNIFIED_SCOPE]}]
+            descriptor["securitySchemes"] = schemes
+            descriptor["_meta"]["securitySchemes"] = schemes
+        result.append(descriptor)
+    return sorted(result, key=lambda tool: tool["name"])
 
 
 def mcp_require_action(grant, scope, arguments):
@@ -19792,7 +19814,7 @@ def mcp_call_tool(name, arguments, grant):
     raise MCPToolError(f"Unbekanntes MCP-Tool: {name}", "method_not_found")
 
 
-MCP_PROTOCOL_VERSIONS = ("2026-07-28", "2026-01-26", "2025-11-25", "2025-06-18", "2025-03-26")
+MCP_PROTOCOL_VERSIONS = ("2026-07-28", "2025-11-25", "2025-06-18", "2025-03-26")
 
 
 def mcp_rpc_error(request_id, code, message, data=None):
@@ -19842,13 +19864,19 @@ def mcp_endpoint(tenant_id=None):
     params = body.get("params") if isinstance(body.get("params"), dict) else {}
     if request_id is None and method.startswith("notifications/"):
         return mcp_apply_cors(Response(status=202))
-    protocol = str(request.headers.get("MCP-Protocol-Version") or "2025-03-26")
+    meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
+    meta_protocol = str(meta.get("io.modelcontextprotocol/protocolVersion") or "")
+    protocol = str(request.headers.get("MCP-Protocol-Version") or meta_protocol or "2025-03-26")
+    if meta_protocol and meta_protocol != protocol:
+        return mcp_json_response(mcp_rpc_error(request_id, -32600, "MCP protocol metadata/header mismatch"), 400)
+    if request.headers.get("Mcp-Method") and request.headers["Mcp-Method"] != method:
+        return mcp_json_response(mcp_rpc_error(request_id, -32600, "Mcp-Method mismatch"), 400)
     if method != "initialize" and protocol not in MCP_PROTOCOL_VERSIONS:
         return mcp_json_response(mcp_rpc_error(request_id, -32600, "Unsupported MCP protocol version"), 400)
     try:
         if method == "initialize":
             requested = str(params.get("protocolVersion") or "2025-03-26")
-            negotiated = requested if requested in MCP_PROTOCOL_VERSIONS else "2025-03-26"
+            negotiated = requested if requested in MCP_PROTOCOL_VERSIONS else "2025-11-25"
             guest_mode = mcp_grant_principal(grant) == "guest"
             instructions = (
                 "Freigabelink-Modus: Zeige und nutze ausschließlich die durch gültige Share-Links erlaubten Tracker und Felder. "
@@ -19871,6 +19899,7 @@ def mcp_endpoint(tenant_id=None):
             result = {}
         elif method == "tools/list":
             result = {"tools": mcp_tools(grant)}
+            mcp_audit_event("tools_discovered", client_id=grant.get("client_id"), detail=str(len(result["tools"])))
         elif method == "tools/call":
             tool_name = str(params.get("name") or "")
             tool_arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
@@ -19890,10 +19919,11 @@ def mcp_endpoint(tenant_id=None):
             result = {"prompts": []}
         else:
             return mcp_json_response(mcp_rpc_error(request_id, -32601, "Method not found"), 404)
+        if protocol == "2026-07-28" and method != "initialize":
+            result = {"resultType": "complete", **result}
         response = mcp_json_response(mcp_rpc_result(request_id, result))
         response.headers["MCP-Protocol-Version"] = result.get("protocolVersion", protocol) if isinstance(result, dict) else protocol
-        if method == "initialize":
-            response.headers["Mcp-Session-Id"] = secrets.token_urlsafe(18)
+        # Stateless transport: do not advertise a session which is never stored.
         return response
     except MCPToolError as exc:
         if method == "tools/call":
@@ -19930,6 +19960,8 @@ def mcp_endpoint(tenant_id=None):
             config["last_error"] = exc.code
             mcp_save_config()
             mcp_audit_event("tool_call", "error", grant.get("client_id"), str(params.get("name") or ""), exc.code)
+            if protocol == "2026-07-28":
+                result["resultType"] = "complete"
             return mcp_json_response(mcp_rpc_result(request_id, result))
         return mcp_json_response(mcp_rpc_error(request_id, -32602, str(exc), {"code": exc.code}), 400)
     except Exception as exc:
@@ -23203,14 +23235,30 @@ def add_device():
 
 @app.route("/api/devices/<name>", methods=["DELETE"])
 def delete_device(name):
+    if not fetch_lock.acquire(blocking=False):
+        return jsonify(status="error", message="Apple-Ortung läuft noch. Bitte danach erneut entfernen."), 409
+    try:
+        with state_lock:
+            return delete_device_locked(name)
+    finally:
+        fetch_lock.release()
+
+
+def delete_device_locked(name):
     try:
         name = canonical_device_name(name)
     except ValueError as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
+    if name not in state.get("accessories", {}) and not (ACC_DIR / f"{name}.json").exists():
+        return jsonify(status="error", message="Apple-Tracker nicht gefunden."), 404
+    save_json(SEVEN_HISTORY_FILE, "seven_day_history")
+    save_json(SHARED_HIST_FILE, "shared_history")
+    backup, _ = create_server_backup(True, True, "before_apple_tracker_removal")
     internal_share_remove_tracker(current_tenant_id(), f"apple:{name}")
     internal_share_remove_tracker(current_tenant_id(), f"fusion:{name}")
     if (ACC_DIR / f"{name}.json").exists():
         (ACC_DIR / f"{name}.json").unlink()
+    (ACC_DIR / f"{name}.json.bak").unlink(missing_ok=True)
     for k in [
         "locations", "recordings", "tracker_meta", "shared_history",
         "seven_day_enabled", "seven_day_history", "since_ts",
@@ -23221,9 +23269,31 @@ def delete_device(name):
     to_del_links = [l for l, d in state["shared_links"].items() if d.get("device") == name]
     for l in to_del_links:
         del state["shared_links"][l]
+        state.get("guest_push_channels", {}).pop(l, None)
+    atomic_write_json(GUEST_PUSH_FILE, state.get("guest_push_channels", {}), private=True)
     state["google_links"].pop(name, None)
     state["samsung_links"].pop(name, None)
     state["fusion_profiles"].pop(name, None)
+    state.get("accessories", {}).pop(name, None)
+    state.get("apple_next_fetch", {}).pop(name, None)
+    refs = {f"apple:{name}", f"fusion:{name}"}
+    for ref in refs:
+        state.get("notification_settings", {}).get("trackers", {}).pop(ref, None)
+        state.get("notification_runtime", {}).pop(ref, None)
+    state["notification_events"] = [row for row in state.get("notification_events", []) if row.get("tracker_ref") not in refs]
+    for fence in state.get("geofences", {}).values():
+        if isinstance(fence, dict) and isinstance(fence.get("tracker_refs"), list) and refs.intersection(fence["tracker_refs"]):
+            fence["tracker_refs"] = [ref for ref in fence["tracker_refs"] if ref not in refs]
+            if not fence["tracker_refs"]:
+                fence["enabled"] = False
+    save_json(NOTIFICATION_SETTINGS_FILE, "notification_settings")
+    save_json(NOTIFICATION_EVENTS_FILE, "notification_events")
+    save_json(GEOFENCES_FILE, "geofences")
+    save_json(NOTIFICATION_RUNTIME_FILE, "notification_runtime")
+    for test in state.get("comparison_tests", {}).values():
+        if isinstance(test, dict) and any(row.get("ref") in refs for row in test.get("targets", []) if isinstance(row, dict)):
+            test["status"] = "cancelled"
+    save_json(COMPARISON_TESTS_FILE, "comparison_tests")
     policy_trackers = state.setdefault("history_retention", default_history_retention_store()).setdefault("trackers", {})
     policy_trackers.pop(f"apple:{name}", None)
     policy_trackers.pop(f"fusion:{name}", None)
@@ -23249,8 +23319,10 @@ def delete_device(name):
     save_json(SAMSUNG_LINKS_FILE, "samsung_links")
     save_json(FUSION_PROFILES_FILE, "fusion_profiles")
     recovery_cleanup_device(name)
-    load_data()
-    return jsonify({"status": "success"})
+    # The targeted stores are already updated. Reloading every provider here
+    # discards in-memory reports and interrupts unrelated export jobs.
+    return jsonify(status="success", backup=backup.name,
+        message="Apple-Tracker aus dieser App entfernt. Apple-Kontobindung bleibt unverändert. Ein privates Backup wurde erstellt.")
 
 
 @app.route("/api/locate/all", methods=["POST"])
@@ -25632,7 +25704,7 @@ def backup_file_catalog(include_history=False, include_secrets=False):
 
 
 def create_server_backup(include_history=False, include_secrets=False, reason="manual"):
-    now=datetime.now().strftime("%Y%m%d-%H%M%S"); suffix="-with-secrets" if include_secrets else ""
+    now=datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(4); suffix="-with-secrets" if include_secrets else ""
     final=BACKUPS_DIR/f"tracker-command-center-{now}{suffix}.zip"; tmp=final.with_suffix(".zip.tmp")
     files=backup_file_catalog(include_history,include_secrets)
     manifest={"app_version":APP_VERSION,"schema_version":state.get("schema_version",{}).get("version"),"created_ts":int(time.time()),"reason":reason,"include_history":bool(include_history),"include_secrets":bool(include_secrets),"files":[]}
@@ -27323,7 +27395,7 @@ def access_before_request():
         return
     if session.get('admin_console'):
         allowed = {'/', '/admin', '/api/logout', '/api/security/password'}
-        if path not in allowed and not path.startswith('/api/mcp/'):
+        if path not in allowed and path != '/api/server/findmy' and not path.startswith('/api/mcp/'):
             return jsonify(status='error', message='Diese Sitzung ist auf die Admin-Oberfläche beschränkt.'), 403
     if session.get('security_bridge'):
         allowed = {'/api/unlock', '/api/unlock/2fa', '/api/passkeys/auth/begin', '/api/passkeys/auth/finish', '/api/security/passkeys/register/begin', '/api/security/passkeys/register/finish'}
@@ -27516,7 +27588,7 @@ def api_remove_native_tracker(provider,tracker_id):
     return jsonify(status='ok',message='Quelle archiviert und aus Fusionen entfernt; Historie bleibt erhalten.')
 
 # A small security page is allowed for server-domain-bound passkeys. It exposes no tracker data.
-_SECURITY_STYLE = '<meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font:16px system-ui;background:#0b1220;color:#edf4ff;max-width:740px;margin:4vh auto;padding:22px}section{background:#182337;padding:24px;border-radius:22px;margin:18px 0}input,button,select{box-sizing:border-box;font:inherit;padding:12px;border-radius:12px;border:1px solid #415471;background:#0f192a;color:inherit;margin:5px;width:100%}button{background:#276edb;cursor:pointer}input[type=checkbox]{width:auto;margin-right:10px}label{display:block;padding:10px 0}small{color:#a5b7d4}pre{white-space:pre-wrap}a{color:#a8ccff}</style>'
+_SECURITY_STYLE = '<meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font:16px system-ui;background:#0b1220;color:#edf4ff;max-width:740px;margin:4vh auto;padding:22px}section{background:linear-gradient(145deg,#26344dbb,#182337dd);backdrop-filter:blur(24px);box-shadow:0 18px 60px #0003;padding:24px;border-radius:22px;margin:18px 0}input,button,select{box-sizing:border-box;font:inherit;padding:12px;border-radius:12px;border:1px solid #415471;background:#0f192a;color:inherit;margin:5px;width:100%}button{background:#276edb;cursor:pointer}input[type=checkbox]{width:auto;margin-right:10px}label{display:block;padding:10px 0}small{color:#a5b7d4}pre{white-space:pre-wrap}a{color:#a8ccff}</style>'
 _PASSKEY_HTML = '''<!doctype html><html lang="de"><head><title>RJ Tracker · Sichere Anmeldung</title>STYLE</head><body><h1>RJ Tracker · Passkey</h1><small>Nur Anmeldung und Passkey-Einrichtung. Keine Tracker oder Standortdaten.</small><section><input id="username" placeholder="Benutzername (optional)"><input id="password" type="password" placeholder="Passwort zur Einrichtung"><input id="code" placeholder="2FA-Code, falls aktiviert"><button id="go">Passkey verwenden</button><pre id="result"></pre></section><script>
 const q=new URLSearchParams(location.search),out=document.getElementById('result');let csrf='';
 const dec=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')+'='.repeat((4-s.length%4)%4)),c=>c.charCodeAt(0));
@@ -27588,15 +27660,20 @@ def passkey_bridge_exchange():
         if not user or not user.get('active',True) or row['generation']!=app_password_generation():return jsonify(status='error',message='Konto geändert.'),403
     return jsonify(finish_user_login(user))
 
-_ADMIN_HTML = '''<!doctype html><html lang="de"><head><title>RJ Tracker · Administration</title>STYLE</head><body><h1>RJ Tracker</h1><small>API Edition · Administration ohne Standortansicht</small><section id="login"><h2>Hauptadmin anmelden</h2><input id="pw" type="password" placeholder="Hauptpasswort"><input id="otp" placeholder="2FA- oder Wiederherstellungscode"><button id="signin">Anmelden</button></section><section id="tools" hidden><h2>Serverstatus</h2><pre id="stats"></pre><h2>Angemeldete Geräte</h2><div id="clients"></div><h2>ChatGPT / MCP</h2><input id="mcpbase" placeholder="Öffentliche HTTPS-Basisadresse"><label><input id="mcpenabled" type="checkbox">MCP aktiv</label><label><input id="mcpactions" type="checkbox">Besitzeraktionen erlauben</label><label><input id="mcpguests" type="checkbox">Freigabelinks erlauben</label><button id="mcpsave">MCP speichern</button><button id="mcpcheck">Verbindung prüfen</button><button id="mcpreconnect">Alle MCP-Verbindungen widerrufen / neu verbinden</button><pre id="mcpinfo"></pre><div id="mcpconnections"></div><h2>Passwort eines Benutzers zurücksetzen</h2><select id="users"></select><input id="newpw" type="password" placeholder="Neues Passwort (mindestens 10 Zeichen)"><button id="reset">Passwort zurücksetzen</button><h2>Hauptpasswort ändern</h2><input id="current" type="password" placeholder="Aktuelles Passwort"><input id="master" type="password" placeholder="Neues Hauptpasswort"><button id="change">Hauptpasswort ändern</button><button id="logout">Abmelden</button></section><pre id="message"></pre><script>
+_ADMIN_HTML = '''<!doctype html><html lang="de"><head><title>RJ Tracker · Administration</title>STYLE</head><body><h1>RJ Tracker</h1><small>API Edition · Administration ohne Standortansicht</small><section id="login"><h2>Hauptadmin anmelden</h2><input id="pw" type="password" placeholder="Hauptpasswort"><input id="otp" placeholder="2FA- oder Wiederherstellungscode"><button id="signin">Anmelden</button></section><section id="tools" hidden><h2>Serverstatus</h2><pre id="stats"></pre><h2>Angemeldete Geräte</h2><div id="clients"></div><h2>ChatGPT / MCP</h2><input id="mcpbase" placeholder="Öffentliche HTTPS-Basisadresse"><label><input id="mcpenabled" type="checkbox">MCP aktiv</label><label><input id="mcpactions" type="checkbox">Besitzeraktionen erlauben</label><label><input id="mcpguests" type="checkbox">Freigabelinks erlauben</label><button id="mcpsave">MCP speichern</button><button id="mcpcheck">Verbindung prüfen</button><button id="mcpreconnect">Alle MCP-Verbindungen widerrufen / neu verbinden</button><pre id="mcpinfo"></pre><div id="mcpconnections"></div><h2>FindMy.py verwalten</h2><pre id="findmyinfo"></pre><input id="findmypw" type="password" placeholder="Master-Passwort für Paketupdate"><input id="findmycode" placeholder="2FA-Code, falls aktiv"><button id="findmycheck">Nach offizieller Version suchen</button><button id="findmyinstall">Geprüftes Update installieren</button><h2>Passwort eines Benutzers zurücksetzen</h2><select id="users"></select><input id="newpw" type="password" placeholder="Neues Passwort (mindestens 10 Zeichen)"><button id="reset">Passwort zurücksetzen</button><h2>Hauptpasswort ändern</h2><input id="current" type="password" placeholder="Aktuelles Passwort"><input id="master" type="password" placeholder="Neues Hauptpasswort"><button id="change">Hauptpasswort ändern</button><button id="logout">Abmelden</button></section><pre id="message"></pre><script>
 let csrf='',pending=false;const message=document.getElementById('message');
 async function api(path,method='GET',body){const r=await fetch(path,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:body?JSON.stringify(body):undefined});const j=await r.json();if(!r.ok||j.status==='error')throw Error(j.message||'Zugriff verweigert');if(j.csrf_token)csrf=j.csrf_token;return j}
-async function load(){const j=await api('admin/api/status');csrf=j.csrf_token;document.getElementById('login').hidden=true;tools.hidden=false;stats.textContent='Version: '+j.version+'\\nBenutzer: '+j.user_count+'\\nAngemeldete Geräte: '+j.clients.length+'\\nAktive API-Schlüssel: '+j.key_count;clients.replaceChildren();for(const c of j.clients){const div=document.createElement('div'),b=document.createElement('button');div.textContent=c.label+' · '+c.user_id+' · '+(c.revoked?'Abgemeldet':'Aktiv');b.textContent='Gerät abmelden';b.disabled=c.revoked;b.onclick=()=>run(async()=>{await api('admin/api/clients/'+encodeURIComponent(c.id),'DELETE',{});await load()});div.append(b);clients.append(div)}users.replaceChildren();for(const u of j.users){if(u.id==='main')continue;const o=document.createElement('option');o.value=u.id;o.textContent=u.username;users.append(o)}await loadMCP()}
+async function load(){const j=await api('admin/api/status');csrf=j.csrf_token;document.getElementById('login').hidden=true;tools.hidden=false;stats.textContent='Version: '+j.version+'\\nBenutzer: '+j.user_count+'\\nAngemeldete Geräte: '+j.clients.length+'\\nAktive API-Schlüssel: '+j.key_count;clients.replaceChildren();for(const c of j.clients){const div=document.createElement('div'),b=document.createElement('button');div.textContent=c.label+' · '+c.user_id+' · '+(c.revoked?'Abgemeldet':'Aktiv');b.textContent='Gerät abmelden';b.disabled=c.revoked;b.onclick=()=>run(async()=>{await api('admin/api/clients/'+encodeURIComponent(c.id),'DELETE',{});await load()});div.append(b);clients.append(div)}users.replaceChildren();for(const u of j.users){if(u.id==='main')continue;const o=document.createElement('option');o.value=u.id;o.textContent=u.username;users.append(o)}await loadMCP();await loadFindMy()}
 async function run(fn){try{await fn();message.textContent='Erfolgreich.'}catch(e){message.textContent=e.message}}
 signin.onclick=()=>run(async()=>{const j=await api(pending?'admin/api/2fa':'admin/api/login','POST',pending?{code:otp.value}:{pw:pw.value});if(j.status==='two_factor_required'){pending=true;message.textContent='2FA-Code eingeben und nochmals anmelden.';return}pw.value='';otp.value='';await load()});
 reset.onclick=()=>run(async()=>{if(!confirm('Passwort dieses Benutzers ersetzen?'))return;await api('admin/api/users/'+encodeURIComponent(users.value)+'/password','POST',{new_password:newpw.value});newpw.value=''});
 change.onclick=()=>run(async()=>{await api('api/security/password','POST',{current_password:current.value,new_password:master.value,confirm_password:master.value});current.value='';master.value=''});
 async function loadMCP(){const j=await api('api/mcp/settings'),m=j.mcp;mcpbase.value=m.public_base_url||'';mcpenabled.checked=m.enabled;mcpactions.checked=m.allow_actions;mcpguests.checked=m.allow_shared_access;mcpinfo.textContent='MCP-Link: '+m.endpoint+'\\nBereit: '+(m.ready?'Ja':'Nein')+'\\nAktive Verbindungen: '+m.active_grants;mcpconnections.replaceChildren();for(const c of j.connections||[]){const div=document.createElement('div'),b=document.createElement('button');div.textContent=c.client_name+' · '+c.principal+' · '+new Date(c.last_used_ts*1000).toLocaleString();b.textContent='Verbindung widerrufen';b.onclick=()=>run(async()=>{if(!confirm('Diese Verbindung sofort sperren?'))return;await api('api/mcp/connections/'+encodeURIComponent(c.id),'DELETE',{});await loadMCP()});div.append(b);mcpconnections.append(div)}}
+let findmyState={};
+async function loadFindMy(){const j=await api('api/server/findmy');findmyState=j.findmy;findmyinfo.textContent='Installiert: '+findmyState.installed_version+'\\nNeueste stabile Version: '+(findmyState.latest_version||'noch nicht geprüft')+'\\n'+(findmyState.message||'')+(findmyState.restart_required?'\\nServerdienst neu starten.':'');findmyinstall.disabled=!!findmyState.running||!findmyState.can_update||!findmyState.latest_version||findmyState.latest_version===findmyState.installed_version}
+findmycheck.onclick=()=>run(async()=>{await api('api/server/findmy','POST',{action:'check'});await loadFindMy()});
+findmyinstall.onclick=()=>run(async()=>{if(!confirm('FindMy.py aktualisieren? Daten werden vorher privat gesichert. Danach Serverdienst neu starten.'))return;try{await api('api/server/findmy','POST',{action:'update',confirmed:true,version:findmyState.latest_version,current_password:findmypw.value,current_code:findmycode.value})}finally{findmypw.value='';findmycode.value=''}await loadFindMy()});
+setInterval(()=>{if(findmyState.running)run(loadFindMy)},3000);
 mcpsave.onclick=()=>run(async()=>{await api('api/mcp/settings','POST',{public_base_url:mcpbase.value,enabled:mcpenabled.checked,allow_actions:mcpactions.checked,allow_shared_access:mcpguests.checked});await loadMCP()});
 mcpcheck.onclick=()=>run(async()=>{const j=await api('api/mcp/diagnostics');mcpinfo.textContent=j.checks.map(c=>c.label+': '+(c.ok?'OK':c.detail)).join('\\n')});
 mcpreconnect.onclick=()=>run(async()=>{if(!confirm('Alle MCP-Verbindungen sperren? Danach den MCP-Link in ChatGPT neu verbinden und anmelden.'))return;await api('api/mcp/settings','DELETE',{});await loadMCP()});
@@ -27720,10 +27797,171 @@ def mcp_diagnostics_api():
         {"label": "Eigenes Master-Passwort", "ok": mcp["secure_password"], "detail": "Eigenes Passwort unter Sicherheit festlegen."},
         {"label": "OAuth-Anmeldeseite", "ok": "mcp_oauth_authorize" in app.view_functions, "detail": "OAuth-Route fehlt."},
     ]
+    catalog = []
+    try:
+        catalog = mcp_tools({"principal": "owner", "scopes": mcp_scopes_supported()})
+        names = [tool["name"] for tool in catalog]
+        if not names or len(names) != len(set(names)):
+            raise ValueError("Leerer Katalog oder doppelte Tool-Namen")
+        for tool in catalog:
+            schema = tool["inputSchema"]
+            if schema.get("type") != "object" or not set(schema.get("required", [])).issubset(schema.get("properties", {})):
+                raise ValueError("Ungültiges Eingabeschema: " + tool["name"])
+        json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"tools": catalog}}, allow_nan=False)
+        checks.append({"label": f"Tool-Erkennung: {len(catalog)} Tools", "ok": True, "detail": "Katalog erzeugt und Schemas geprüft."})
+    except Exception as exc:
+        checks.append({"label": "Tool-Erkennung", "ok": False, "detail": str(exc)[:300]})
     return jsonify(status="ok", ready=all(row["ok"] for row in checks), checks=checks,
+        protocols=list(MCP_PROTOCOL_VERSIONS), tool_count=len(catalog),
         endpoint=mcp["endpoint"], authorization_url=base+"/oauth/authorize",
         metadata_url=base+"/.well-known/oauth-authorization-server",
         note="Lokale Konfiguration geprüft. Die Erreichbarkeit deiner öffentlichen Domain prüft ChatGPT beim Verbinden.")
+
+
+@app.route("/api/mcp/tools", methods=["GET"])
+def mcp_catalog_api():
+    return jsonify(status="ok", tools=mcp_tools({"principal": "owner", "scopes": mcp_scopes_supported()}), protocols=list(MCP_PROTOCOL_VERSIONS))
+
+
+# Global package maintenance belongs to the main administrator, never a tenant,
+# API key or MCP grant. Versions come only from the official PyPI project.
+_findmy_update_lock = threading.Lock()
+_findmy_update_file = _MAIN_DATA_DIR / ".findmy_update.json"
+_findmy_update = safe_load_json(_findmy_update_file, {}, accepted_types=(dict,))
+if _findmy_update.get("running"):
+    _findmy_update.update(running=False, phase="interrupted", message="Server während des Updates beendet. Installierte Version prüfen.")
+if _findmy_update.get("phase") == "complete" and _findmy_update.get("installed_version") == FINDMY_RUNTIME_VERSION:
+    _findmy_update["restart_required"] = False
+
+
+def findmy_update_save(**values):
+    _findmy_update.update(values, updated_ts=int(time.time()))
+    atomic_write_json(_findmy_update_file, _findmy_update, private=True)
+
+
+def findmy_installed_version():
+    try:
+        return package_version("FindMy")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def findmy_release_check():
+    req = urllib.request.Request("https://pypi.org/pypi/FindMy/json", headers={"User-Agent": "RJTracker-maintenance/4.4"})
+    with urllib.request.urlopen(req, timeout=12) as response:
+        payload = json.loads(response.read(2 * 1024 * 1024))
+    latest = str(payload["info"]["version"])
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", latest):
+        raise ValueError("Keine stabile FindMy-Version verfügbar")
+    findmy_update_save(latest_version=latest, checked_ts=int(time.time()), check_error="")
+    return latest
+
+
+def findmy_run_pip(args):
+    # --isolated ignores arbitrary server pip configuration and environment.
+    completed = subprocess.run([sys.executable, "-m", "pip", "--isolated", *args,
+        "--disable-pip-version-check", "--no-input"], capture_output=True, text=True, timeout=180)
+    if completed.returncode:
+        raise RuntimeError("Paketverwaltung fehlgeschlagen. Schreibrechte, pip und Internetverbindung prüfen.")
+
+
+def findmy_update_worker(target):
+    old = findmy_installed_version()
+    changed = False
+    rollback_wheel = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="rj-findmy-") as folder:
+            root = Path(folder)
+            previous = root / "previous"; previous.mkdir()
+            candidate = root / "candidate"; candidate.mkdir()
+            staged = root / "staged"; staged.mkdir()
+            findmy_update_save(phase="download", message="Aktuelle und neue Version für Prüfung und Rückkehr herunterladen.")
+            for version, destination in ((old, previous), (target, candidate)):
+                if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+                    raise RuntimeError("Installierte Version ist nicht sicher rückspielbar.")
+                findmy_run_pip(["download", "--index-url", "https://pypi.org/simple", "--only-binary=:all:", "--no-deps", "--dest", str(destination), "FindMy==" + version])
+            rollback_wheel = next(previous.glob("*.whl"))
+            wheel = next(candidate.glob("*.whl"))
+            findmy_run_pip(["install", "--no-deps", "--target", str(staged), str(wheel)])
+            findmy_update_save(phase="preflight", message="API und vorhandene Abhängigkeiten isoliert prüfen.")
+            probe = '''import sys, importlib.metadata as m
+sys.path.insert(0, sys.argv[1])
+from findmy import AppleAccount, FindMyAccessory, LocalAnisetteProvider, LoginState, TrustedDeviceSecondFactorMethod
+from pip._vendor.packaging.requirements import Requirement
+for text in m.distribution('FindMy').requires or []:
+ r=Requirement(text)
+ if r.marker is None or r.marker.evaluate({'extra':''}):
+  assert r.specifier.contains(m.version(r.name)), 'Dependency mismatch: '+r.name
+assert callable(AppleAccount.fetch_location) and callable(AppleAccount.fetch_location_history)
+'''
+            check = subprocess.run([sys.executable, "-c", probe, str(staged)], capture_output=True, timeout=30)
+            if check.returncode:
+                raise RuntimeError("Neue FindMy-Version passt nicht zur installierten API oder den Abhängigkeiten. Aktuelle Version bleibt aktiv.")
+            findmy_update_save(phase="backup", message="Serverdaten vor der Installation sichern.")
+            with tenant_context("main"):
+                backup, _ = create_server_backup(True, True, "before_findmy_update")
+            findmy_update_save(backup=backup.name, previous_version=old, phase="install", message="Geprüftes Paket installieren.")
+            changed = True
+            try:
+                findmy_run_pip(["install", "--no-deps", "--force-reinstall", str(wheel)])
+                verify = subprocess.run([sys.executable, "-c", "from findmy import AppleAccount, FindMyAccessory, LocalAnisetteProvider"], capture_output=True, timeout=30)
+                if verify.returncode or findmy_installed_version() != target:
+                    raise RuntimeError("Installation konnte nicht bestätigt werden.")
+            except Exception:
+                findmy_update_save(phase="rollback", message="Vorherige Paketversion wiederherstellen.")
+                findmy_run_pip(["install", "--no-deps", "--force-reinstall", str(rollback_wheel)])
+                changed = False
+                raise
+            findmy_update_save(running=False, phase="complete", installed_version=target, restart_required=True,
+                message="FindMy.py aktualisiert. Serverdienst neu starten, damit alle Worker die neue Version laden. Bestehende Daten bleiben erhalten.")
+    except Exception as exc:
+        findmy_update_save(running=False, phase="error", restart_required=changed,
+            message=str(exc)[:350], installed_version=findmy_installed_version())
+    finally:
+        _findmy_update_lock.release()
+
+
+@app.route("/api/server/findmy", methods=["GET", "POST"])
+def findmy_maintenance_api():
+    if not is_main_admin():
+        return jsonify(status="error", message="Nur der Hauptadmin darf Serverpakete verwalten."), 403
+    if request.method == "GET":
+        return jsonify(status="ok", findmy={**_findmy_update, "installed_version": findmy_installed_version(),
+            "source_url": "https://github.com/malmeloo/FindMy.py", "can_update": sys.prefix != sys.base_prefix,
+            "runtime_version": FINDMY_RUNTIME_VERSION})
+    data = request.get_json(silent=True) or {}
+    if data.get("action") == "check":
+        try:
+            findmy_release_check()
+            return findmy_maintenance_api_status()
+        except Exception:
+            findmy_update_save(check_error="PyPI nicht erreichbar. Später erneut prüfen.")
+            return jsonify(status="error", message=_findmy_update["check_error"]), 502
+    if data.get("action") != "update" or data.get("confirmed") is not True:
+        return jsonify(status="error", message="Update muss ausdrücklich bestätigt werden."), 400
+    if sys.prefix == sys.base_prefix:
+        return jsonify(status="error", message="Für Paketupdates den Server in einer eigenen Python-venv starten."), 409
+    if not verify_identity_password("main", data.get("current_password")):
+        return jsonify(status="error", message="Aktuelles Master-Passwort erforderlich."), 403
+    if two_factor_enabled("main"):
+        valid, _ = verify_two_factor_code("main", data.get("current_code"), consume=True)
+        if not valid:
+            return jsonify(status="error", message="Gültiger Zwei-Faktor-Code erforderlich."), 403
+    target = str(data.get("version") or "")
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", target) or target != _findmy_update.get("latest_version") or time.time() - _findmy_update.get("checked_ts", 0) > 3600:
+        return jsonify(status="error", message="Zuerst neu nach einer offiziellen Version suchen."), 409
+    if not _findmy_update_lock.acquire(blocking=False):
+        return jsonify(status="error", message="Ein FindMy-Update läuft bereits."), 409
+    if target == findmy_installed_version():
+        _findmy_update_lock.release()
+        return jsonify(status="error", message="Diese Version ist bereits installiert."), 409
+    findmy_update_save(running=True, phase="queued", target_version=target, message="Update wird vorbereitet.")
+    threading.Thread(target=findmy_update_worker, args=(target,), daemon=True, name="findmy-update").start()
+    return findmy_maintenance_api_status(), 202
+
+
+def findmy_maintenance_api_status():
+    return jsonify(status="ok", findmy={**_findmy_update, "installed_version": findmy_installed_version()})
 
 
 if __name__ == "__main__":

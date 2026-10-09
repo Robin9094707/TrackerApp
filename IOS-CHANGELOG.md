@@ -1,3 +1,13 @@
+# iOS 4.4.0 · MCP-Discovery & Serververwaltung
+
+- MCP-Discovery: stateless Transport ohne fiktive Session-ID, revisionsabhängige Complete-Antworten, eindeutige OAuth-Security-Metadaten, nach erteilten Berechtigungen gefilterter Katalog. Granulare Altverbindungen bleiben gültig.
+- Nativer durchsuchbarer MCP-Tool-Katalog inklusive Parameter und Bestätigungspflichten; Serverdiagnose prüft Tool-Erzeugung und Schema-Grundstruktur.
+- FindMy.py: offizielle stabile Version prüfen, Master-Passwort/2FA-geschützte Installation in einer venv, isolierte API-/Abhängigkeitsprüfung, privates Backup, Paket-Rollback und Fortschrittsanzeige. Zum Laden neuer Module Serverdienst neu starten.
+- Apple-Tracker direkt im Detailmenü aus der App entfernen: Schlüssel, Verlauf, Freigaben, Alarme, Recovery und Fusionen. Zugehörige Einzel-Geofences werden deaktiviert statt auf alle Tracker erweitert. Private Sicherung vor Löschung; Apple-Kontobindung bleibt bestehen.
+- API-Werkzeuge zeigen jeden veröffentlichten Endpunkt ohne 300er-Limit, bieten Pfadparameter, GET/POST/PUT/PATCH/DELETE, JSON, Formulare, Dateiupload und Antwortdateien. Änderungen erfordern Bestätigung; Serverrechte gelten unverändert.
+- Google-Werkzeuge und Abhängigkeiten über native Formulare verwalten. Browser-Administration ergänzt FindMy-Verwaltung und Glasoptik.
+- 15 gezielte Backend-Regressionsprüfungen einschließlich OAuth → Initialize → Tool-Liste → Tool-Aufruf; keine zusätzlichen langen IPA-Simulatorläufe.
+
 # 4.3.0 · Calendar History & ChatGPT Control Center
 
 - History defaults to today from local midnight, using the server timezone. Select one day, arbitrary multiple days, or all stored dates, including those older than 90 days.

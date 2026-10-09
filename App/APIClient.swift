@@ -192,6 +192,48 @@ final class APIClient {
         return String(decoding: data, as: UTF8.self)
     }
 
+    func requestAdvanced(path: String, method: String, bodyText: String, encoding: String,
+                         fileData: Data?, fileName: String, fileField: String) async throws -> (String, URL?) {
+        guard let parts = URLComponents(string: path), parts.scheme == nil, parts.host == nil,
+              parts.path.hasPrefix("/api/"), !parts.path.contains("<") else {
+            throw APIError.message("API-Pfad und alle Platzhalter zuerst ausfüllen.")
+        }
+        let object = try JSONSerialization.jsonObject(with: Data(bodyText.utf8))
+        guard let values = object as? [String: Any] else { throw APIError.message("Der Body muss ein JSON-Objekt sein.") }
+        let form = values.mapValues { value -> String in
+            if let string = value as? String { return string }
+            if let number = value as? NSNumber { return number.stringValue }
+            return String(describing: value)
+        }
+        var upload: Data?
+        let boundary = "RJTracker-" + UUID().uuidString
+        if encoding == "Datei" {
+            guard let fileData, fileData.count <= 20 * 1024 * 1024 else { throw APIError.message("Datei fehlt oder ist größer als 20 MB.") }
+            let fields = Array(form.keys) + [fileField, fileName]
+            guard fields.allSatisfy({ !$0.contains("\r") && !$0.contains("\n") && !$0.contains("\"") }), !fileField.isEmpty else {
+                throw APIError.message("Ungültiger Dateiname oder Feldname.")
+            }
+            var data = Data()
+            for key in form.keys.sorted() {
+                data.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(key)\"\r\n\r\n\(form[key] ?? "")\r\n".utf8))
+            }
+            data.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(fileField)\"; filename=\"\(fileName)\"\r\nContent-Type: application/octet-stream\r\n\r\n".utf8))
+            data.append(fileData); data.append(Data("\r\n--\(boundary)--\r\n".utf8)); upload = data
+        }
+        let read = ["GET", "HEAD"].contains(method)
+        let data = try await raw(path: parts.path, method: method, json: !read && encoding == "JSON" ? values : nil,
+                                 query: parts.queryItems ?? [], form: !read && encoding == "Formular" ? form : nil,
+                                 multipart: upload, boundary: boundary)
+        if let parsed = try? JSONSerialization.jsonObject(with: data), JSONSerialization.isValidJSONObject(parsed),
+           let pretty = try? JSONSerialization.data(withJSONObject: parsed, options: [.prettyPrinted, .sortedKeys]) {
+            return (String(decoding: pretty, as: UTF8.self), nil)
+        }
+        let ext = data.starts(with: Data("%PDF".utf8)) ? "pdf" : (data.starts(with: [0x50, 0x4b]) ? "zip" : "txt")
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("API-Antwort-\(UUID().uuidString).\(ext)")
+        try data.write(to: file, options: .atomic)
+        return (String(data: data, encoding: .utf8) ?? "Datei empfangen: \(data.count) Bytes", file)
+    }
+
     func request<T: Decodable>(path: String, method: String = "GET", json: [String: Any]? = nil, query: [URLQueryItem] = [], needsCSRF: Bool? = nil) async throws -> T {
         let data = try await raw(path: path, method: method, json: json, query: query, needsCSRF: needsCSRF)
         do { return try decoder.decode(T.self, from: data) }
@@ -201,7 +243,7 @@ final class APIClient {
         }
     }
 
-    private func raw(path: String, method: String, json: [String: Any]?, query: [URLQueryItem], needsCSRF: Bool? = nil, form: [String: String]? = nil) async throws -> Data {
+    private func raw(path: String, method: String, json: [String: Any]?, query: [URLQueryItem], needsCSRF: Bool? = nil, form: [String: String]? = nil, multipart: Data? = nil, boundary: String = "") async throws -> Data {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
             guard method == "GET", let data = PreviewFixtures.response(path: path) else { throw APIError.message("Im UI-Test sind Serveränderungen deaktiviert.") }
@@ -224,6 +266,10 @@ final class APIClient {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("RJTracker-iOS/4.0", forHTTPHeaderField: "User-Agent")
         request.setValue("iPhone / iPad · RJ Tracker", forHTTPHeaderField: "X-RJ-Device-Label")
+        if let multipart {
+            request.httpBody = multipart
+            request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        }
         if let json {
             guard JSONSerialization.isValidJSONObject(json) else { throw APIError.message("Ungültiger JSON-Body.") }
             request.httpBody = try JSONSerialization.data(withJSONObject: json)

@@ -14,6 +14,8 @@ struct TrackerDetailView: View {
     @State private var showSharing = false
     @State private var visibilityAction: String?
     @State private var busy = false
+    @State private var showDelete = false
+    @State private var deletionError: String?
     private var current: Tracker { model.trackers.first { $0.ref == tracker.ref } ?? tracker }
 
     var body: some View {
@@ -41,6 +43,7 @@ struct TrackerDetailView: View {
                 }
                 .buttonStyle(.plain).rjCompactCard()
                 information
+                if let deletionError { Text(deletionError).foregroundStyle(.red).font(.caption) }
                 if ["apple", "fusion"].contains(current.provider) {
                     Button { showRecoveryConfirm = true } label: {
                         Label("Als vermisst suchen", systemImage: "lifepreserver")
@@ -71,6 +74,9 @@ struct TrackerDetailView: View {
                     }.disabled(model.updatingRefs.contains(current.ref))
                     Button { visibilityAction = "hidden" } label: { Label("Ausblenden", systemImage: "eye.slash") }
                     Button { visibilityAction = "archived" } label: { Label("Archivieren", systemImage: "archivebox") }
+                    if current.provider == "apple" {
+                        Button(role: .destructive) { showDelete = true } label: { Label("Aus dieser App löschen", systemImage: "trash") }
+                    }
                     if current.validLocation != nil {
                         ShareLink(item: current.shareText) { Label("Standort teilen", systemImage: "square.and.arrow.up") }
                     }
@@ -79,6 +85,11 @@ struct TrackerDetailView: View {
             }
         }
         .sheet(isPresented: $showGroups) { NavigationStack { GroupAssignmentView(tracker: current) } }
+        .confirmationDialog("Apple-Tracker endgültig aus dieser App entfernen?", isPresented: $showDelete, titleVisibility: .visible) {
+            Button("Tracker & App-Verlauf löschen", role: .destructive) { Task { await removeAppleTracker() } }
+        } message: {
+            Text("Importschlüssel, Verlauf, Alarme und Freigaben dieses Trackers werden entfernt. Der Server erstellt vorher eine private Sicherung mit Zugangsdaten. Die Zuordnung in Apples Wo-ist?-Konto bleibt bestehen.")
+        }
         .sheet(isPresented: $showSharing) { NavigationStack { TrackerSharingView(tracker: current) } }
         .confirmationDialog("Objekt aus der Liste nehmen?", isPresented: Binding(get: { visibilityAction != nil }, set: { if !$0 { visibilityAction = nil } }), titleVisibility: .visible) {
             if let action = visibilityAction {
@@ -118,6 +129,14 @@ struct TrackerDetailView: View {
         .rjCard()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("tracker-detail-header")
+    }
+
+    private func removeAppleTracker() async {
+        busy = true; defer { busy = false }
+        do {
+            _ = try await APIClient.shared.requestJSON(path: "/api/v3/trackers/apple/" + escaped(current.apiID), method: "DELETE", json: [:])
+            APIClient.shared.clearHistoryCache(); await model.refreshTrackers(); dismiss()
+        } catch { deletionError = error.localizedDescription }
     }
 
     private var actions: some View {

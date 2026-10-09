@@ -52,6 +52,12 @@ struct GoogleRepairView: View {
             Section {
                 Button("Google-Reparatur starten") { operation = "repair" }.disabled(busy)
                 Button("Zugangsdaten neu einlesen") { operation = "reload-secrets" }.disabled(busy)
+                NavigationLink("Offizielle Google-Werkzeuge aktualisieren") {
+                    ManagementForm(title: "Google-Werkzeuge laden", path: "/api/google/tools/download", explanation: "Lädt das offizielle GoogleFindMyTools-Archiv auf deinen Server. Zugangsdaten und gespeicherte Verläufe bleiben erhalten.")
+                }
+                NavigationLink("Google-Abhängigkeiten installieren") {
+                    ManagementForm(title: "Google-Abhängigkeiten", path: "/api/google/tools/dependencies", explanation: "Installiert die Abhängigkeiten der Google-Werkzeuge in deren eigener Serverumgebung.")
+                }
                 Text("Die Reparatur läuft auf dem Server weiter. Falls eine neue Google-Anmeldung nötig ist, wird sie hierdurch nicht ersetzt.").font(.caption).foregroundStyle(.secondary)
             }
             if busy { ProgressView() }

@@ -1,8 +1,10 @@
-# RJ Tracker 4.3 · native iOS + API Backend 20.2
+# RJ Tracker 4.4 · native iOS + API Backend 20.3
 
-Neu: vollständige Kalendertage und freie Mehrfachauswahl, Benachrichtigungen leeren, native MCP-Verwaltung sowie MCP-Kontrollen im Admin-Bereich. [Update-Anleitung und Kompatibilität](docs/UPGRADE-4.3.md).
+Neu in 4.4: reparierte MCP-Discovery, sichtbarer Tool-Katalog, FindMy.py-Paketverwaltung, vollständiges Löschen importierter Apple-Tracker und erweiterte API-Werkzeuge. [Update 4.4](docs/UPGRADE-4.4.md).
 
-Native SwiftUI-/MapKit-App für Apple-, Google-, Samsung- und Fusion-Tracker. Android und der Android-Workflow wurden entfernt. Das Backend stellt die bisherigen Tracker-APIs sowie neue Import-, Geräte-, Passkey- und API-Key-Endpunkte bereit. Die Browseroberfläche unter `/` bietet ausschließlich Hauptadmin-Anmeldung, Statistik, Geräte-Abmeldung und Passwortverwaltung.
+Weiterhin: vollständige Kalendertage und freie Mehrfachauswahl, Benachrichtigungen leeren, native MCP-Verwaltung sowie MCP-Kontrollen im Admin-Bereich. [Update-Anleitung und Kompatibilität](docs/UPGRADE-4.3.md).
+
+Native SwiftUI-/MapKit-App für Apple-, Google-, Samsung- und Fusion-Tracker. Android und der Android-Workflow wurden entfernt. Das Backend stellt die bisherigen Tracker-APIs sowie neue Import-, Geräte-, Passkey- und API-Key-Endpunkte bereit. Die Browseroberfläche unter `/` bietet ausschließlich Hauptadmin-Anmeldung, Statistik, Geräte-Abmeldung Passwortverwaltung sowie MCP- und FindMy.py-Verwaltung.
 
 ## Dateien
 
