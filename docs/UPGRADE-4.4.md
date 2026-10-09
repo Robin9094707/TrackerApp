@@ -12,7 +12,7 @@ Unter **Ich → Server verwalten → ChatGPT / MCP** die Konfiguration prüfen u
 
 Bei der Meldung „Authentication succeeded, action discovery failed“ erst Backend und IPA aktualisieren. Danach die fehlgeschlagene Verbindung in ChatGPT entfernen und mit dem angezeigten MCP-Link und OAuth neu anlegen. Im geöffneten Serverfenster mit Master-/Kontopasswort und gegebenenfalls 2FA anmelden. Bestehende funktionierende Verbindungen müssen nicht pauschal widerrufen werden. Widerruf ist weiterhin einzeln oder gesammelt möglich.
 
-Die kompatiblen älteren Protokolle bleiben erhalten. 2026-07-28-Anfragen bekommen `resultType: complete`; fiktive Protokollrevisionen werden nicht mehr zugesagt. Der stateless Server gibt keine ungespeicherte Session-ID mehr aus. Jeder Tool-Descriptor hat genau ein OAuth-Schema und spiegelt es in `_meta`. Altverbindungen sehen nur die durch ihre granularen Scopes erlaubten Tools. Die Ursache auf einem fremden laufenden Server lässt sich ohne dessen Logs und URL nicht abschließend nachweisen.
+Die kompatiblen älteren Protokolle bleiben erhalten. 2026-07-28-Anfragen bekommen `resultType: complete`; fiktive Protokollrevisionen werden nicht mehr zugesagt. Der stateless Server gibt keine ungespeicherte Session-ID mehr aus. Neue OAuth-Verbindungen fordern standardmäßig den einheitlichen Scope `suite:access` an; explizit gewünschte granulare Leserechte bleiben erhalten. Jeder Tool-Descriptor hat genau ein OAuth-Schema und spiegelt es in `_meta`. Altverbindungen sehen nur die durch ihre granularen Scopes erlaubten Tools. Die Ursache auf einem fremden laufenden Server lässt sich ohne dessen Logs und URL nicht abschließend nachweisen.
 
 ## FindMy.py aktualisieren
 

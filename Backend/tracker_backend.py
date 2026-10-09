@@ -14794,7 +14794,8 @@ def mcp_unsign_authorization(value):
 
 
 def mcp_scope_set(value):
-    requested = {item for item in str(value or "trackers:read").split() if item}
+    default_scope = MCP_UNIFIED_SCOPE if mcp_config().get("unified_scope", True) else "trackers:read"
+    requested = {item for item in str(value or default_scope).split() if item}
     supported = set(mcp_scopes_supported())
     return requested & supported
 
@@ -15010,7 +15011,9 @@ def mcp_bearer_challenge(code="invalid_token", description="OAuth-Zugriffstoken 
     return f'Bearer resource_metadata="{metadata}", error="{code}", error_description="{safe_description}", scope="{safe_scope}"'
 
 
-def mcp_unauthorized(code="invalid_token", description="OAuth-Zugriffstoken fehlt oder ist ungültig.", scope="trackers:read"):
+def mcp_unauthorized(code="invalid_token", description="OAuth-Zugriffstoken fehlt oder ist ungültig.", scope=None):
+    if scope is None:
+        scope = MCP_UNIFIED_SCOPE if mcp_config().get("unified_scope", True) else "trackers:read"
     challenge = mcp_bearer_challenge(code, description, scope)
     return mcp_json_response({"error": code, "error_description": description}, 401, {"WWW-Authenticate": challenge})
 

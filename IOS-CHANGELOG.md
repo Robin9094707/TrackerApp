@@ -6,7 +6,7 @@
 - Apple-Tracker direkt im Detailmenü aus der App entfernen: Schlüssel, Verlauf, Freigaben, Alarme, Recovery und Fusionen. Zugehörige Einzel-Geofences werden deaktiviert statt auf alle Tracker erweitert. Private Sicherung vor Löschung; Apple-Kontobindung bleibt bestehen.
 - API-Werkzeuge zeigen jeden veröffentlichten Endpunkt ohne 300er-Limit, bieten Pfadparameter, GET/POST/PUT/PATCH/DELETE, JSON, Formulare, Dateiupload und Antwortdateien. Änderungen erfordern Bestätigung; Serverrechte gelten unverändert.
 - Google-Werkzeuge und Abhängigkeiten über native Formulare verwalten. Browser-Administration ergänzt FindMy-Verwaltung und Glasoptik.
-- 15 gezielte Backend-Regressionsprüfungen einschließlich OAuth → Initialize → Tool-Liste → Tool-Aufruf; keine zusätzlichen langen IPA-Simulatorläufe.
+- 16 gezielte Backend-Regressionsprüfungen einschließlich OAuth → Initialize → Tool-Liste → Tool-Aufruf; keine zusätzlichen langen IPA-Simulatorläufe.
 
 # 4.3.0 · Calendar History & ChatGPT Control Center
 

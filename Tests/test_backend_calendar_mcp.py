@@ -215,6 +215,18 @@ class BackendUpgradeTests(unittest.TestCase):
         unsupported=self.client.post('/mcp',json={'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'future'}},headers={'Authorization':'Bearer '+token})
         self.assertEqual(unsupported.json['result']['protocolVersion'],'2025-11-25')
 
+    def test_new_connector_requests_unified_scope_without_expanding_old_grants(self):
+        public=APP.test_client()
+        r=public.post('/mcp',json={'jsonrpc':'2.0','id':1,'method':'tools/list'})
+        self.assertEqual(r.status_code,401)
+        self.assertIn('scope="suite:access"',r.headers['WWW-Authenticate'])
+        self.assertEqual(M['mcp_scope_set'](None),{'suite:access'})
+        self.assertEqual(M['mcp_scope_set']('trackers:read'),{'trackers:read'})
+        with APP.test_request_context(base_url='https://tracker.example'):
+            self.assertEqual(len(M['mcp_tools']({'scopes':['suite:access']})),58)
+            legacy=M['mcp_tools']({'scopes':['trackers:read']})
+            self.assertTrue(all(t['annotations']['readOnlyHint'] for t in legacy))
+
     def test_native_catalog_and_findmy_admin_guard(self):
         catalog=self.client.get('/api/mcp/tools')
         self.assertEqual(catalog.status_code,200)
