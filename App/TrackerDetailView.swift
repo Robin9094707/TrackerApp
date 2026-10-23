@@ -25,7 +25,7 @@ struct TrackerDetailView: View {
                 header
                 actions
                 if current.provider == "google" {
-                    GoogleLauncherCard().padding(12).rjCompactCard()
+                    GoogleLauncherCard(deviceID: current.apiID).padding(12).rjCompactCard()
                 }
                 if current.provider == "fusion" { FusionSourcesCard(tracker: current) }
                 VStack(spacing: 0) {

@@ -105,14 +105,14 @@ struct DeviceDetailLocationsView: View {
         }
 
         if let otherPublicDER = device.sharingSettings.pendingShareOperations.first?.sharingOtherPublicKey, let ownPrivateProto = device.sharingSettings.pendingShareOperations.first?.sharingOwnPrivateKey, device.sharingSettings.sharingState == .SharedWithMePending {
-            CustomSection(header: "Device Sharing") {
+            CustomSection(header: "Google-Freigabe") {
                 LUIText("Device was shared with you. Waiting for owner approval...")
                     .padding(.vertical)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 let pin = UpdateBleDeviceSharingSettings.calculatePIN(ownerPublicKeyDER: otherPublicDER, inviteePublicKeyDER: ownPrivateProto.publicKey)
 
-                CustomPickerLabel(selection: pin, backgroundColor: .orange, description: "Confirmation PIN", imageName: "key.horizontal.fill", isLink: false)
+                CustomPickerLabel(selection: pin, backgroundColor: .orange, description: "Bestätigungs-PIN", imageName: "key.horizontal.fill", isLink: false)
             }
         }
 
@@ -123,7 +123,7 @@ struct DeviceDetailLocationsView: View {
            let accountKey = device.accountKey,
            device.sharingSettings.sharingState == .SharedWithOthersPending
         {
-            CustomSection(header: "Device Sharing") {
+            CustomSection(header: "Google-Freigabe") {
                 LUIText("Device was shared with \(theirName). Approve?")
                     .padding(.vertical)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -137,7 +137,7 @@ struct DeviceDetailLocationsView: View {
                     requestRefresh()
                 }
 
-                CustomPickerLabel(selection: pin, backgroundColor: .orange, description: "Confirmation PIN", imageName: "key.horizontal.fill", isLink: false)
+                CustomPickerLabel(selection: pin, backgroundColor: .orange, description: "Bestätigungs-PIN", imageName: "key.horizontal.fill", isLink: false)
             }
         }
 
@@ -149,7 +149,7 @@ struct DeviceDetailLocationsView: View {
                     let requestTime = device.lastReportRefresh
                     let selection = requestTime != nil ? timeToRelativeTime(date: pastTime(date: requestTime!), currentDate: clock.currentDate) : "Never"
 
-                    CustomPickerLabel(selection: selection, backgroundColor: .blue, description: "Last Update", imageName: "clock.fill", isLink: false)
+                    CustomPickerLabel(selection: selection, backgroundColor: .blue, description: "Letzte Aktualisierung", imageName: "clock.fill", isLink: false)
 
                     ZStack {
                         if refreshing {
@@ -172,18 +172,18 @@ struct DeviceDetailLocationsView: View {
 
             if let peripheral = device.bluetoothData, !deviceNotCurrentlyReachable(device: peripheral, currentDate: clock.currentDate) {
                 LUILink(destination: PrecisionFindingView(tracker: device, bluetoothData: peripheral)) {
-                    CustomPickerLabel(selection: "Nearby", backgroundColor: .orange, description: "Locate Tracker", imageName: "smallcircle.fill.circle.fill")
+                    CustomPickerLabel(selection: "Nearby", backgroundColor: .orange, description: "In der Nähe suchen", imageName: "smallcircle.fill.circle.fill")
                 }
 
                 if device.batteryState != .Unknown, !device.isCustomTracker {
-                    CustomPickerLabel(selection: device.batteryState.rawValue, backgroundColor: device.batteryState.color, description: "Battery Level", imageName: device.batteryState.image, isLink: false)
+                    CustomPickerLabel(selection: device.batteryState.rawValue, backgroundColor: device.batteryState.color, description: "Batteriestand", imageName: device.batteryState.image, isLink: false)
                 }
             } else {
                 LUIButton {
                     toggleSoundPlayback()
                 } label: {
                     HStack {
-                        SettingsLabel(imageName: "waveform", text: playsSound ? "Stop Sound Request" : "Request Sound", backgroundColor: .red)
+                        SettingsLabel(imageName: "waveform", text: playsSound ? "Klingelanfrage beenden" : "Klingeln anfragen", backgroundColor: .red)
 
                         if soundRequested {
                             LoadingIndicator()
@@ -203,14 +203,14 @@ struct DeviceDetailLocationsView: View {
         if device.sharingSettings.sharingState != .SharedWithMePending, device.deviceType != .deviceTypePhone {
             let isSharedWithMe = device.sharingSettings.sharingState == .SharedWithMe
 
-            CustomSection(header: "Manage Device") {
+            CustomSection(header: "Tracker verwalten") {
                 LUIButton {
                     deviceName = device.userDefinedName
                     showTextEditField = true
                 } label: {
-                    NavigationLinkLabel(imageName: "character.cursor.ibeam", text: "Change Name", backgroundColor: .indigo)
+                    NavigationLinkLabel(imageName: "character.cursor.ibeam", text: "Namen ändern", backgroundColor: .indigo)
                 }
-                .alert("Change Device Name", isPresented: $showTextEditField) {
+                .alert("Trackernamen ändern", isPresented: $showTextEditField) {
                     TextField("Name", text: $deviceName)
 
                     Button("Save") {

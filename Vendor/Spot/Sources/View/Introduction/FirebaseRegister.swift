@@ -14,7 +14,7 @@ struct FirebaseRegisterView: View {
     @State private var failed = false
 
     var body: some View {
-        PermissionView(title: "Setup", symbol: "icloud", subtitle: "Preparing your account... Please wait and make sure that you have internet access.", continueLabel: "", canSkip: false, animateMockup: true) {
+        PermissionView(title: "Setup", symbol: "icloud", subtitle: "Deine lokale Google-Verbindung wird eingerichtet. Bitte prüfe, dass du mit dem Internet verbunden bist.", continueLabel: "", canSkip: false, animateMockup: true) {
             IntroductionDoneView()
         } nextViewSkip: {
             IntroductionDoneView()

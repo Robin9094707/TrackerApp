@@ -96,7 +96,7 @@ struct DeviceListView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Add Device", systemImage: "plus") {
+                Button("Tracker hinzufügen", systemImage: "plus") {
                     if tokenManager.ownerKey == nil {
                         settings.showKeyRecoverySheet = true
                     } else {

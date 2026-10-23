@@ -18,7 +18,7 @@ struct GoogleEmailView: View {
     @State var canSkip = TokenManager.sharedInstance.aasToken != nil
 
     var body: some View {
-        PermissionView(title: "Login", symbol: "person.fill", subtitle: "Tap \"Continue\" to login with your Google account. Your credentials stay on-device.", continueLabel: "Continue", canSkip: false, animateMockup: false) {
+        PermissionView(title: "Login", symbol: "person.fill", subtitle: "Melde dich direkt mit deinem Google-Konto an. Deine Zugangsdaten und Schlüssel bleiben auf diesem iPhone.", continueLabel: "Weiter", canSkip: false, animateMockup: false) {
             if canSkip {
                 IntroductionDoneView()
             } else {

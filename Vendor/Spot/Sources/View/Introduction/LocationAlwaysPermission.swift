@@ -15,7 +15,7 @@ struct LocationAlwaysPermissionView: View {
     var body: some View {
         let canProceed = locationManager.locationManager?.authorizationStatus == .authorizedAlways
 
-        PermissionView(title: "Background Location", symbol: "mappin.and.ellipse", subtitle: "Allow background location access for Spot so that the location of your own trackers can be updated even if the app is closed.", permissionAction: {
+        PermissionView(title: "Suche im Hintergrund", symbol: "mappin.and.ellipse", subtitle: "Erlaube den Standort im Hintergrund, um Sichtungsmeldungen für deine eigenen Tracker zu aktualisieren, während die App im Hintergrund aktiv ist.", permissionAction: {
             if canProceed {
                 locationManager.enableBackgroundLocationUpdate()
                 IntroductionViewController.sharedInstance.canProceed = true
@@ -33,7 +33,7 @@ struct LocationAlwaysPermissionView: View {
                 }
             }
 
-        }, continueLabel: "Continue", canSkip: true, animateMockup: false) {
+        }, continueLabel: "Weiter", canSkip: true, animateMockup: false) {
             FirebaseRegisterView()
         } nextViewSkip: {
             FirebaseRegisterView()

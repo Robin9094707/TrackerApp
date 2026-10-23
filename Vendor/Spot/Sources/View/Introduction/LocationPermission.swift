@@ -15,7 +15,7 @@ struct LocationPermissionView: View {
     var body: some View {
         let canProceed = locationManager.permissionSet
 
-        PermissionView(title: "Location Access", symbol: "mappin.and.ellipse", subtitle: "Allow location access for Spot so that the location of your own trackers can be updated if they are nearby.", permissionAction: {
+        PermissionView(title: "Dein Standort", symbol: "mappin.and.ellipse", subtitle: "Mit deinem Standort kann RJ Tracker Sichtungsmeldungen für deine eigenen Tracker in der Nähe aktualisieren.", permissionAction: {
             let authorizationStatus = locationManager.locationManager?.authorizationStatus ?? .notDetermined
             let authorizationAccuracy = locationManager.locationManager?.accuracyAuthorization ?? .none
 
@@ -32,7 +32,7 @@ struct LocationPermissionView: View {
                 openAppSettings()
             }
 
-        }, continueLabel: "Continue", canSkip: true, animateMockup: false) {
+        }, continueLabel: "Weiter", canSkip: true, animateMockup: false) {
             LocationAlwaysPermissionView()
         } nextViewSkip: {
             FirebaseRegisterView()

@@ -25,6 +25,15 @@ packages:
   SwiftProtobuf:
     url: https://github.com/apple/swift-protobuf.git
     exactVersion: 1.29.0
+  Digest:
+    url: https://github.com/leif-ibsen/Digest
+    exactVersion: 1.12.0
+  BigInt:
+    url: https://github.com/leif-ibsen/BigInt
+    exactVersion: 1.21.0
+  ASN1:
+    url: https://github.com/leif-ibsen/ASN1
+    exactVersion: 2.7.0
   CryptoSwift:
     url: https://github.com/krzyzanowskim/CryptoSwift.git
     exactVersion: 1.8.4
@@ -46,6 +55,9 @@ targets:
       - package: SwiftECC
       - package: SwiftProtobuf
       - package: CryptoSwift
+      - package: Digest
+      - package: BigInt
+      - package: ASN1
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: eu.rjuhas.rjtracker.spotintegration

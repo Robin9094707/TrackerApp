@@ -12,6 +12,7 @@ struct LocalGoogleView: View {
 }
 
 struct GoogleLauncherCard: View {
+    var deviceID: String? = nil
     @ObservedObject private var google = GoogleTrackerStore.shared
     @State private var open = false
     var body: some View {
@@ -31,7 +32,7 @@ struct GoogleLauncherCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("local-google-launcher")
-        .fullScreenCover(isPresented: $open) { LocalGoogleView() }
+        .fullScreenCover(isPresented: $open) { LocalGoogleView(deviceID: deviceID) }
     }
 }
 

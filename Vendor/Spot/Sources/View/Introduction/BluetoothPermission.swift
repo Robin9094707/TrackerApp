@@ -15,7 +15,7 @@ struct BluetoothPermissionView: View {
     var body: some View {
         let canProceed = bluetoothManager.centralManager?.state == .poweredOn || bluetoothManager.centralManager?.state == .poweredOff
 
-        PermissionView(title: "Bluetooth Access", symbol: "magnifyingglass", subtitle: "Find My Device trackers use Bluetooth for communication. Please allow Bluetooth access so Spot can communicate with your trackers.", permissionAction: {
+        PermissionView(title: "Bluetooth-Zugriff", symbol: "magnifyingglass", subtitle: "Erlaube Bluetooth, damit RJ Tracker deine Google-Tracker in der Nähe finden und klingeln lassen kann.", permissionAction: {
             bluetoothManager.startCentralManager()
 
             if bluetoothManager.centralManager?.state == .unauthorized {
@@ -26,7 +26,7 @@ struct BluetoothPermissionView: View {
                 IntroductionViewController.sharedInstance.canProceed = true
             }
 
-        }, continueLabel: "Continue", canSkip: true, animateMockup: false) {
+        }, continueLabel: "Weiter", canSkip: true, animateMockup: false) {
             LocationPermissionView()
         } nextViewSkip: {
             FirebaseRegisterView()

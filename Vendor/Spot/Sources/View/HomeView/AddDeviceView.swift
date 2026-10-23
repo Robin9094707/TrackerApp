@@ -16,14 +16,14 @@ struct AddDeviceView: View {
     var body: some View {
         NavigationView {
             NavigationSubView {
-                BigSymbolViewWithText(symbol: "plus.app.fill", subtitle: "Add new Find My Device trackers by asking someone to share their device with you, or by creating your own device.", title: "Add Device") {
+                BigSymbolViewWithText(symbol: "plus.app.fill", subtitle: "Füge eine Google-Freigabe hinzu oder erstelle einen eigenen ESP32-Tracker. Handelsübliche Tracker werden zuerst mit einem kompatiblen Android-Gerät gekoppelt.", title: "Tracker hinzufügen") {
                     VStack(spacing: luiModel.SettingsSectionSpacing) {
                         CustomSection {
                             LUILink(destination: AddInviteView(showSheet: $showAddDeviceSheet)) {
-                                NavigationLinkLabel(imageName: "person.2.fill", text: "Add Shared Device", backgroundColor: .green)
+                                NavigationLinkLabel(imageName: "person.2.fill", text: "Geteilten Tracker hinzufügen", backgroundColor: .green)
                             }
                             LUILink(destination: ESPAddView(showSheet: $showAddDeviceSheet)) {
-                                NavigationLinkLabel(imageName: "plus", text: "Create Own Device", backgroundColor: .blue)
+                                NavigationLinkLabel(imageName: "plus", text: "Eigenen Tracker erstellen", backgroundColor: .blue)
                             }
                         }
 

@@ -22,9 +22,9 @@ struct ContentView: View {
             DeviceListView(initialDeviceID: initialDeviceID)
         }, settingsView: {
             if let _ = PushReceiver.sharedInstance.getToken(), let username = tokenManager.username {
-                CustomSection(footer: "If Background Scanning is enabled, Spot can detect and update locations for your own trackers even when the app is in the background.") {
+                CustomSection(footer: "Bei aktivierter Hintergrundsuche kann RJ Tracker deine eigenen Google-Tracker per Bluetooth erkennen. iOS bestimmt, wann Hintergrundaktivität möglich ist.") {
                     Toggle(isOn: $settings.backgroundScanning) {
-                        SettingsLabel(imageName: "text.magnifyingglass", text: "Background Scanning", backgroundColor: .green)
+                        SettingsLabel(imageName: "text.magnifyingglass", text: "Bluetooth-Hintergrundsuche", backgroundColor: .green)
                     }
                 }
 
@@ -32,7 +32,7 @@ struct ContentView: View {
                     LUILink(destination: LocalGoogleImportView()) { SettingsLabel(imageName: "doc.badge.plus", text: "Google JSON lokal importieren", backgroundColor: .blue) }
                 }
 
-                CustomSection(header: "Account", footer: "Logging out will not delete location history or other data. You can log back in at any time.") {
+                CustomSection(header: "Account", footer: "Beim Abmelden bleiben deine lokalen Verläufe erhalten. Du kannst dich jederzeit erneut anmelden.") {
                     SettingsLabel(imageName: "person.fill", text: username)
 
                     LUIButton {
@@ -45,7 +45,7 @@ struct ContentView: View {
                             Settings.sharedInstance.devicesList = nil
                         }
                     } label: {
-                        NavigationLinkLabel(imageName: "xmark", text: "Logout", backgroundColor: .red)
+                        NavigationLinkLabel(imageName: "xmark", text: "Google lokal abmelden", backgroundColor: .red)
                     }
                 }
             }
@@ -62,12 +62,6 @@ struct ContentView: View {
     }
 
     func scenePhaseChanged(_ newPhase: ScenePhase) {
-        if newPhase == .active {
-            Settings.sharedInstance.isBackground = false
-        } else {
-            if scenePhase == .active, newPhase == .inactive || newPhase == .background {
-                Settings.sharedInstance.isBackground = true
-            }
-        }
+        Settings.sharedInstance.isBackground = newPhase != .active
     }
 }

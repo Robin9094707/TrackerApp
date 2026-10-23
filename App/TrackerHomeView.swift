@@ -42,7 +42,6 @@ struct TrackerHomeView: View {
                 .presentationBackgroundInteraction(.enabled(upThrough: .large))
                 .interactiveDismissDisabled()
         }
-        .fullScreenCover(item: $googleDestination) { LocalGoogleView(deviceID: $0.deviceID) }
         .task { fitAll(); await google.restoreIfNeeded() }
         .onChange(of: google.trackers) { _, _ in if selectedRef == nil { fitAll() } }
         .onChange(of: located.map(\.ref)) { _, _ in if selectedRef == nil { fitAll() } }
@@ -186,6 +185,7 @@ struct TrackerHomeView: View {
         .toolbarBackground(Color(uiColor: .systemGroupedBackground), for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
         .environment(\.rjExpandInspector, { detent = .large })
+        .fullScreenCover(item: $googleDestination) { LocalGoogleView(deviceID: $0.deviceID) }
         .onChange(of: tab) { _, value in
             if value != 0 { detent = .large }
             else { detent = .medium }
@@ -232,6 +232,7 @@ struct TrackerHomeView: View {
 }
 
 struct TrackerLibraryView: View {
+    @ObservedObject private var google = GoogleTrackerStore.shared
     @Environment(AppModel.self) private var model
     let onSelect: (Tracker) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -252,7 +253,7 @@ struct TrackerLibraryView: View {
                             .accessibilityLabel("Hinweis schließen")
                     }
                 }
-                if model.filteredTrackers.isEmpty {
+                if model.filteredTrackers.isEmpty && google.trackers.isEmpty {
                     ContentUnavailableView(model.trackers.isEmpty ? "Noch keine Objekte" : "Keine Treffer", systemImage: "airtag", description: Text(model.trackers.isEmpty ? "Füge unter Ich → Accounts, Import & Fusionen deine Tracker hinzu." : "Passe deine Suche oder Filter an."))
                 }
                 ForEach(model.filteredTrackers) { tracker in

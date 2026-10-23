@@ -9,3 +9,5 @@ Vendored as the SpotIntegration framework in RJ Tracker 5.0. Original applicatio
 Integration changes: public host/snapshot bridge; separate Keychain/preferences and account-specific history stores; non-destructive Core Data migration; authenticated async login completion; request validation; local secrets import; lifecycle forwarding. All original tracker management, Bluetooth, crypto, location, sharing and ESP32 creation sources are included.
 
 The complete combined application source is distributed under GPL-3.0-only. Third-party notices remain in Licenses and Configuration.swift. Backend dependencies retain their respective licenses.
+
+The dependency versions are pinned to the upstream Package.resolved, including Digest 1.12.0, BigInt 1.21.0 and ASN1 2.7.0. Newer Digest enum cases are incompatible with SwiftECC 5.4.0.
