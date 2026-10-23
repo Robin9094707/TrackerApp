@@ -49,6 +49,25 @@ class BackendUpgradeTests(unittest.TestCase):
         return {'lat':51.43,'lon':6.76,'acc':12,'ts':start+offset,
                 'report_id':report or day,'received_at':time.time()}
 
+    def test_google_local_contract_does_not_change_existing_data(self):
+        keys = ('google_devices', 'google_history', 'seven_day_history', 'samsung_history')
+        before = {key: copy.deepcopy(STATE[key]) for key in keys}
+        response = self.client.get('/api/mobile/v1/google/local')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['mode'], 'on_device')
+        self.assertFalse(response.json['credentials_upload'])
+        self.assertFalse(response.json['requires_backend'])
+        self.assertIn('remote_ring', response.json['features'])
+        capabilities = self.client.get('/api/mobile/v1/capabilities')
+        self.assertTrue(capabilities.json['native']['google_local_client'])
+        self.assertEqual(before, {key: STATE[key] for key in keys})
+
+    def test_google_local_contract_requires_auth_and_rejects_token_upload(self):
+        anonymous = APP.test_client()
+        self.assertEqual(anonymous.get('/api/mobile/v1/google/local').status_code, 401)
+        response = self.client.post('/api/mobile/v1/google/local', json={'aas_token': 'not-a-real-token'}, headers=self.headers)
+        self.assertEqual(response.status_code, 405)
+
     def test_existing_stores_survive_startup(self):
         for key in ('seven_day_history','google_history','samsung_history'):
             row=STATE[key]['legacy']['points'][0]

@@ -18,6 +18,7 @@ struct MoreView: View {
                 NavigationLink { AccountManagementView() } label: { Label("Konto & Sicherheit", systemImage: "person.badge.shield.checkmark") }
                 NavigationLink { InternalSharesView() } label: { Label("Interne Freigaben", systemImage: "person.2") }
             }
+            Section("Google Find Hub") { GoogleLauncherCard() }
             Section("Meine Objekte") {
                 NavigationLink { GroupsView() } label: { Label("Gruppen", systemImage: "folder") }
                 NavigationLink { ArchiveView() } label: { Label("Archiv & ausgeblendete Objekte", systemImage: "archivebox") }

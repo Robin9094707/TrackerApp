@@ -79,6 +79,21 @@ final class TrackerUITests: XCTestCase {
     }
 
     @MainActor
+    func testLocalGoogleCanOpenAndReturnToExistingTrackers() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "-appearance", "light"]
+        app.launch()
+        let launcher = app.buttons["local-google-launcher"].firstMatch
+        XCTAssertTrue(launcher.waitForExistence(timeout: 20))
+        launcher.tap()
+        let close = app.buttons["Zurück zu RJ Tracker"]
+        XCTAssertTrue(close.waitForExistence(timeout: 15))
+        capture("12-Google-Local-Onboarding")
+        close.tap()
+        XCTAssertTrue(app.buttons["tracker-row-fusion:demo-bag"].waitForExistence(timeout: 10))
+    }
+
+    @MainActor
     private func capture(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name

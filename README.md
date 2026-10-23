@@ -1,3 +1,17 @@
+# RJ Tracker 5.0
+
+Universelle iPhone-/iPad-Tracker-App mit bestehendem Apple-/Google-/Samsung-/Fusion-Backend und vollständig integriertem lokalem Google-Find-Hub-Client auf Basis von [Spot](https://github.com/leonboe1/Spot).
+
+Google direkt auf dem iPhone: Anmeldung und AAS-Token, Schlüsselwiederherstellung, lokale secrets.json-Imports, Geräteimport, verschlüsselte Standorte und lokale Historie, Bluetooth-Suche/Klingeln, Google-Klingelanfragen, Freigaben, Verlustmodus und ESP32-Erstellung. Die bestehenden Serverfunktionen bleiben erhalten.
+
+[Upgrade und Nutzung](docs/UPGRADE-5.0.md) · [API](docs/API-EDITION.md) · [Spot-Quellstand/Lizenzen](Vendor/Spot/UPSTREAM.md)
+
+Mindestversion iOS 18.1. Die GitHub Action **Build RJ Tracker IPA** erzeugt eine unsigned IPA zum anschließenden Signieren.
+
+Der kombinierte App-Quellcode steht unter GPL-3.0-only; Drittanbieterhinweise sind in `Vendor/Spot/Licenses` enthalten. Das eingeschränkt lizenzierte Spot-App-Icon ist nicht enthalten.
+
+---
+
 # RJ Tracker 4.4.1 · native iOS + API Backend 20.3.1
 
 Fix 4.4.1: MCP-Tool-Erkennung auch bei POST an die Domainwurzel und mit abschließendem Slash. Vorhandene Daten bleiben erhalten; die App zeigt die letzte erfolgreiche Erkennung. [Update 4.4.1](docs/UPGRADE-4.4.1.md).

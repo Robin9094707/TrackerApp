@@ -1,10 +1,13 @@
 import SwiftUI
 import MapKit
+import SpotIntegration
 
 struct TrackerHomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var google = GoogleTrackerStore.shared
+    @State private var googleDestination: LocalGoogleDestination?
     @State private var position: MapCameraPosition = .automatic
     @State private var selectedRef: String?
     @State private var path: [String] = []
@@ -39,7 +42,9 @@ struct TrackerHomeView: View {
                 .presentationBackgroundInteraction(.enabled(upThrough: .large))
                 .interactiveDismissDisabled()
         }
-        .task { fitAll() }
+        .fullScreenCover(item: $googleDestination) { LocalGoogleView(deviceID: $0.deviceID) }
+        .task { fitAll(); await google.restoreIfNeeded() }
+        .onChange(of: google.trackers) { _, _ in if selectedRef == nil { fitAll() } }
         .onChange(of: located.map(\.ref)) { _, _ in if selectedRef == nil { fitAll() } }
         .onChange(of: current?.location) { _, _ in if follow { focusCurrent() } }
         .onChange(of: detent) { _, value in
@@ -72,6 +77,19 @@ struct TrackerHomeView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("\(tracker.name) auf Karte öffnen")
+                    }
+                }
+            }
+            ForEach(localGoogleOnMap) { tracker in
+                if let lat = tracker.latitude, let lon = tracker.longitude {
+                    Annotation(tracker.name, coordinate: .init(latitude: lat, longitude: lon)) {
+                        Button { googleDestination = LocalGoogleDestination(deviceID: tracker.id) } label: {
+                            Image(systemName: "sensor.tag.radiowaves.forward.fill")
+                                .font(.title3).foregroundStyle(.white).padding(12)
+                                .background(.green.gradient, in: Circle())
+                                .overlay(Circle().stroke(.white, lineWidth: 3))
+                                .shadow(radius: 4, y: 2)
+                        }.buttonStyle(.plain).accessibilityLabel("Google-Tracker \(tracker.name) öffnen")
                     }
                 }
             }
@@ -187,8 +205,19 @@ struct TrackerHomeView: View {
         Haptics.impact()
     }
 
+    private var localGoogleOnMap: [GoogleTrackerSnapshot] {
+        guard ["all", "google"].contains(model.providerFilter), model.selectedScope == .all, model.selectedGroup == nil else { return [] }
+        return google.trackers.filter { tracker in
+            (model.searchText.isEmpty || tracker.name.localizedCaseInsensitiveContains(model.searchText)) &&
+            !model.trackers.contains { $0.provider == "google" && ($0.serverID == tracker.id || $0.ref == "google:" + tracker.id) }
+        }
+    }
     private func fitAll() {
-        guard let region = RJMapCamera.overview(locations: located.compactMap(\.validLocation), panelCoverage: coverage) else { return }
+        let googleLocations = localGoogleOnMap.compactMap { tracker -> TrackerLocation? in
+            guard let lat = tracker.latitude, let lon = tracker.longitude else { return nil }
+            return TrackerLocation(latitude: lat, longitude: lon, accuracyM: tracker.accuracy)
+        }
+        guard let region = RJMapCamera.overview(locations: located.compactMap(\.validLocation) + googleLocations, panelCoverage: coverage) else { return }
         animate { position = .region(region) }
     }
 
@@ -210,6 +239,7 @@ struct TrackerLibraryView: View {
     var body: some View {
         @Bindable var model = model
         List {
+            LocalGoogleRows()
             Section {
                 SyncStatusView()
                     .listRowBackground(Color.clear)
@@ -257,7 +287,7 @@ struct TrackerLibraryView: View {
         .navigationTitle("Objekte")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $model.searchText, prompt: "Name, Adresse oder Notiz")
-        .refreshable { await model.refreshTrackers() }
+        .refreshable { await model.refreshTrackers(); await GoogleTrackerStore.shared.refresh() }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Menu {

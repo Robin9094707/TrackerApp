@@ -1,3 +1,12 @@
+# 5.0.0 – Integriertes Google Find Hub
+
+- Vollständige Spot-Tracker-Funktionen in RJ Tracker integriert: lokale Anmeldung/Token-Erstellung, Schlüsselwiederherstellung, Standortberichte, lokale Historie, Bluetooth-Suche/Klingeln, Google-Klingelanfragen, Freigaben, Verlustmodus und ESP32-Erstellung.
+- Direkter Einstieg ohne Backend, lokale JSON-Imports, Google-Objekte in der bestehenden Karten-/Objektübersicht.
+- Getrennte Keychain-/Preference-Bereiche und Konto-Verlaufsdateien; vorhandene Serverzugänge und Daten bleiben erhalten.
+- Fehlerbehandlung für Token-Austausch/Google-Anfragen und nichtdestruktive lokale Datenbankmigration.
+- Optionales kompatibles Backend 20.4.0 mit lokalem Capability-Vertrag.
+- Mindestversion iOS 18.1. Unsigned IPA über bestehende GitHub Action.
+
 # iOS 4.4.1 · MCP-Endpunktkorrektur
 
 - MCP-POST an `/`, `/mcp` und `/mcp/` nutzt denselben abgesicherten Handler. Behebt die im Serverlog nachgewiesene 405-Antwort nach erfolgreichem OAuth.

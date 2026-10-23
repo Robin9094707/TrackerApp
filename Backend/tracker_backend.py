@@ -11725,7 +11725,7 @@ def tracker_lab_active_job():
     return None
 
 APP_NAME = "Universal Tag Studio"
-APP_VERSION = "20.3.1 API EDITION"
+APP_VERSION = "20.4.0 API EDITION"
 
 
 OPTIMIZED_ROUTE_DEFAULT_POINTS = int(os.environ.get("ULTRA_TRACKER_ROUTE_MAX_DISPLAY_POINTS", "4200"))
@@ -26896,10 +26896,34 @@ def mobile_capabilities_api():
             "diagnostics": True,
             "admin_api_catalog": True,
             "apns_bridge": True,
+            "google_local_client": True,
         },
+        "google_local": google_local_client_contract(),
         "all_api_routes": catalog,
         "route_count": len(catalog),
     })
+
+
+def google_local_client_contract():
+    """Capability contract only. Google credentials/reports remain on the iPhone.
+
+    This adds no schema migration, credentials import or background worker. Existing
+    Apple/Google/Samsung/Fusion stores and the server's secrets.json are unchanged.
+    """
+    return {
+        "integration": "Spot", "client_version": "5.0.0", "protocol_version": 1,
+        "mode": "on_device", "requires_backend": False,
+        "credentials_upload": False, "history_upload": False,
+        "server_google_session_preserved": True,
+        "features": ["google_login", "aas_token", "key_recovery", "local_json_import",
+                     "device_import", "encrypted_locations", "local_history", "bluetooth_finding",
+                     "bluetooth_ring", "remote_ring", "rename", "lost_mode", "sharing", "esp32_creation"],
+    }
+
+
+@app.route(f"{MOBILE_API_PREFIX}/google/local", methods=["GET"])
+def mobile_google_local_api():
+    return jsonify(status="ok", **google_local_client_contract())
 
 
 @app.route(f"{MOBILE_API_PREFIX}/bootstrap", methods=["GET"])
@@ -27361,7 +27385,7 @@ def access_register_client():
 
 def access_key_scope(path, method):
     # Explicit endpoint families: keys cannot manage users, passwords, backups or credentials.
-    if path in {'/api/v3/info', '/api/v3/schema', '/api/mobile/v1/session', '/api/mobile/v1/capabilities', '/api/mobile/v1/trackers', '/api/mobile/v1/tracker', '/api/mobile/v1/history', '/api/mobile/v1/history/stream', '/api/mobile/v1/history/days', '/api/mobile/v1/alerts'} and method == 'GET':
+    if path in {'/api/v3/info', '/api/v3/schema', '/api/mobile/v1/session', '/api/mobile/v1/capabilities', '/api/mobile/v1/trackers', '/api/mobile/v1/tracker', '/api/mobile/v1/history', '/api/mobile/v1/history/stream', '/api/mobile/v1/history/days', '/api/mobile/v1/alerts', '/api/mobile/v1/google/local'} and method == 'GET':
         return 'read'
     if path == '/api/mobile/v1/locate' and method == 'POST':
         return 'locate'

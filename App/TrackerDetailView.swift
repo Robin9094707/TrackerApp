@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import SpotIntegration
 
 struct TrackerDetailView: View {
     @Environment(AppModel.self) private var model
@@ -23,6 +24,9 @@ struct TrackerDetailView: View {
             VStack(spacing: 18) {
                 header
                 actions
+                if current.provider == "google" {
+                    GoogleLauncherCard().padding(12).rjCompactCard()
+                }
                 if current.provider == "fusion" { FusionSourcesCard(tracker: current) }
                 VStack(spacing: 0) {
                     NavigationLink { HistoryView(tracker: current) } label: {

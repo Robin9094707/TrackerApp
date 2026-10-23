@@ -232,7 +232,11 @@ struct TrackerImportView: View {
 struct GoogleSetupView: View {
     var body: some View {
         List {
-            Section("Google Find Hub") {
+            Section("Direkt auf diesem iPhone") {
+                GoogleLauncherCard()
+                Text("Lokale Anmeldung, Schlüsselwiederherstellung, Bluetooth-Suche, Klingeln, Freigaben und eigener ESP32-Tracker – integriert aus Spot.").font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Google über deinen Server") {
                 Text("Bestehende Google-Sitzungen werden übernommen. Neue Accounts werden über die GoogleFindMyTools-Secrets eingebunden.").foregroundStyle(.secondary)
                 NavigationLink("Google secrets.json importieren") { TrackerImportView(provider: "google") }
                 NavigationLink("Google-Werkzeuge herunterladen") { ManagementForm(title: "Werkzeuge einrichten", path: "/api/google/tools/download", explanation: "Lädt den festgelegten Upstream auf deinem Server.") }

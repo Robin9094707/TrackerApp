@@ -21,7 +21,7 @@
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Zeige deine Position auf der Karte und die Entfernung zu deinen Trackern. Dein iPhone-Standort wird nicht an den Tracker-Server gesendet.</string>
+	<string>Zeige deine Position und die Entfernung zu deinen Trackern. Bei aktivierten Google-Sichtungsmeldungen wird die Position zum verschlüsselten Google-Find-Hub-Bericht hinzugefügt.</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
@@ -34,6 +34,8 @@
 	<array>
 		<string>remote-notification</string>
 		<string>fetch</string>
+		<string>bluetooth-central</string>
+		<string>location</string>
 	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
@@ -77,5 +79,9 @@
 			<string>Editor</string>
 		</dict>
 	</array>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Finde deine eigenen Google-Tracker in der Nähe und lasse sie klingeln.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Wenn du Hintergrundsuche aktivierst, kann die App deine eigenen Google-Tracker per Bluetooth erkennen und verschlüsselte Sichtungsmeldungen an Google senden.</string>
 </dict>
 </plist>

@@ -16,6 +16,7 @@ struct ConnectionView: View {
                 ScrollView {
                     VStack(spacing: 22) {
                         hero
+                        GoogleLauncherCard().padding(16).rjCompactCard()
                         connectionCard
                         privacyCard
                     }

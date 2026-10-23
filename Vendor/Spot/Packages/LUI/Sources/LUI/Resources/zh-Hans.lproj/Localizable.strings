@@ -1,0 +1,17 @@
+"introductionview_continue_button" = "继续";
+"introductionview_welcome_to" = "欢迎使用 %@";
+"introduction_skip_button" = "跳过";
+"introduction_done_header" = "准备就绪！";
+"introduction_done_subheader" = "设置已完成。感谢您使用 %@。祝您使用愉快！";
+"settingsview_header" = "设置";
+"settingsview_more_header" = "更多";
+"settingsview_more_privacy_policy" = "隐私政策";
+"settings_privacy_policy_url" = "https://leonboettger.com/privacy";
+"settingsview_information_and_contact" = "相关信息和联系方式";
+"informationview_header" = "信息";
+"informationview_for_os" = "适用于 %2$@ 的 %1$@";
+"informationview_version" = "版本";
+"informationview_more_contact" = "联系开发者";
+"informationview_contact_footer" = "如需帮助，请发送电子邮件至 %@";
+"informationview_used_software" = "已用内容";
+"informationview_copyright_text" = "此应用程序使用了以下内容：";

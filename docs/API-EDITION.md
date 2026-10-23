@@ -116,3 +116,8 @@ Direkt die Python-Datei ersetzen und denselben `data/`-Ordner weiterverwenden. K
 `received_at` bezeichnet die lokale erstmalige Speicherung; `timestamp` bleibt der ursprüngliche Beobachtungszeitpunkt. Der Stream sortiert nach Empfangsreihenfolge, damit nachgelieferte ältere Messungen ankommen. Darstellung und Export können anschließend nach `timestamp` sortieren. Fusionen liefern in diesem Endpunkt die unveränderten Reports ihrer verbundenen Quellen, unabhängig von der optimierten Fusion-Anzeige.
 
 `POST /api/polling/settings` mit `{"apple":{"interval_min":20,"interval_max":20}}` setzt die Apple-Abrufkadenz. Alte Standardfenster 20–30 Sekunden werden als 20 Sekunden behandelt; andere individuelle Einstellungen bleiben bestehen. Explizite Verlaufspausen, globale Pause und Fehler-Backoff werden beachtet. `apple_batch_reports_default` steuert die automatische Aufzeichnung unkonfigurierter Apple-Tracker. Bestehende Aufbewahrungsfristen bleiben verbindlich.
+
+
+## On-device Google / Spot (20.4.0, client 5.0)
+
+`GET /api/mobile/v1/google/local` (authenticated, API-key scope `read`) returns the local Google capability contract. It accepts no credentials or location uploads. Existing server Google sessions, schema and paths are retained. `GET /api/mobile/v1/capabilities` includes `native.google_local_client=true` and the same `google_local` object. Local Google features also work against earlier backends because Google communication is handled directly by the iPhone.
