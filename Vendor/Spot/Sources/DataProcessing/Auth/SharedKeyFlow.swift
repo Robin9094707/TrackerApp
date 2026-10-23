@@ -61,7 +61,7 @@ struct WebView: UIViewRepresentable {
 
         /// Detect page navigation and check for the redirect
         func webView(_: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            if let url = navigationAction.request.url, url.absoluteString.contains(observedRedirectUrl) {
+            if let url = navigationAction.request.url, url.scheme == "https", url.host == observedRedirectUrl {
                 // Load the new URL
                 if let newUrl = SecurityDomainUrlGenerator.getUrl() {
                     DispatchQueue.main.async {
@@ -76,6 +76,8 @@ struct WebView: UIViewRepresentable {
 
         /// Handle JavaScript messages
         func userContentController(_: WKUserContentController, didReceive message: WKScriptMessage) {
+            let origin = message.frameInfo.securityOrigin
+            guard message.frameInfo.isMainFrame, origin.protocol == "https", origin.host == "accounts.google.com" else { return }
             if message.name == "getKeyHandler", let body = message.body as? [String: Any] {
                 if let vaultKeys = body["vaultKeys"] as? String {
                     do {

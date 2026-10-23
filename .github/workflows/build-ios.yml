@@ -82,7 +82,7 @@ jobs:
           xcodebuild -project RJTracker.xcodeproj -scheme RJTracker -showBuildSettings >/dev/null
 
       - name: Optional focused review
-        continue-on-error: true
+        timeout-minutes: 15
         if: inputs.review == true || contains(github.event.head_commit.message, '[review]')
         shell: bash
         run: |
@@ -93,6 +93,7 @@ jobs:
             -configuration Debug -destination "platform=iOS Simulator,id=$SIM_ID" \
             -resultBundlePath RJ-Tracker-tests.xcresult \
             -parallel-testing-enabled NO \
+            -only-testing:SpotIntegrationTests \
             -only-testing:RJTrackerTests \
             -only-testing:RJTrackerUITests/TrackerUITests/testAccountSecurityAndHistory \
             -only-testing:RJTrackerUITests/TrackerUITests/testLocalGoogleCanOpenAndReturnToExistingTrackers \
