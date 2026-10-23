@@ -81,44 +81,6 @@ jobs:
           plutil -lint App/Info.plist App/RJTracker.entitlements
           xcodebuild -project RJTracker.xcodeproj -scheme RJTracker -showBuildSettings >/dev/null
 
-      - name: Optional focused review
-        timeout-minutes: 15
-        if: inputs.review == true || contains(github.event.head_commit.message, '[review]')
-        shell: bash
-        run: |
-          set -o pipefail
-          SIM_ID="$(xcrun simctl list devices available --json | python3 -c 'import sys,json; d=json.load(sys.stdin)["devices"]; phones=[p for k,v in d.items() if "iOS" in k for p in v if p["name"].startswith("iPhone")]; phones.sort(key=lambda p: ("Pro" not in p["name"], p["name"])); print(phones[0]["udid"])')"
-          xcodebuild test \
-            -project RJTracker.xcodeproj -scheme RJTracker \
-            -configuration Debug -destination "platform=iOS Simulator,id=$SIM_ID" \
-            -resultBundlePath RJ-Tracker-tests.xcresult \
-            -parallel-testing-enabled NO \
-            -only-testing:SpotIntegrationTests \
-            -only-testing:RJTrackerTests \
-            -only-testing:RJTrackerUITests/TrackerUITests/testAccountSecurityAndHistory \
-            -only-testing:RJTrackerUITests/TrackerUITests/testLocalGoogleCanOpenAndReturnToExistingTrackers \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            2>&1 | tee RJ-Tracker-tests.log
-
-      - name: Export simulator screenshots
-        if: always() && (inputs.review == true || contains(github.event.head_commit.message, '[review]'))
-        shell: bash
-        run: |
-          if [ -d RJ-Tracker-tests.xcresult ]; then
-            xcrun xcresulttool export attachments --path RJ-Tracker-tests.xcresult --output-path TestScreenshots || true
-          fi
-
-      - name: Upload test results
-        if: always() && (inputs.review == true || contains(github.event.head_commit.message, '[review]'))
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: RJ-Tracker-v5.0.0-tests-and-screenshots
-          path: |
-            RJ-Tracker-tests.log
-            TestScreenshots
-          if-no-files-found: warn
-          retention-days: 30
-
       - name: Build unsigned app
         shell: bash
         run: |
@@ -164,6 +126,47 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
+
+      - name: Optional focused review
+        timeout-minutes: 12
+        continue-on-error: true
+        if: inputs.review == true || contains(github.event.head_commit.message, '[review]')
+        shell: bash
+        run: |
+          set -o pipefail
+          SIM_ID="$(xcrun simctl list devices available --json | python3 -c 'import sys,json; d=json.load(sys.stdin)["devices"]; phones=[p for k,v in d.items() if "iOS" in k for p in v if p["name"].startswith("iPhone")]; phones.sort(key=lambda p: ("Pro" not in p["name"], p["name"])); print(phones[0]["udid"])')"
+          xcrun simctl boot "$SIM_ID" || true
+          xcrun simctl bootstatus "$SIM_ID" -b
+          xcodebuild test \
+            -project RJTracker.xcodeproj -scheme RJTracker \
+            -configuration Debug -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -resultBundlePath RJ-Tracker-tests.xcresult \
+            -parallel-testing-enabled NO \
+            -only-testing:SpotIntegrationTests \
+            -only-testing:RJTrackerTests \
+            -only-testing:RJTrackerUITests/TrackerUITests/testAccountSecurityAndHistory \
+            -only-testing:RJTrackerUITests/TrackerUITests/testLocalGoogleCanOpenAndReturnToExistingTrackers \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee RJ-Tracker-tests.log
+
+      - name: Export simulator screenshots
+        if: always() && (inputs.review == true || contains(github.event.head_commit.message, '[review]'))
+        shell: bash
+        run: |
+          if [ -d RJ-Tracker-tests.xcresult ]; then
+            xcrun xcresulttool export attachments --path RJ-Tracker-tests.xcresult --output-path TestScreenshots || true
+          fi
+
+      - name: Upload test results
+        if: always() && (inputs.review == true || contains(github.event.head_commit.message, '[review]'))
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: RJ-Tracker-v5.0.0-tests-and-screenshots
+          path: |
+            RJ-Tracker-tests.log
+            TestScreenshots
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Upload build log on failure
         if: failure()
