@@ -66,6 +66,7 @@ final class NovaApiManager: SharedInstance {
                     return false
                 }
 
+                guard device.belongsToCurrentAccount else { return true }
                 if let deviceUpdate = self.decodeFcmPayload(payload: push.data), deviceUpdate.fcmMetadata.requestUuid == requestUuid {
                     self.deviceFetchQueue.async {
                         let contributor: ContributorType = isAllAreas ? .AtAllAreas : .HighTrafficOnly

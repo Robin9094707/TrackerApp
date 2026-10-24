@@ -47,7 +47,7 @@ func uniqueGoogleReports(_ reports: [LocationReportWrapper]) -> [LocationReportW
     return reports.filter { report in
         let location = report.decryptedLocation.map { "\($0.latitude):\($0.longitude):\($0.altitude)" }
             ?? (report.encryptedLocation.flatMap { try? $0.serializedData() }?.base64EncodedString() ?? report.name ?? "")
-        let key = "\(report.time.timeIntervalSince1970)|\(report.status.rawValue)|\(report.isOwnReport)|\(location)"
+        let key = "\(report.time.timeIntervalSince1970)|\(report.status.rawValue)|\(report.isOwnReport)|\(report.accuracy ?? 0)|\(location)"
         return seen.insert(key).inserted
     }.sorted { $0.time > $1.time }
 }

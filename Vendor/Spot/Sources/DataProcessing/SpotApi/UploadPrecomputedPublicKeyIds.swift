@@ -30,7 +30,12 @@ final class UploadPrecomputedPublicKeyIds: SharedInstance {
             self.isChecking = true
 
             Task {
-
+                defer {
+                    self.eidUploadQueue.async { self.isChecking = false }
+                    DispatchQueue.main.async { self.isUploading = false }
+                }
+                do {
+                let account = TokenManager.sharedInstance.username
                 var uploadRequest = UploadPrecomputedPublicKeyIdsRequest()
 
                 let cloudIds = try await ListEidsForBleDevices.perform()
@@ -39,6 +44,7 @@ final class UploadPrecomputedPublicKeyIds: SharedInstance {
                 let allDevices = try await NovaApiManager.sharedInstance.requestDeviceList()
 
                 for metadata in allDevices.deviceMetadata {
+                    guard TokenManager.sharedInstance.username == account else { throw CancellationError() }
                     let deviceInformation = getInformation(deviceMetadata: metadata)
 
                     let registration = deviceInformation.deviceRegistration
@@ -123,6 +129,7 @@ final class UploadPrecomputedPublicKeyIds: SharedInstance {
                 }
 
                 if needsToUpload {
+                    guard TokenManager.sharedInstance.username == account else { throw CancellationError() }
                     let serializedProto = try uploadRequest.serializedData()
 
                     do {
@@ -130,18 +137,8 @@ final class UploadPrecomputedPublicKeyIds: SharedInstance {
                     } catch {}
                 } else {}
 
-                DispatchQueue.main.async {
-                    withAnimation(.spring) {
-                        UploadPrecomputedPublicKeyIds.sharedInstance.isUploading = false
-                    }
-                }
-
-                self.isChecking = false
-            }
-
-            if self.timer == nil {
-                self.timer = Timer.scheduledTimer(withTimeInterval: hoursToSeconds(hours: 12), repeats: true) { _ in
-                    try? self.checkAndUpload()
+                } catch {
+                    // Keep the current keys and allow the next scheduled attempt.
                 }
             }
         }

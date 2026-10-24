@@ -26,7 +26,9 @@ final class TokenManager: SharedInstance {
             return token.token
         }
 
+        let account = username, identity = aasToken
         let newToken = try await requestToken(scope: "android_device_manager")
+        guard username == account, aasToken == identity else { throw CancellationError() }
         admToken = newToken
 
         return newToken.token
@@ -37,7 +39,9 @@ final class TokenManager: SharedInstance {
             return token.token
         }
 
+        let account = username, identity = aasToken
         let newToken = try await requestToken(scope: "spot", playServices: true)
+        guard username == account, aasToken == identity else { throw CancellationError() }
         spotToken = newToken
 
         return newToken.token

@@ -61,12 +61,12 @@ final class PushReceiver: SharedInstance {
             androidCertSha1: "38918a453d07199354f8b19af05ec6562ced5788"
         )
 
+        config = FcmPushClientConfig()
         do {
             credentials = try KeychainStore.shared.load(FcmCredentials.self, for: .fcmCredentials)
         } catch {
             showAlert(title: "Secure Storage Error", message: error.localizedDescription)
         }
-        config = FcmPushClientConfig()
     }
 
     /// PUBLIC API

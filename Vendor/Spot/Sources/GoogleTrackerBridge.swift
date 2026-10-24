@@ -45,7 +45,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
     @Published public private(set) var statusMessage: String?
     @Published public private(set) var locating: Set<String> = []
     @Published public var refreshInterval: Int {
-        didSet { refreshInterval = Self.validInterval(refreshInterval); preferences.set(refreshInterval, forKey: "native.refreshInterval"); restartPolling() }
+        didSet { preferences.set(Self.validInterval(refreshInterval), forKey: "native.refreshInterval"); restartPolling() }
     }
     @Published public var contributorMode: String {
         didSet {
@@ -61,7 +61,8 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
     private var restored = false
     private var generation = UUID()
     private var lastCatalog = Date.distantPast
-    public static func validInterval(_ value: Int) -> Int { [0, 60, 120, 300, 900].contains(value) ? value : 60 }
+    private var lastMaintenance = Date.distantPast
+    nonisolated public static func validInterval(_ value: Int) -> Int { [0, 60, 120, 300, 900].contains(value) ? value : 60 }
 
     private init() {
         refreshInterval = Self.validInterval(preferences.object(forKey: "native.refreshInterval") as? Int ?? 60)
@@ -100,7 +101,8 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         guard let device = try? device(id) else { return [] }
         return uniqueGoogleReports(device.refreshes.flatMap(\.reports)).map { report in
             let location = report.decryptedLocation
-            let fingerprint = "\(report.time.timeIntervalSince1970)|\(report.status.rawValue)|\(location?.latitude ?? 0)|\(location?.longitude ?? 0)|\(report.isOwnReport)|\(report.name ?? "")"
+            let encrypted = location == nil ? (report.encryptedLocation.flatMap { try? $0.serializedData() }?.base64EncodedString() ?? "") : ""
+            let fingerprint = "\(report.time.timeIntervalSince1970)|\(report.status.rawValue)|\(location?.latitude ?? 0)|\(location?.longitude ?? 0)|\(report.isOwnReport)|\(report.accuracy ?? 0)|\(report.name ?? "")|\(encrypted)"
             return GoogleReportSnapshot(id: SHA256.hash(data: Data(fingerprint.utf8)).hex, date: report.time,
                 latitude: location?.latitude, longitude: location?.longitude, accuracy: report.accuracy.map(Double.init),
                 kind: String(describing: report.status), own: report.isOwnReport, label: report.name)
@@ -140,7 +142,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         }
         restartPolling()
     }
-    public static func isOAuthCookie(_ cookie: HTTPCookie) -> Bool {
+    nonisolated public static func isOAuthCookie(_ cookie: HTTPCookie) -> Bool {
         cookie.name == "oauth_token" && ["accounts.google.com", ".google.com", "google.com"].contains(cookie.domain)
     }
     public func prepareLogin() async throws -> URL {
@@ -185,6 +187,9 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
             let list = try await NovaApiManager.sharedInstance.requestDeviceList()
             guard generation == self.generation else { return }
             try GoogleReportArchive.storeCatalog(list)
+            if TokenManager.sharedInstance.ownerKey == nil, let shared = TokenManager.sharedInstance.sharedKey?.dataFromHex {
+                try? await installSharedKey(shared)
+            }
             await processDeviceList(list: list.deviceMetadata)
             // processDeviceList commits its observable list on the main queue.
             await Task.yield()
@@ -192,8 +197,9 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
             if CBManager.authorization == .allowedAlways { BluetoothManager.sharedInstance.startCentralManager() }
             let devices = Settings.sharedInstance.devicesList ?? []
             DispatchQueue.global(qos: .utility).async { GoogleReportArchive.replay(devices: devices) }
-            if TokenManager.sharedInstance.ownerKey == nil, let shared = TokenManager.sharedInstance.sharedKey?.dataFromHex {
-                try? await installSharedKey(shared)
+            if TokenManager.sharedInstance.ownerKey != nil, Date().timeIntervalSince(lastMaintenance) >= 900 {
+                lastMaintenance = .now
+                try? UploadPrecomputedPublicKeyIds.sharedInstance.checkAndUpload()
             }
             publishSnapshots()
             requestReportsForAll()
@@ -230,7 +236,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
     private func restartPolling() {
         polling?.cancel(); polling = nil
         guard active, hasCredentials, refreshInterval > 0 else { return }
-        let seconds = refreshInterval
+        let seconds = Self.validInterval(refreshInterval)
         polling = Task { [weak self] in
             while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000) } catch { return }
