@@ -3,6 +3,7 @@ import MapKit
 import SpotIntegration
 
 struct NativeGoogleTrackerView: View {
+    @Environment(AppModel.self) private var model
     let deviceID: String
     @ObservedObject private var google = GoogleTrackerStore.shared
     @State private var busy = false
@@ -51,6 +52,11 @@ struct NativeGoogleTrackerView: View {
                 Section {
                     NavigationLink { NativeGoogleHistoryView(deviceID: deviceID) } label: { Label("Alle \(tracker.reportCount) Reports ansehen", systemImage: "clock.arrow.circlepath") }
                         .accessibilityIdentifier("tracker-history-link")
+                    if let serverTracker = model.bootstrap?.trackers.first(where: { $0.provider == "google" && $0.apiID == deviceID }) {
+                        NavigationLink { TrackerDetailView(tracker: serverTracker, preferNativeGoogle: false) } label: {
+                            Label("Bisheriger Serververlauf & Automationen", systemImage: "externaldrive.badge.icloud")
+                        }
+                    }
                     if !tracker.unlocked {
                         NavigationLink { GoogleAccountView() } label: { Label("Google-Schlüssel entsperren", systemImage: "lock.open") }
                         Text("Verschlüsselte Reports bleiben erhalten und werden nach dem Entsperren erneut verarbeitet.").font(.caption).foregroundStyle(.secondary)

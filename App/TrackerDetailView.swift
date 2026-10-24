@@ -5,6 +5,7 @@ import SpotIntegration
 struct TrackerDetailView: View {
     @Environment(AppModel.self) private var model
     let tracker: Tracker
+    var preferNativeGoogle = true
     @Environment(\.dismiss) private var dismiss
     @State private var showEdit = false
     @State private var showAutomation = false
@@ -21,7 +22,7 @@ struct TrackerDetailView: View {
 
     var body: some View {
         Group {
-            if tracker.provider == "google", GoogleTrackerStore.shared.hasDevice(tracker.apiID) {
+            if preferNativeGoogle, tracker.provider == "google", GoogleTrackerStore.shared.hasDevice(tracker.apiID) {
                 NativeGoogleTrackerView(deviceID: tracker.apiID)
             } else { serverBody }
         }

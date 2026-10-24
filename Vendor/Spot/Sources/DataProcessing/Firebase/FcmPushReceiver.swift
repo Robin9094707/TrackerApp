@@ -206,7 +206,7 @@ final class PushReceiver: SharedInstance {
         req.authToken = String(credentials.gcm.security_token)
         req.id = fcmConfig.chromeVersion
         req.domain = "mcs.android.com"
-        req.deviceID = "android-\(intToHex(Int(androidId)))"
+        req.deviceID = "android-\(String(androidId, radix: 16))"
         req.networkType = 1
         req.resource = String(androidId)
         req.user = String(androidId)

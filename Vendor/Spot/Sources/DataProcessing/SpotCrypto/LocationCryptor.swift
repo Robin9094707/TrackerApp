@@ -51,6 +51,7 @@ class LocationCryptor {
         }
 
         let encryptedReport = encryptedLocation.encryptedReport
+        guard encryptedReport.encryptedLocation.count >= 16 else { throw googleError("Google-Report enthält noch keinen entschlüsselbaren Standort.") }
         let ephemeralPublicKey = encryptedReport.ephemeralPublicKey
 
         var decryptedLocation: DecryptedLocation
