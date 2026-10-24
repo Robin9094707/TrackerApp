@@ -88,7 +88,8 @@ final class TrackerUITests: XCTestCase {
         launcher.tap()
         let close = app.buttons["Zurück zu RJ Tracker"]
         XCTAssertTrue(close.waitForExistence(timeout: 15))
-        capture("12-Google-Local-Onboarding")
+        XCTAssertTrue(app.buttons["Bei Google anmelden"].waitForExistence(timeout: 10))
+        capture("12-Native-Google-Account")
         close.tap()
         XCTAssertTrue(app.buttons["tracker-row-fusion:demo-bag"].waitForExistence(timeout: 10))
     }

@@ -6,11 +6,11 @@
 //
 
 import Foundation
-import LUI
+import Combine
 import SwiftUI
 
 class SpotApiManager {
-    static func spotRequest(apiScope: String, payload: Data) async throws -> Data {
+    static func spotRequest(apiScope: String, payload: Data, retryAuth: Bool = true) async throws -> Data {
         let isUpload = apiScope.contains("UploadOwner") || apiScope.contains("UploadScans")
         var service = "https://spot-pa.googleapis.com/google.internal.spot.v1.SpotService"
 
@@ -34,6 +34,7 @@ class SpotApiManager {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 20
         request.allHTTPHeaderFields = headers
         request.httpBody = GrpcParser.constructGrpc(payload)
 
@@ -43,6 +44,10 @@ class SpotApiManager {
             throw NSError(domain: "InvalidResponse", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid response."])
         }
 
+        if [401, 403].contains(httpResponse.statusCode), retryAuth {
+            TokenManager.sharedInstance.clearCachedTokens()
+            return try await spotRequest(apiScope: apiScope, payload: payload, retryAuth: false)
+        }
         if httpResponse.statusCode == 200 {
             do {
                 return try GrpcParser.extractPayload(data)

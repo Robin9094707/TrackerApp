@@ -78,6 +78,7 @@ class PlayServicesOAuth {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 20
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.setValue("GoogleAuth/1.4", forHTTPHeaderField: "User-Agent")

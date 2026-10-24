@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import LUI
+import Combine
 
 struct TruncatedEidInfo {
     let canonicDeviceId: String

@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import LUI
+import Combine
 
 class UpdateBleDevice {
     static func setLostMode(canonicDeviceId: String, lostMode: Bool) async throws {

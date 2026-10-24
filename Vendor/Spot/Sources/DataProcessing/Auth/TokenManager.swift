@@ -7,7 +7,7 @@
 
 import Dispatch
 import Foundation
-import LUI
+import Combine
 
 final class TokenManager: SharedInstance {
     static var sharedInstance = TokenManager()
@@ -58,10 +58,6 @@ final class TokenManager: SharedInstance {
 
     private func requestToken(scope: String, playServices: Bool = false) async throws -> CachedToken {
         guard let username, let aasToken else {
-            // reset app to onboarding
-            DispatchQueue.main.async {
-                LUISettings.sharedInstance.appLaunchedBefore = false
-            }
 
             throw NSError(domain: "TokenManagerError", code: 0, userInfo: [NSLocalizedDescriptionKey: "Username or AAS token is missing."])
         }
@@ -69,10 +65,6 @@ final class TokenManager: SharedInstance {
         guard let androidId = PushReceiver.sharedInstance.getAndroidId()?.description else {
             let errorMessage = "Android ID is missing."
 
-            // reset app to onboarding
-            DispatchQueue.main.async {
-                LUISettings.sharedInstance.appLaunchedBefore = false
-            }
 
             throw NSError(domain: "TokenManagerError", code: 0, userInfo: [NSLocalizedDescriptionKey: errorMessage])
         }
@@ -96,13 +88,12 @@ final class TokenManager: SharedInstance {
                 switch result {
                 case let .success(authResponse):
                     if let auth = authResponse["Auth"] {
-                        var expiration = 0
-
-                        if let expiresInDurationSec = authResponse["ExpiresInDurationSec"] {
-                            expiration = Int(expiresInDurationSec) ?? 0
-                        }
-
-                        let expirationDate = Date().addingTimeInterval(TimeInterval(expiration))
+                        let duration = Double(authResponse["ExpiresInDurationSec"] ?? "")
+                        let absolute = Double(authResponse["Expiry"] ?? "")
+                        let expiry = duration.map { Date().addingTimeInterval($0) }
+                            ?? absolute.map { Date(timeIntervalSince1970: $0) }
+                            ?? Date().addingTimeInterval(1800)
+                        let expirationDate = expiry.addingTimeInterval(-60)
                         continuation.resume(returning: CachedToken(token: auth, expirationDate: expirationDate))
                     } else {
                         continuation.resume(throwing: NSError(domain: "TokenManagerError", code: 0, userInfo: [NSLocalizedDescriptionKey: "No auth token found in response."]))

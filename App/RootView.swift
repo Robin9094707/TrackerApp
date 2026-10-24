@@ -1,6 +1,8 @@
 import SwiftUI
+import SpotIntegration
 
 struct RootView: View {
+    @ObservedObject private var google = GoogleTrackerStore.shared
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -9,7 +11,10 @@ struct RootView: View {
             switch model.connectionState {
             case .restoring:
                 RJLaunchView().transition(.opacity)
-            case .disconnected, .connecting, .needsTwoFactor:
+            case .disconnected:
+                if google.hasCredentials && (model.localMode || model.serverURL.isEmpty) { MainTabView() }
+                else { ConnectionView() }
+            case .connecting, .needsTwoFactor:
                 ConnectionView()
             case .connected:
                 MainTabView().transition(.opacity)

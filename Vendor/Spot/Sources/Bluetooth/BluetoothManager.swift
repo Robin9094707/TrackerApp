@@ -8,7 +8,7 @@
 import CoreBluetooth
 import CoreData
 import CryptoSwift
-import LUI
+import Combine
 import SwiftUI
 
 /// Wrapper class for CoreBluetooth actions
@@ -17,7 +17,7 @@ open class BluetoothManager: NSObject, CBPeripheralDelegate, CBCentralManagerDel
     override private init() {
         super.init()
 
-        if LUISettings.sharedInstance.appLaunchedBefore {
+        if (TokenManager.sharedInstance.aasToken != nil) {
             startCentralManager()
         }
     }
@@ -188,7 +188,7 @@ open class BluetoothManager: NSObject, CBPeripheralDelegate, CBCentralManagerDel
                     self.turnedOn = true
                 }
 
-                if !scanning, LUISettings.sharedInstance.appLaunchedBefore {
+                if !scanning, (TokenManager.sharedInstance.aasToken != nil) {
                     startScan()
                 }
             }

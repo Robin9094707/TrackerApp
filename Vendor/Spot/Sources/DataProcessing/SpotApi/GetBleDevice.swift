@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import LUI
+import Combine
 
 class GetBleDevice {
     static func perform(canonicDeviceId: String) async throws -> GetBleDeviceResponse {

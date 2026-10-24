@@ -1,3 +1,13 @@
+# 5.1.0 – native Google-Datenquelle und Migration
+
+- Spot-Oberflächen und LUI-Paket entfernt. Google-Geräte, Details, Reports und Konto sind Teil der nativen TrackerApp.
+- Bestehende AAS-/FCM-/Eigentümerschlüssel und kontospezifische Verläufe werden weiterverwendet, ohne das alte Onboarding-Flag auszuwerten.
+- Blockierende Registrierungs-/Push-Wartepfade durch asynchrone Vorgänge mit Zeitlimits ersetzt; begrenzte Wiederholungen statt bis zu 100 Registrierungsversuchen.
+- Google-Push-Framing verarbeitet fragmentierte und mehrere Nachrichten; Standortabruf nimmt weitere Reports im gesamten Empfangsfenster an.
+- Einstellbare Vordergrundaktualisierung, standardmäßig jede Minute; alle unterschiedlichen Reports einschließlich semantischer Meldungen und gesperrter Originalpakete.
+- Kurzlebige Zugriffstokens werden erneuert, ohne den AAS-Token bei Verbindungsproblemen zu löschen.
+- Automatisierte Protokoll-, Timeout-, Abbruch- und v5.0-Preference-Migrationstests auf dem macOS-Runner.
+
 # 5.0.0 – Integriertes Google Find Hub
 
 - Vollständige Spot-Tracker-Funktionen in RJ Tracker integriert: lokale Anmeldung/Token-Erstellung, Schlüsselwiederherstellung, Standortberichte, lokale Historie, Bluetooth-Suche/Klingeln, Google-Klingelanfragen, Freigaben, Verlustmodus und ESP32-Erstellung.

@@ -7,7 +7,7 @@
 
 import CoreLocation
 import Foundation
-import LUI
+import Combine
 import UIKit
 
 class UploadOwnerScansRequest {

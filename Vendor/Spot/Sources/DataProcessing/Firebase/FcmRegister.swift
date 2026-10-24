@@ -7,7 +7,7 @@
 
 import CryptoKit
 import Foundation
-import LUI
+import Combine
 import SwiftUI
 
 class FcmRegister {
@@ -21,17 +21,20 @@ class FcmRegister {
         self.config = config
         self.credentials = credentials
 
-        session = URLSession(configuration: .default)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 15
+        session = URLSession(configuration: configuration)
     }
 
-    func checkinOrRegister() throws -> FcmCredentials {
+    func checkinOrRegister() async throws -> FcmCredentials {
         if let credentials {
-            if let _ = try gcmCheckIn(androidId: credentials.gcm.android_id, securityToken: credentials.gcm.security_token) {
+            if let _ = try await gcmCheckIn(androidId: credentials.gcm.android_id, securityToken: credentials.gcm.security_token) {
                 return credentials
             }
         }
 
-        credentials = try register()
+        credentials = try await register()
         guard let credentials else {
             throw NSError(domain: "Unable to register with fcm", code: 0, userInfo: nil)
         }
@@ -43,14 +46,14 @@ class FcmRegister {
         session.invalidateAndCancel()
     }
 
-    private func register() throws -> FcmCredentials {
-        guard let gcmData = try gcmCheckInAndRegister() else {
+    private func register() async throws -> FcmCredentials {
+        guard let gcmData = try await gcmCheckInAndRegister() else {
             throw NSError(domain: "Unable to establish subscription with Google Cloud Messaging.", code: 0, userInfo: nil)
         }
 
         let keys = try generateKeys()
 
-        guard let fcmData = try fcmInstallAndRegister(gcmData: gcmData, keys: keys) else {
+        guard let fcmData = try await fcmInstallAndRegister(gcmData: gcmData, keys: keys) else {
             throw NSError(domain: "Unable to register with fcm", code: 0, userInfo: nil)
         }
 
@@ -69,14 +72,14 @@ class FcmRegister {
 
     /// __ GCM __
 
-    private func gcmCheckInAndRegister() throws -> GcmRegistration? {
-        guard let options = try gcmCheckIn() else {
+    private func gcmCheckInAndRegister() async throws -> GcmRegistration? {
+        guard let options = try await gcmCheckIn() else {
             throw NSError(domain: "Unable to register and check in to gcm", code: 0, userInfo: nil)
         }
-        return try gcmRegister(options: options)
+        return try await gcmRegister(options: options)
     }
 
-    private func gcmCheckIn(androidId: UInt64? = nil, securityToken: UInt64? = nil) throws -> CheckinProto_AndroidCheckinResponse? {
+    private func gcmCheckIn(androidId: UInt64? = nil, securityToken: UInt64? = nil) async throws -> CheckinProto_AndroidCheckinResponse? {
         var payload = getCheckinPayload(androidId: androidId, securityToken: securityToken)
         let retries = 3
         var checkinResponse: CheckinProto_AndroidCheckinResponse?
@@ -90,7 +93,7 @@ class FcmRegister {
                 request.setValue("application/x-protobuf", forHTTPHeaderField: "Content-Type")
                 request.httpBody = try payload.serializedData()
 
-                let (data, response) = try fetchDataSynchronously(with: request)
+                let (data, response) = try await fetchDataSynchronously(with: request)
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                     checkinResponse = try CheckinProto_AndroidCheckinResponse(serializedBytes: data)
                     content = data
@@ -101,10 +104,10 @@ class FcmRegister {
                         break
                     } else {}
                     payload = getCheckinPayload()
-                    Thread.sleep(forTimeInterval: 1)
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
                 }
             } catch {
-                Thread.sleep(forTimeInterval: 1)
+                try await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
 
@@ -138,7 +141,7 @@ class FcmRegister {
         return payload
     }
 
-    private func gcmRegister(options: CheckinProto_AndroidCheckinResponse, retries: Int = 100) throws -> GcmRegistration? {
+    private func gcmRegister(options: CheckinProto_AndroidCheckinResponse, retries: Int = 3) async throws -> GcmRegistration? {
         let gcmAppId = "wp:\(config.bundleId)#\(getRandomUUID())"
         guard options.hasAndroidID, options.hasSecurityToken else {
             return nil
@@ -173,21 +176,23 @@ class FcmRegister {
                 request.allHTTPHeaderFields = headers
                 request.httpBody = bodyData
 
-                let (data, _) = try fetchDataSynchronously(with: request)
+                let (data, response) = try await fetchDataSynchronously(with: request)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
                 let responseText = String(data: data, encoding: .utf8)
 
                 if responseText?.contains("Error") == true {
                     lastError = NSError(domain: responseText ?? "", code: 0, userInfo: nil)
-                    Thread.sleep(forTimeInterval: 1)
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
                     continue
                 }
 
-                let token = responseText?.split(separator: "=")[1]
-                return GcmRegistration(token: String(token ?? ""), app_id: gcmAppId, android_id: androidId, security_token: securityToken)
+                guard let responseText, responseText.hasPrefix("token="), responseText.count > 6 else { throw URLError(.badServerResponse) }
+                let token = String(responseText.dropFirst(6)).trimmingCharacters(in: .whitespacesAndNewlines)
+                return GcmRegistration(token: token, app_id: gcmAppId, android_id: androidId, security_token: securityToken)
             } catch {
                 lastError = error
 
-                Thread.sleep(forTimeInterval: 1)
+                try await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
 
@@ -200,8 +205,8 @@ class FcmRegister {
 
     /// __ FCM __
 
-    private func fcmInstallAndRegister(gcmData: GcmRegistration, keys: FcmKeys) throws -> FcmRegistrationAndInstallation? {
-        if let installation = try fcmInstall(), let registration = try fcmRegister(gcmData: gcmData, installation: installation, keys: keys) {
+    private func fcmInstallAndRegister(gcmData: GcmRegistration, keys: FcmKeys) async throws -> FcmRegistrationAndInstallation? {
+        if let installation = try await fcmInstall(), let registration = try await fcmRegister(gcmData: gcmData, installation: installation, keys: keys) {
             return FcmRegistrationAndInstallation(registration: registration, installation: installation)
         }
         return nil
@@ -227,7 +232,7 @@ class FcmRegister {
         headers["X-Android-Cert"] = fingerprint
     }
 
-    private func fcmInstall() throws -> FcmInstallation? {
+    private func fcmInstall() async throws -> FcmInstallation? {
         var fid = try SecureRandom.getBytes(17)
         fid[0] = 0b0111_0000 + (fid[0] % 0b0001_0000)
         let fid64 = fid.base64EncodedString()
@@ -252,7 +257,7 @@ class FcmRegister {
         request.allHTTPHeaderFields = headers
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: .withoutEscapingSlashes)
 
-        let (data, response) = try fetchDataSynchronously(with: request)
+        let (data, response) = try await fetchDataSynchronously(with: request)
 
         if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
             return try JSONDecoder().decode(FcmInstallation.self, from: data)
@@ -278,7 +283,7 @@ class FcmRegister {
         let version: Int
     }
 
-    private func fcmRegister(gcmData: GcmRegistration, installation: FcmInstallation, keys: FcmKeys, retries: Int = 10) throws -> FcmRegistration? {
+    private func fcmRegister(gcmData: GcmRegistration, installation: FcmInstallation, keys: FcmKeys, retries: Int = 3) async throws -> FcmRegistration? {
         var headers = [
             "Content-Type": "application/json",
             "x-goog-api-key": config.apiKey,
@@ -304,14 +309,14 @@ class FcmRegister {
 
         for _ in 0 ..< retries {
             do {
-                let (data, response) = try fetchDataSynchronously(with: request)
+                let (data, response) = try await fetchDataSynchronously(with: request)
                 if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                     return try JSONDecoder().decode(FcmRegistration.self, from: data)
                 } else {
                     let text = String(data: data, encoding: .utf8)
                 }
             } catch {
-                Thread.sleep(forTimeInterval: 1)
+                try await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
 
@@ -320,36 +325,9 @@ class FcmRegister {
 
     /// __ Helper functions __
 
-    private func fetchDataSynchronously(with request: URLRequest) throws -> (Data, URLResponse) {
-        // Create a semaphore
-        let semaphore = DispatchSemaphore(value: 0)
-        var result: (Data, URLResponse)?
-        var thrownError: Error?
-
-        // Perform the asynchronous work
-        Task {
-            do {
-                let (data, response) = try await URLSession.shared.data(for: request)
-                result = (data, response)
-            } catch {
-                thrownError = error
-            }
-
-            // Signal when the task is done
-            semaphore.signal()
-        }
-
-        // Block the thread until the signal is received
-        semaphore.wait()
-
-        // Handle the result or error
-        if let error = thrownError {
-            throw error
-        }
-        guard let output = result else {
-            throw URLError(.badServerResponse)
-        }
-        return output
+    private func fetchDataSynchronously(with request: URLRequest) async throws -> (Data, URLResponse) {
+        try Task.checkCancellation()
+        return try await session.data(for: request)
     }
 
     /// Encode parameters into x-www-form-urlencoded format

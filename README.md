@@ -1,3 +1,9 @@
+# RJ Tracker 5.1
+
+Native Google-Find-Hub-Datenquelle in derselben universellen TrackerApp. Die Spot-App-Oberfläche wurde entfernt; nur die Google-Protokolltechnik wird als Bibliothek verwendet.
+
+[Migration und Nutzung](docs/UPGRADE-5.1.md). Bestehender Google-Keychain-Service, Konto-Preferences, lokale Verläufe und alle Serverdaten bleiben erhalten. Google-Anmeldung und Verbindung haben Zeitlimits und einen erneuten Versuch. Alle gelieferten Report-Pakete werden verarbeitet; Vordergrundabrufe sind einstellbar.
+
 # RJ Tracker 5.0
 
 Universelle iPhone-/iPad-Tracker-App mit bestehendem Apple-/Google-/Samsung-/Fusion-Backend und vollständig integriertem lokalem Google-Find-Hub-Client auf Basis von [Spot](https://github.com/leonboe1/Spot).

@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import LUI
+import Combine
 
 enum DeviceOnlyKeys: String, RawRepresentable {
     // Default keys

@@ -7,7 +7,7 @@
 
 import CoreData
 import Foundation
-import LUI
+import Combine
 
 func loadReportsFromDisk(for canonicDeviceId: String) -> [RefreshWrapper] {
     PersistenceController.shared.getDatabaseQueue().sync {
@@ -24,9 +24,11 @@ func loadReportsFromDisk(for canonicDeviceId: String) -> [RefreshWrapper] {
 
                 for report in reports {
                     if let status = LocationReport.Status(rawValue: Int(report.status)), let time = report.time {
-                        let report = LocationReportWrapper(decryptedLocation: DecryptedLocation(latitude: report.latitude, longitude: report.longitude, altitude: report.altitude), time: time, accuracy: report.accuracy, status: status, isOwnReport: report.isOwnReport)
-
-                        refreshArray.append(report)
+                        if status == .semantic, let name = report.name {
+                            refreshArray.append(LocationReportWrapper(time: time, name: name))
+                        } else {
+                            refreshArray.append(LocationReportWrapper(decryptedLocation: DecryptedLocation(latitude: report.latitude, longitude: report.longitude, altitude: report.altitude), time: time, accuracy: report.accuracy, status: status, isOwnReport: report.isOwnReport))
+                        }
                     }
                 }
 
@@ -65,28 +67,23 @@ func storeReportsOnDisk(requestDate: Date, contributorType: ContributorType, can
         let refreshes = Array(device.refreshes as? Set<StoredRefresh> ?? [])
         let existingReports: Set<StoredLocationReport> = Set(refreshes.flatMap { $0.reports as? Set<StoredLocationReport> ?? [] })
 
-        for report in decryptedRefresh.reports {
-            // check if report already stored
-            if let latitude = report.decryptedLocation?.latitude, let longitude = report.decryptedLocation?.longitude, let altitude = report.decryptedLocation?.altitude, let accuracy = report.accuracy {
-                var newDbRecord: StoredLocationReport
-
-                if let existingReport = existingReports.first(where: { $0.time == report.time && $0.latitude == latitude && $0.longitude == longitude && $0.altitude == altitude }) {
-                    newDbRecord = existingReport
-                } else {
-                    let newReport = StoredLocationReport(context: context)
-                    newReport.latitude = latitude
-                    newReport.longitude = longitude
-                    newReport.altitude = altitude
-                    newReport.status = Int16(report.status.rawValue)
-                    newReport.time = report.time
-                    newReport.accuracy = accuracy
-                    newReport.isOwnReport = report.isOwnReport
-                    newDbRecord = newReport
-                }
-
-                newRefresh.addToReports(newDbRecord)
+        var added = 0
+        for report in uniqueGoogleReports(decryptedRefresh.reports) {
+            guard report.decryptedLocation != nil || report.name != nil else { continue }
+            let location = report.decryptedLocation
+            let existing = existingReports.contains { stored in
+                stored.time == report.time && stored.status == Int16(report.status.rawValue) &&
+                stored.isOwnReport == report.isOwnReport && stored.name == report.name &&
+                (location == nil || (stored.latitude == location?.latitude && stored.longitude == location?.longitude && stored.altitude == location?.altitude))
             }
+            if existing { continue }
+            let stored = StoredLocationReport(context: context)
+            stored.latitude = location?.latitude ?? 0; stored.longitude = location?.longitude ?? 0; stored.altitude = location?.altitude ?? 0
+            stored.accuracy = report.accuracy ?? 0; stored.name = report.name
+            stored.status = Int16(report.status.rawValue); stored.time = report.time; stored.isOwnReport = report.isOwnReport
+            newRefresh.addToReports(stored); added += 1
         }
+        if added == 0 { context.delete(newRefresh); return }
 
         device.addToRefreshes(newRefresh)
     }

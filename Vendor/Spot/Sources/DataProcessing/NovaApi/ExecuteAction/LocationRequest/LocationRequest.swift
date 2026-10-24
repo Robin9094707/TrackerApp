@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import LUI
+import Combine
 
 class LocationRequest {
     let payload: Data

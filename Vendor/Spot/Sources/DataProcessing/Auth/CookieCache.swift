@@ -5,7 +5,7 @@
 //  Created by Leon Böttger on 12.12.24.
 //
 
-import LUI
+import Combine
 import WebKit
 
 class CookieCache {
@@ -40,7 +40,7 @@ class CookieCache {
                 WKWebsiteDataStore.default().httpCookieStore.setCookie(cookie) {
                     addCookies(cookies: Array(cookies.dropFirst()), completion: completion)
                 }
-            }
+            } else { addCookies(cookies: Array(cookies.dropFirst()), completion: completion) }
         } else {
             // dont need other cookies
             completion()

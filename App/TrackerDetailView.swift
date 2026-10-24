@@ -20,6 +20,13 @@ struct TrackerDetailView: View {
     private var current: Tracker { model.trackers.first { $0.ref == tracker.ref } ?? tracker }
 
     var body: some View {
+        Group {
+            if tracker.provider == "google", GoogleTrackerStore.shared.hasDevice(tracker.apiID) {
+                NativeGoogleTrackerView(deviceID: tracker.apiID)
+            } else { serverBody }
+        }
+    }
+    private var serverBody: some View {
         ScrollView {
             VStack(spacing: 18) {
                 header

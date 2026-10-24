@@ -7,7 +7,7 @@
 
 import CoreLocation
 import Foundation
-import LUI
+import Combine
 
 /// Struct for requests to new locations
 struct LocationManagerRequest: Identifiable, Equatable {

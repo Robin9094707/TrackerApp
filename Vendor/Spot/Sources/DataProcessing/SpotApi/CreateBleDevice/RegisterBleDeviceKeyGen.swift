@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import LUI
+import Combine
 
 let ROTATION_PERIOD: Int32 = 1024
 

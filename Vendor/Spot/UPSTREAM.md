@@ -11,3 +11,7 @@ Integration changes: public host/snapshot bridge; separate Keychain/preferences 
 The complete combined application source is distributed under GPL-3.0-only. Third-party notices remain in Licenses and Configuration.swift. Backend dependencies retain their respective licenses.
 
 The dependency versions are pinned to the upstream Package.resolved, including Digest 1.12.0, BigInt 1.21.0 and ASN1 2.7.0. Newer Digest enum cases are incompatible with SwiftECC 5.4.0.
+
+## 5.1 engine extraction
+
+Removed the whole Spot/LUI presentation layer. The host owns every view and authentication WebKit presentation. Kept the same Keychain service, preferences suite and history paths for migration. Replaced blocking registration/push transport, retained multi-message report windows and added a protected raw-report archive. The original protocol attribution and GPL notices remain.

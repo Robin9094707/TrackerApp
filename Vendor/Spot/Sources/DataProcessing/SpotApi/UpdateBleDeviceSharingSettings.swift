@@ -7,7 +7,7 @@
 
 import CryptoKit
 import Foundation
-import LUI
+import Combine
 
 private let scope = "UpdateBleDeviceSharingSettings"
 

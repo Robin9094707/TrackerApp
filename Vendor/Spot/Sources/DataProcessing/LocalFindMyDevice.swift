@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import LUI
+import Combine
 import SwiftUI
 
 private let deviceRefreshQueue = DispatchQueue(label: "DeviceRefreshQueue")
@@ -162,10 +162,8 @@ func processDeviceList(list: [DeviceMetadata]) async {
         }
     }
 
-    DispatchQueue.main.async {
-        withAnimation {
-            Settings.sharedInstance.devicesList = newList
-        }
+    await MainActor.run {
+        Settings.sharedInstance.devicesList = newList
     }
 }
 

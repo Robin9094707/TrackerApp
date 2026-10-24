@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import LUI
+import Combine
 import SwiftUI
 
 final class UploadPrecomputedPublicKeyIds: SharedInstance {

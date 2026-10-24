@@ -5,6 +5,7 @@
         <relationship name="refreshes" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="StoredRefresh" inverseName="device" inverseEntity="StoredRefresh"/>
     </entity>
     <entity name="StoredLocationReport" representedClassName="StoredLocationReport" syncable="YES" codeGenerationType="class">
+        <attribute name="name" optional="YES" attributeType="String"/>
         <attribute name="accuracy" optional="YES" attributeType="Float" defaultValueString="0.0" usesScalarValueType="YES"/>
         <attribute name="altitude" optional="YES" attributeType="Double" defaultValueString="0.0" usesScalarValueType="YES"/>
         <attribute name="isOwnReport" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>

@@ -5,7 +5,7 @@
 //  Created by Leon Böttger on 23.12.24.
 //
 
-import LUI
+import Combine
 import SwiftUI
 
 final class Settings: SharedInstance {

@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import LUI
+import Combine
 
 final class NovaApiManager: SharedInstance {
     static var sharedInstance = NovaApiManager()
@@ -72,14 +72,11 @@ final class NovaApiManager: SharedInstance {
 
                         let didReceiveUpdate = mergeDeviceUpdate(requestDate: requestDate, contributorType: contributor, deviceUpdateProtobuf: deviceUpdate, localDevice: device)
 
-                        if !didReceiveUpdate, !tryingAgain, Settings.sharedInstance.contributorType == .Adaptive {
-                            self.requestLocationDataForDevice(device: device, tryingAgain: true, callback: callback)
-                        } else {
-                            callback(true)
-                        }
+                        GoogleReportArchive.store(deviceUpdate)
+                        callback(true)
                     }
 
-                    return true
+                    return false // Keep listening for all later packets in this request window.
                 }
 
                 return false
@@ -93,6 +90,7 @@ final class NovaApiManager: SharedInstance {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 20
         request.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer " + androidDeviceManagerOauthToken, forHTTPHeaderField: "Authorization")
         request.setValue("en-US", forHTTPHeaderField: "Accept-Language")
@@ -108,6 +106,10 @@ final class NovaApiManager: SharedInstance {
         let statusCode = httpResponse.statusCode
 
         guard (200..<300).contains(statusCode) else {
+            if [401, 403].contains(statusCode), failedAttempts == 0 {
+                TokenManager.sharedInstance.clearCachedTokens()
+                return try await novaRequest(apiScope: apiScope, payload: payload, failedAttempts: 1)
+            }
             if [429, 500, 502, 503, 504].contains(statusCode), failedAttempts < 2 {
                 try await Task.sleep(nanoseconds: UInt64(failedAttempts + 1) * 1_000_000_000)
                 return try await novaRequest(apiScope: apiScope, payload: payload, failedAttempts: failedAttempts + 1)

@@ -6,7 +6,7 @@
 //
 
 import Foundation
-import LUI
+import Combine
 
 enum RegisterBleDevice {
     static func registerESP32(pairDate: Int32, ownerKey: Data, EIK: Data, curveType: CurveType) async throws -> DeviceMetadata.DeviceInformation {

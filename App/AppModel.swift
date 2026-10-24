@@ -1,5 +1,7 @@
 import Foundation
 import Observation
+import Combine
+import SpotIntegration
 import UserNotifications
 
 @MainActor
@@ -34,7 +36,33 @@ final class AppModel {
     var providerFilter = "all" { didSet { preferences.set(providerFilter, forKey: "tracker.provider") } }
     var searchText = ""
 
-    var trackers: [Tracker] { bootstrap?.trackers ?? [] }
+    var localGoogleTrackers: [Tracker] = []
+    var localMode: Bool = UserDefaults.standard.bool(forKey: "native.localMode") { didSet { UserDefaults.standard.set(localMode, forKey: "native.localMode") } }
+    @ObservationIgnored private var googleSubscriptions = Set<AnyCancellable>()
+    var trackers: [Tracker] {
+        var result = bootstrap?.trackers ?? []
+        for local in localGoogleTrackers {
+            if let index = result.firstIndex(where: { $0.provider == "google" && ($0.apiID == local.apiID || $0.ref == local.ref) }) {
+                if local.reportTimestamp >= result[index].reportTimestamp, local.location != nil { result[index].location = local.location; result[index].lastSeenTs = local.lastSeenTs }
+                if let favorite = GoogleTrackerStore.shared.favoriteOverride(local.apiID) { result[index].favorite = favorite }
+                result[index].battery = local.battery ?? result[index].battery
+            } else { result.append(local) }
+        }
+        return result
+    }
+    private func receiveGoogle(_ snapshots: [GoogleTrackerSnapshot]) {
+        localGoogleTrackers = snapshots.map { snapshot in
+            let location: TrackerLocation? = {
+                guard let lat = snapshot.latitude, let lon = snapshot.longitude else { return nil }
+                return TrackerLocation(latitude: lat, longitude: lon, accuracyM: snapshot.accuracy,
+                    timestamp: snapshot.reportedAt.map { Int($0.timeIntervalSince1970) }, network: "google", provider: "google")
+            }()
+            return Tracker(ref: "google:" + snapshot.id, name: snapshot.name, provider: "google", location: location,
+                lastSeenTs: snapshot.reportedAt.map { Int($0.timeIntervalSince1970) }, battery: snapshot.battery,
+                status: snapshot.nearby ? "In der Nähe" : "Google direkt", favorite: GoogleTrackerStore.shared.favorite(snapshot.id),
+                historyActive: true, emoji: "📡", serverID: snapshot.id)
+        }
+    }
     var filteredTrackers: [Tracker] {
         TrackerQuery(text: searchText, provider: providerFilter, scope: selectedScope,
                      sort: selectedSort, group: selectedGroup)
@@ -44,6 +72,9 @@ final class AppModel {
 
     init(preferences: UserDefaults = .standard) {
         self.preferences = preferences
+        GoogleTrackerStore.shared.$trackers.receive(on: DispatchQueue.main).sink { [weak self] snapshots in
+            Task { @MainActor in self?.receiveGoogle(snapshots) }
+        }.store(in: &googleSubscriptions)
         selectedSort = TrackerSort(rawValue: preferences.string(forKey: "tracker.sort") ?? "") ?? .favorites
         selectedScope = TrackerScope(rawValue: preferences.string(forKey: "tracker.scope") ?? "") ?? .all
         let provider = preferences.string(forKey: "tracker.provider") ?? "all"
@@ -154,7 +185,9 @@ final class AppModel {
         }
     }
 
-    func isLocating(_ tracker: Tracker) -> Bool { locatingRefs.contains(tracker.ref) }
+    func isLocating(_ tracker: Tracker) -> Bool {
+        locatingRefs.contains(tracker.ref) || (tracker.provider == "google" && GoogleTrackerStore.shared.locating.contains(tracker.apiID))
+    }
     func isUpdatingNotification(_ tracker: Tracker) -> Bool { notificationRefs.contains(tracker.ref) }
 
     func refreshAlerts(limit: Int = 150, unreadOnly: Bool = false) async {
@@ -199,6 +232,11 @@ final class AppModel {
     }
 
     func locate(_ tracker: Tracker) async {
+        if tracker.provider == "google", GoogleTrackerStore.shared.hasDevice(tracker.apiID) {
+            do { try GoogleTrackerStore.shared.locate(tracker.apiID); statusMessage = "Google sammelt alle Reports für \(tracker.name) …" }
+            catch { errorMessage = error.localizedDescription }
+            return
+        }
         guard !locatingRefs.contains(tracker.ref), !isLocatingAll else { return }
         locatingRefs.insert(tracker.ref)
         let generation = sessionGeneration
@@ -229,6 +267,8 @@ final class AppModel {
     }
 
     func locateAll() async {
+        GoogleTrackerStore.shared.requestReportsForAll()
+        if connectionState != .connected { return }
         guard !isLocatingAll, locatingRefs.isEmpty else { return }
         isLocatingAll = true
         let generation = sessionGeneration
@@ -252,6 +292,11 @@ final class AppModel {
     }
 
     func setFavorite(_ tracker: Tracker) async {
+        if tracker.provider == "google", GoogleTrackerStore.shared.hasDevice(tracker.apiID) {
+            GoogleTrackerStore.shared.setFavorite(tracker.apiID, enabled: tracker.favorite != true)
+            receiveGoogle(GoogleTrackerStore.shared.trackers)
+            return
+        }
         guard !updatingRefs.contains(tracker.ref) else { return }
         updatingRefs.insert(tracker.ref)
         defer { updatingRefs.remove(tracker.ref) }

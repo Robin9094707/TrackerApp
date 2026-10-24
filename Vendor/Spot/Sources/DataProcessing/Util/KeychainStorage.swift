@@ -7,7 +7,7 @@
 
 import Combine
 import Foundation
-import LUI
+import Combine
 
 @propertyWrapper
 final class KeychainStorage<Value: Codable & Equatable> {

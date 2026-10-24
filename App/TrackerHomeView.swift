@@ -7,7 +7,6 @@ struct TrackerHomeView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var google = GoogleTrackerStore.shared
-    @State private var googleDestination: LocalGoogleDestination?
     @State private var position: MapCameraPosition = .automatic
     @State private var selectedRef: String?
     @State private var path: [String] = []
@@ -76,19 +75,6 @@ struct TrackerHomeView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("\(tracker.name) auf Karte öffnen")
-                    }
-                }
-            }
-            ForEach(localGoogleOnMap) { tracker in
-                if let lat = tracker.latitude, let lon = tracker.longitude {
-                    Annotation(tracker.name, coordinate: .init(latitude: lat, longitude: lon)) {
-                        Button { googleDestination = LocalGoogleDestination(deviceID: tracker.id) } label: {
-                            Image(systemName: "sensor.tag.radiowaves.forward.fill")
-                                .font(.title3).foregroundStyle(.white).padding(12)
-                                .background(.green.gradient, in: Circle())
-                                .overlay(Circle().stroke(.white, lineWidth: 3))
-                                .shadow(radius: 4, y: 2)
-                        }.buttonStyle(.plain).accessibilityLabel("Google-Tracker \(tracker.name) öffnen")
                     }
                 }
             }
@@ -185,7 +171,6 @@ struct TrackerHomeView: View {
         .toolbarBackground(Color(uiColor: .systemGroupedBackground), for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
         .environment(\.rjExpandInspector, { detent = .large })
-        .fullScreenCover(item: $googleDestination) { LocalGoogleView(deviceID: $0.deviceID) }
         .onChange(of: tab) { _, value in
             if value != 0 { detent = .large }
             else { detent = .medium }
@@ -205,19 +190,8 @@ struct TrackerHomeView: View {
         Haptics.impact()
     }
 
-    private var localGoogleOnMap: [GoogleTrackerSnapshot] {
-        guard ["all", "google"].contains(model.providerFilter), model.selectedScope == .all, model.selectedGroup == nil else { return [] }
-        return google.trackers.filter { tracker in
-            (model.searchText.isEmpty || tracker.name.localizedCaseInsensitiveContains(model.searchText)) &&
-            !model.trackers.contains { $0.provider == "google" && ($0.serverID == tracker.id || $0.ref == "google:" + tracker.id) }
-        }
-    }
     private func fitAll() {
-        let googleLocations = localGoogleOnMap.compactMap { tracker -> TrackerLocation? in
-            guard let lat = tracker.latitude, let lon = tracker.longitude else { return nil }
-            return TrackerLocation(latitude: lat, longitude: lon, accuracyM: tracker.accuracy)
-        }
-        guard let region = RJMapCamera.overview(locations: located.compactMap(\.validLocation) + googleLocations, panelCoverage: coverage) else { return }
+        guard let region = RJMapCamera.overview(locations: located.compactMap(\.validLocation), panelCoverage: coverage) else { return }
         animate { position = .region(region) }
     }
 
@@ -240,7 +214,7 @@ struct TrackerLibraryView: View {
     var body: some View {
         @Bindable var model = model
         List {
-            LocalGoogleRows()
+            Section { GoogleLauncherCard() }
             Section {
                 SyncStatusView()
                     .listRowBackground(Color.clear)

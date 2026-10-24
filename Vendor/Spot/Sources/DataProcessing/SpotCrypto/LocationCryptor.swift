@@ -8,7 +8,7 @@
 import BigInt
 import CryptoKit
 import Foundation
-import LUI
+import Combine
 import SwiftECC
 import SwiftUI
 
@@ -18,9 +18,7 @@ class LocationCryptor {
     static func decryptList(device: LocalFindMyDevice, refresh: RefreshWrapper, completion: @escaping (RefreshWrapper) -> Void) {
         locationFetchQueue.async {
 
-            guard let eik = device.eik else {
-                return
-            }
+            guard let eik = device.eik else { completion(refresh); return }
 
             var modifiedRefresh = refresh
 
@@ -39,7 +37,7 @@ class LocationCryptor {
                         }
                     }
                 } catch {
-                    showAlert(title: "Error", message: "An error occurred during decrypting. Error: \(error).")
+                    // Keep encrypted reports for key recovery; one failed report must not discard its neighbours.
                 }
             }
 

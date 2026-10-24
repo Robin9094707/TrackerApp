@@ -8,11 +8,14 @@ struct MoreView: View {
                 HStack(spacing: 14) {
                     Image(systemName: "person.crop.circle.fill").font(.system(size: 48)).foregroundStyle(.blue)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(model.bootstrap?.session?.user?.displayName ?? model.username).font(.title3.bold())
+                        Text(model.bootstrap?.session?.user?.displayName ?? (model.username.isEmpty ? "Mein Tracker-Konto" : model.username)).font(.title3.bold())
                         Text("\(model.trackers.count) Objekte · \(model.trackers.filter { $0.favorite == true }.count) Favoriten").font(.caption).foregroundStyle(.secondary)
                     }
                 }.padding(.vertical, 8)
                 SyncStatusView()
+            }
+            if model.connectionState != .connected {
+                Section { Button("Mit Tracker-Server verbinden", systemImage: "network") { model.localMode = false } }
             }
             Section("Konto") {
                 NavigationLink { AccountManagementView() } label: { Label("Konto & Sicherheit", systemImage: "person.badge.shield.checkmark") }

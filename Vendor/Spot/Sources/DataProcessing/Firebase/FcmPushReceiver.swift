@@ -7,7 +7,7 @@
 
 import CryptoKit
 import Foundation
-import LUI
+import Combine
 import Network
 import SwiftProtobuf
 #if canImport(UIKit)
@@ -21,7 +21,16 @@ final class PushReceiver: SharedInstance {
 
     private var newMessageCallbacks = [MessageCallback]()
     private var fcmConfig: FcmRegisterConfig
-    private var credentials: FcmCredentials?
+    private let credentialLock = NSLock()
+    private var storedCredentials: FcmCredentials?
+    private var credentials: FcmCredentials? {
+        get { credentialLock.lock(); defer { credentialLock.unlock() }; return storedCredentials }
+        set { credentialLock.lock(); storedCredentials = newValue; credentialLock.unlock() }
+    }
+    @MainActor private var registrationTask: Task<FcmCredentials, Error>?
+    private var connectionGeneration = UUID()
+    private var ready = false
+    private var readyCallbacks: [() -> Void] = []
     private var persistentIds = [String]()
     private var config: FcmPushClientConfig
     private var doListen: Bool = false
@@ -75,13 +84,11 @@ final class PushReceiver: SharedInstance {
             let newCallback = MessageCallback(callback: callback)
             newMessageCallbacks.append(newCallback)
 
-            if !doListen {
-                checkinOrRegister()
-            }
+            guard credentials != nil else { callback(nil); newMessageCallbacks.removeAll { $0 == newCallback }; return }
+            if ready { isListening() } else { readyCallbacks.append(isListening) }
+            if !doListen { start() }
 
-            isListening()
-
-            pushQueue.asyncAfter(deadline: .now() + 20) { [self] in
+            pushQueue.asyncAfter(deadline: .now() + 35) { [self] in
                 if newMessageCallbacks.contains(newCallback) {
                     newMessageCallbacks.removeAll { $0 == newCallback }
                     _ = callback(nil)
@@ -94,9 +101,26 @@ final class PushReceiver: SharedInstance {
         }
     }
 
-    func registerForLogin(callback: @escaping () -> Void) {
-        pushQueue.async {
-            self.checkinOrRegister(callback: callback)
+    @MainActor func prepare(force: Bool = false) async throws {
+        if !force, getToken() != nil, getAndroidId() != nil { return }
+        if let registrationTask { _ = try await registrationTask.value; return }
+        let existing = credentials
+        let register = FcmRegister(config: fcmConfig, credentials: existing)
+        let task = Task { () throws -> FcmCredentials in
+            defer { register.close() }
+            return try await register.checkinOrRegister()
+        }
+        registrationTask = task
+        defer { registrationTask = nil }
+        do {
+            let result: FcmCredentials = try await googleCallback(seconds: 30) { done in
+                Task { do { done(.success(try await task.value)) } catch { done(.failure(error)) } }
+            }
+            try storeCredentials(credentials: result)
+        } catch {
+            task.cancel(); register.close()
+            // An offline device must retain its already working Google identity.
+            throw error
         }
     }
 
@@ -138,94 +162,31 @@ final class PushReceiver: SharedInstance {
         credentials = nil
     }
 
-    private func checkinOrRegister(callback: (() -> Void)? = nil) {
-        // Check in if you have credentials otherwise register as a new client.
-        do {
-            if credentials == nil {
-                credentials = try KeychainStore.shared.load(FcmCredentials.self, for: .fcmCredentials)
-            }
-            registerer = FcmRegister(config: fcmConfig, credentials: credentials)
-            let result = try registerer?.checkinOrRegister()
-            registerer?.close()
-            try storeCredentials(credentials: result)
-        } catch {
-            DispatchQueue.main.async {
-                callback?()
-                showAlert(title: "Google-Verbindung", message: "Die Google-Registrierung ist fehlgeschlagen. Bitte erneut versuchen.")
-            }
-            return
-        }
-
-        DispatchQueue.main.async {
-            callback?()
-        }
-
-        if !newMessageCallbacks.isEmpty {
-            start()
-        }
-    }
-
     private func listen() {
-        connectWithRetry()
-        login()
-        startReading()
-    }
-
-    private func connectWithRetry() {
-        var connected = false
-
-        while !connected, doListen {
-            connected = connect()
-
-            if !connected {
-                let sleepTime = config.startSecondsBeforeRetryConnect
-
-                Thread.sleep(forTimeInterval: sleepTime)
+        let generation = UUID()
+        connectionGeneration = generation
+        let connection = NWConnection(host: "mtalk.google.com", port: 5228, using: .tls)
+        self.connection = connection
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            guard let self, let connection else { return }
+            self.pushQueue.async {
+                guard self.connectionGeneration == generation, self.doListen else { return }
+                switch state {
+                case .ready:
+                    self.login(); self.startReading()
+                case .failed, .cancelled:
+                    self.reset()
+                default: break
+                }
             }
         }
-    }
-
-    private func connect() -> Bool {
-        let semaphore = DispatchSemaphore(value: 0)
-        var success = false
-
-        connection = openConnection { result in
-            success = result
-            semaphore.signal() // Release the semaphore when the callback is executed
-        }
-
-        // Wait for the semaphore signal (blocks the thread until signal is called)
-        semaphore.wait()
-
-        return success
-    }
-
-    private func openConnection(callback: @escaping (Bool) -> Void) -> NWConnection {
-        let parameters = NWParameters.tls // Use standard TLS parameters
-
-        let MCS_HOST = "mtalk.google.com"
-        let MCS_PORT: UInt16 = 5228
-
-        let connection = NWConnection(host: NWEndpoint.Host(MCS_HOST), port: NWEndpoint.Port(rawValue: MCS_PORT)!, using: parameters)
         connection.start(queue: networkQueue)
-
-        connection.stateUpdateHandler = { state in
-            switch state {
-            case .ready:
-                callback(true)
-                connection.stateUpdateHandler = nil
-            case .cancelled:
-                callback(false)
-                connection.stateUpdateHandler = nil
-            case let .failed(error):
-                callback(false)
-                connection.stateUpdateHandler = nil
-            default:
-                break
-            }
+        pushQueue.asyncAfter(deadline: .now() + 12) { [weak self] in
+            guard let self, self.connectionGeneration == generation, !self.ready else { return }
+            self.failPending()
+            showAlert(title: "Google-Push", message: "Google-Push hat nicht rechtzeitig geantwortet. Die Anmeldung und vorhandene Reports bleiben erhalten; erneut versuchen.")
+            self.stop()
         }
-
-        return connection
     }
 
     /// USER AUTHENTIFICATION
@@ -273,11 +234,12 @@ final class PushReceiver: SharedInstance {
             return
         }
 
+        let generation = connectionGeneration
         var connectionInvalid = false
 
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, isComplete, error in
             self.pushQueue.async {
-                if connectionInvalid || !self.doListen {
+                if connectionInvalid || !self.doListen || self.connectionGeneration != generation {
                     return
                 }
 
@@ -287,7 +249,7 @@ final class PushReceiver: SharedInstance {
                     do {
                         try self.checkForMessages()
                     } catch {
-                        self.buffer = Data()
+                        self.buffer = Data(); self.reset()
                     }
                 }
 
@@ -310,84 +272,16 @@ final class PushReceiver: SharedInstance {
         }
     }
 
+    private var frameDecoder = GoogleMCSDecoder()
     private func checkForMessages() throws {
-        var tag: UInt8 = 0
-        bufferIndex = 0
-
-        if firstMessage {
-            guard let firstData = readBuffer(length: 2) else { return }
-
-            let version = firstData[firstData.startIndex]
-            tag = firstData[firstData.startIndex + 1]
-
-            if version < MCS_VERSION, version != 38 {
-                throw NSError(domain: "Unsupported version", code: 0)
-            }
-
+        let frames = try frameDecoder.append(buffer)
+        buffer.removeAll(keepingCapacity: true)
+        for frame in frames {
             firstMessage = false
-        } else {
-            guard let tagData = readBuffer(length: 1) else { return }
-            tag = tagData[tagData.startIndex]
-        }
-
-        let size = try readVarint32()
-
-        if size < 0 {
-            throw NSError(domain: "Invalid message size", code: 0)
-        }
-
-        guard let buf = readBuffer(length: size) else { return }
-
-        guard let msgClass = MCSMessageTag.fromInt(Int(tag)) else {
-            throw NSError(domain: "Unsupported message tag", code: 0)
-        }
-
-        guard let payloadProto = msgClass.getInstance(with: buf) else {
-            throw NSError(domain: "Could not deserialize payload", code: 0)
-        }
-        buffer.removeFirst(bufferIndex)
-
-        if !buffer.isEmpty {
-            try checkForMessages()
-        }
-
-        handleMessage(msg: MessageWrapper(message: payloadProto, type: msgClass))
-    }
-
-    private func readVarint32() throws -> Int {
-        var result = 0
-        var shift = 0
-
-        while true {
-            guard let byteData = readBuffer(length: 1)?.first else {
-                throw NSError(domain: "Error reading varint32", code: 0)
-            }
-
-            result |= (Int(byteData) & 0x7F) << shift
-            if (byteData & 0x80) == 0 {
-                break
-            }
-            shift += 7
-
-            if shift >= 32 {
-                throw NSError(domain: "Too large integer", code: 0)
+            if let type = MCSMessageTag.fromInt(Int(frame.tag)), let message = type.getInstance(with: frame.payload) {
+                handleMessage(msg: MessageWrapper(message: message, type: type))
             }
         }
-
-        return result
-    }
-
-    private func readBuffer(length: Int) -> Data? {
-        // read from buffer index to length
-        if length + bufferIndex > buffer.count {
-            return nil
-        }
-
-        let startIndex = buffer.startIndex + bufferIndex
-        let data = buffer[startIndex ..< startIndex + length]
-        bufferIndex += length
-
-        return data
     }
 
     private func sendMsg(messageWrapper: MessageWrapper) {
@@ -499,6 +393,9 @@ final class PushReceiver: SharedInstance {
             } else {
                 resetErrorCount(errorType: .login)
                 persistentIds = []
+                ready = true
+                let callbacks = readyCallbacks; readyCallbacks.removeAll()
+                callbacks.forEach { $0() }
             }
             return
         }
@@ -533,7 +430,7 @@ final class PushReceiver: SharedInstance {
         if doNotRaise {
             return ""
         }
-        fatalError("couldn't find in app_data \(key)")
+        return ""
     }
 
     private func handleDataMessage(msg: McsProto_DataMessageStanza) {
@@ -547,7 +444,7 @@ final class PushReceiver: SharedInstance {
 
         guard let credentials else { return }
 
-        if subtype != credentials.gcm.app_id {}
+        guard subtype == credentials.gcm.app_id, !cryptoKey.isEmpty, !salt.isEmpty else { return }
 
         do {
             let decrypted = try FcmDecryptor.decryptRawData(rawData: msg.rawData, serverPublicKeyString: cryptoKey, saltString: salt, ownPrivateKeyDer: credentials.keys.privateKey, ownSecretString: credentials.keys.secret)
@@ -595,30 +492,26 @@ final class PushReceiver: SharedInstance {
     /// TEARDOWN CONNECTION
 
     private func stop() {
-        if connection == nil {
-            return
-        }
-
-        registerer = nil
-        heartbeatTimer?.invalidate()
-        buffer = Data()
-        bufferIndex = 0
-        doListen = false
-
-        connection?.cancel()
-
-        while connection?.state != .cancelled {
-            Thread.sleep(forTimeInterval: 1)
-        }
-
-        connection = nil
+        connectionGeneration = UUID()
+        doListen = false; ready = false
+        readyCallbacks.removeAll()
+        DispatchQueue.main.async { self.heartbeatTimer?.invalidate(); self.heartbeatTimer = nil }
+        connection?.stateUpdateHandler = nil
+        connection?.cancel(); connection = nil
+        buffer.removeAll(); frameDecoder = GoogleMCSDecoder()
     }
-
+    private func failPending() {
+        let callbacks = newMessageCallbacks; newMessageCallbacks.removeAll()
+        callbacks.forEach { _ = $0.callback(nil) }
+    }
     func reset() {
         stop()
-        Thread.sleep(forTimeInterval: 30)
-
-        checkinOrRegister()
+        if !newMessageCallbacks.isEmpty {
+            pushQueue.asyncAfter(deadline: .now() + 2) { [weak self] in
+                guard let self, !self.newMessageCallbacks.isEmpty, !self.doListen else { return }
+                self.start()
+            }
+        }
     }
 
     /// ERROR HANDLERS
@@ -645,6 +538,6 @@ final class PushReceiver: SharedInstance {
         }
 
         let id = UUID()
-        let callback: (FcmPush) -> Bool
+        let callback: (FcmPush?) -> Bool
     }
 }
