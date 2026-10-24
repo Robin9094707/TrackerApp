@@ -42,12 +42,22 @@ enum GoogleReportArchive {
     }
 }
 
+// One identity for both deduplication and SwiftUI rows. Include altitude and
+// semantic labels so distinct reports never share a row or disappear on replay.
+func googleReportIdentity(_ report: LocationReportWrapper) -> String {
+    let location = report.decryptedLocation
+    let payload = location == nil ? report.encryptedLocation.flatMap { try? $0.serializedData() }?.base64EncodedString() : nil
+    let fields: [String?] = [String(report.time.timeIntervalSince1970), String(report.status.rawValue),
+        String(report.isOwnReport), report.accuracy.map { String($0) },
+        location.map { String($0.latitude) }, location.map { String($0.longitude) },
+        location.map { String($0.altitude) }, report.name, payload]
+    // Length prefixes keep names containing separators unambiguous.
+    let canonical = fields.map { field in field.map { "\($0.utf8.count):\($0)" } ?? "-" }.joined(separator: "|")
+    return SHA256.hash(data: Data(canonical.utf8)).hex
+}
+
 func uniqueGoogleReports(_ reports: [LocationReportWrapper]) -> [LocationReportWrapper] {
     var seen = Set<String>()
-    return reports.filter { report in
-        let location = report.decryptedLocation.map { "\($0.latitude):\($0.longitude):\($0.altitude)" }
-            ?? (report.encryptedLocation.flatMap { try? $0.serializedData() }?.base64EncodedString() ?? report.name ?? "")
-        let key = "\(report.time.timeIntervalSince1970)|\(report.status.rawValue)|\(report.isOwnReport)|\(report.accuracy ?? 0)|\(location)"
-        return seen.insert(key).inserted
-    }.sorted { $0.time > $1.time }
+    return reports.filter { seen.insert(googleReportIdentity($0)).inserted }
+        .sorted { $0.time > $1.time }
 }

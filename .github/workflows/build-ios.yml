@@ -33,6 +33,7 @@ jobs:
       - run: python -m py_compile Backend/tracker_backend.py
       - run: python Tests/test_backend_calendar_mcp.py -v
   build:
+    needs: backend
     name: Build unsigned iOS IPA
     runs-on: macos-26
     timeout-minutes: 60
@@ -134,12 +135,12 @@ jobs:
           set -o pipefail
           SIM_ID="$(xcrun simctl list devices booted --json | python3 -c 'import sys,json; d=json.load(sys.stdin)["devices"]; print(next(p["udid"] for v in d.values() for p in v if p["name"].startswith("iPhone")))')"
           xcodebuild test \
-            -project RJTracker.xcodeproj -scheme RJTracker \
+            -project RJTracker.xcodeproj -scheme RJTrackerReleaseLaunch \
             -configuration Release -destination "platform=iOS Simulator,id=$SIM_ID" \
             -resultBundlePath RJ-Tracker-release-tests.xcresult \
             -parallel-testing-enabled NO \
             -only-testing:RJTrackerUITests/TrackerUITests/testColdStartAndRelaunchWithoutSession \
-            ENABLE_TESTABILITY=YES CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             2>&1 | tee RJ-Tracker-release-tests.log
 
       - name: Create unsigned IPA
@@ -155,10 +156,11 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$APP/Info.plist"
           test -n "$(find "$APP" -name 'AppIcon*.png' -print -quit)"
           cp -R "$APP" Payload/
-          /usr/bin/zip -qry RJ-Tracker-v5.1.1-unsigned.ipa Payload
-          unzip -t RJ-Tracker-v5.1.1-unsigned.ipa
-          ls -lh RJ-Tracker-v5.1.1-unsigned.ipa
-          echo "### RJ Tracker 5.1.1" >> "$GITHUB_STEP_SUMMARY"
+          /usr/bin/zip -qry RJ-Tracker-v5.1.2-unsigned.ipa Payload
+          unzip -t RJ-Tracker-v5.1.2-unsigned.ipa
+          shasum -a 256 RJ-Tracker-v5.1.2-unsigned.ipa > SHA256SUMS.txt
+          ls -lh RJ-Tracker-v5.1.2-unsigned.ipa
+          echo "### RJ Tracker 5.1.2" >> "$GITHUB_STEP_SUMMARY"
           echo "Commit: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
           echo "Unsigned IPA ready for sideload signing." >> "$GITHUB_STEP_SUMMARY"
 
@@ -166,8 +168,10 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-v5.1.1-unsigned-IPA
-          path: RJ-Tracker-v5.1.1-unsigned.ipa
+          name: RJ-Tracker-v5.1.2-unsigned-IPA
+          path: |
+            RJ-Tracker-v5.1.2-unsigned.ipa
+            SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
@@ -184,7 +188,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-v5.1.1-tests-and-screenshots
+          name: RJ-Tracker-v5.1.2-tests-and-screenshots
           path: |
             RJ-Tracker-tests.log
             RJ-Tracker-release-tests.log
@@ -196,7 +200,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-v5.1.1-build-log
+          name: RJ-Tracker-v5.1.2-build-log
           path: RJ-Tracker-build.log
           if-no-files-found: ignore
           retention-days: 30

@@ -101,9 +101,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         guard let device = try? device(id) else { return [] }
         return uniqueGoogleReports(device.refreshes.flatMap(\.reports)).map { report in
             let location = report.decryptedLocation
-            let encrypted = location == nil ? (report.encryptedLocation.flatMap { try? $0.serializedData() }?.base64EncodedString() ?? "") : ""
-            let fingerprint = "\(report.time.timeIntervalSince1970)|\(report.status.rawValue)|\(location?.latitude ?? 0)|\(location?.longitude ?? 0)|\(report.isOwnReport)|\(report.accuracy ?? 0)|\(report.name ?? "")|\(encrypted)"
-            return GoogleReportSnapshot(id: SHA256.hash(data: Data(fingerprint.utf8)).hex, date: report.time,
+            return GoogleReportSnapshot(id: googleReportIdentity(report), date: report.time,
                 latitude: location?.latitude, longitude: location?.longitude, accuracy: report.accuracy.map(Double.init),
                 kind: String(describing: report.status), own: report.isOwnReport, label: report.name)
         }

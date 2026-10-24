@@ -1,3 +1,15 @@
+# RJ Tracker 5.1.2
+
+Native iPhone-/iPad-App für Apple-, Google-, Samsung- und Fusion-Tracker, mit Google Find Hub direkt auf dem Gerät. Mindestversion: iOS 18.1.
+
+[Update und Installation 5.1.2](docs/UPGRADE-5.1.2.md) · [Änderungen](IOS-CHANGELOG.md) · [API/Backend](docs/API-EDITION.md)
+
+Die GitHub Action **Build RJ Tracker IPA** erstellt `RJ-Tracker-v5.1.2-unsigned.ipa` und `SHA256SUMS.txt`. Sie prüft Backend, Google-Protokoll und Datenbankmigration, Debug-Unit-/UI-Tests sowie den Kaltstart und Neustart der optimierten Release-App. Die IPA muss anschließend mit dem eigenen Profil signiert werden. Echte Google-Anmeldung, Entschlüsselung und Tracker-Klingeln benötigen ein eigenes Konto und Hardware; Simulatorprüfungen ersetzen diese Prüfung nicht.
+
+Bestehende App mit derselben Bundle-ID und Signierungsidentität aktualisieren, ohne sie vorher zu löschen. Serverdaten und Google-Kontoverläufe bleiben erhalten. Für dieses Update ist kein Backendwechsel nötig.
+
+---
+
 # RJ Tracker 5.1
 
 Native Google-Find-Hub-Datenquelle in derselben universellen TrackerApp. Die Spot-App-Oberfläche wurde entfernt; nur die Google-Protokolltechnik wird als Bibliothek verwendet.
@@ -32,7 +44,7 @@ Native SwiftUI-/MapKit-App für Apple-, Google-, Samsung- und Fusion-Tracker. An
 
 - `Backend/tracker_backend.py`: eigenständiges Python-Backend; keine separate Frontend-Datei erforderlich.
 - `Backend/requirements.txt`: aktuelle stabile Python-Abhängigkeiten, fest versioniert.
-- `App/`: nativer iOS-Client, iOS 17+, Liquid Glass ab iOS 26.
+- `App/`: nativer iOS-Client, iOS 18.1+, Liquid Glass ab iOS 26.
 - `docs/API-EDITION.md`: Einrichtung, API-Beispiele und Migration.
 
 ## Bestehendes Backend aktualisieren
@@ -74,7 +86,7 @@ Neue Passkeys und Passkey-Anmeldung starten direkt aus der App einen Sicherheits
 
 ## IPA-Build
 
-GitHub Actions baut bei Push nach `main` die Release-App und erzeugt `RJ-Tracker-v4.3.0-unsigned.ipa`. Standardmäßig laufen keine Simulator-/UI-Tests. Optionale bisherige Review-Tests bleiben auf ausdrücklichen Workflow-Input beschränkt.
+GitHub Actions baut bei Push nach `main` die Release-App und erzeugt `RJ-Tracker-v5.1.2-unsigned.ipa` mit SHA-256-Prüfsumme. Backend-, Protokoll-, Migrations- sowie Debug- und Release-Startprüfungen sind Pflicht. Die Release-Startprüfung nutzt ein eigenes Scheme ohne Debug-Unit-Test-Abhängigkeiten.
 
 Die IPA ist **unsigniert** und muss für das iPhone mit einem geeigneten Profil signiert werden. APNs benötigt zusätzlich die bestehenden Servervariablen für Team-ID, Key-ID und `.p8` sowie passende App-Entitlements beim Signieren.
 
