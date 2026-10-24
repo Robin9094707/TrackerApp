@@ -60,6 +60,9 @@ jobs:
         run: |
           swiftc Vendor/Spot/Sources/GooglePreferenceStorage.swift Vendor/Spot/Sources/GoogleCallback.swift Vendor/Spot/Sources/GoogleMCSDecoder.swift Tests/GoogleProtocolChecks.swift -o /tmp/google-protocol-checks
           /tmp/google-protocol-checks
+          xcrun momc Vendor/Spot/Sources/CoreData/DataModel.xcdatamodeld /tmp/GoogleDataModel.momd
+          swiftc -parse-as-library Tests/GoogleMigrationCheck.swift -o /tmp/google-migration-check
+          /tmp/google-migration-check /tmp/GoogleDataModel.momd
 
       - name: Generate app icons
         shell: bash

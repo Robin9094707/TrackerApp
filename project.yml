@@ -101,7 +101,7 @@ targets:
     platform: iOS
     sources:
       - path: Tests
-        excludes: [GoogleProtocolChecks.swift]
+        excludes: [GoogleProtocolChecks.swift, GoogleMigrationCheck.swift]
     dependencies:
       - target: RJTracker
     settings:
