@@ -52,7 +52,7 @@ import Foundation
         var available = false
         APIStubProtocol.handler = { request in
             if !available { throw URLError(.notConnectedToInternet) }
-            if request.url?.path.hasSuffix("/session") == true { return (200, Data(#"{"authenticated":true}"#.utf8)) }
+            if request.url?.path.hasSuffix("/session") == true { return (200, Data(#"{"status":"ok","authenticated":true}"#.utf8)) }
             return (200, try JSONEncoder().encode(PreviewFixtures.bootstrap))
         }
         await model.start()

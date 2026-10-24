@@ -5,7 +5,7 @@ final class TrackerUITests: XCTestCase {
     func testColdStartAndRelaunchWithoutSession() {
         let app = XCUIApplication()
         // Exercise production restoration, without the --ui-testing fixture shortcut.
-        app.launchArguments = ["-appearance", "light", "-serverURL", ""]
+        app.launchArguments = ["-appearance", "light", "-serverURL", ""] + ["-tracker.provider", "all", "-tracker.scope", "all"]
         for _ in 0..<2 {
             app.launch()
             XCTAssertTrue(app.buttons["local-google-launcher"].firstMatch.waitForExistence(timeout: 20))
@@ -22,7 +22,7 @@ final class TrackerUITests: XCTestCase {
     @MainActor
     func testMapLibraryDetailsAndPlaces() {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "-appearance", "light"]
+        app.launchArguments = ["--ui-testing", "-appearance", "light"] + ["-tracker.provider", "all", "-tracker.scope", "all"]
         app.launch()
         let bag = app.buttons["tracker-row-fusion:demo-bag"]
         XCTAssertTrue(bag.waitForExistence(timeout: 20))
@@ -38,7 +38,7 @@ final class TrackerUITests: XCTestCase {
     @MainActor
     func testDarkAppearanceAndAccessibilityText() {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "-appearance", "dark", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
+        app.launchArguments = ["--ui-testing", "-appearance", "dark", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"] + ["-tracker.provider", "all", "-tracker.scope", "all"]
         app.launch()
         XCTAssertTrue(app.buttons["tracker-row-fusion:demo-bag"].waitForExistence(timeout: 20))
         capture("04-Dark-Large-Text")
@@ -58,7 +58,7 @@ final class TrackerUITests: XCTestCase {
     @MainActor
     func testGroupsAndPollingSettings() {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "-appearance", "light"]
+        app.launchArguments = ["--ui-testing", "-appearance", "light"] + ["-tracker.provider", "all", "-tracker.scope", "all"]
         app.launch()
         XCTAssertTrue(app.buttons["tracker-row-fusion:demo-bag"].waitForExistence(timeout: 20))
         app.tabBars.buttons["Ich"].tap()
@@ -79,7 +79,7 @@ final class TrackerUITests: XCTestCase {
     @MainActor
     func testAccountSecurityAndHistory() {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "-appearance", "dark"]
+        app.launchArguments = ["--ui-testing", "-appearance", "dark"] + ["-tracker.provider", "all", "-tracker.scope", "all"]
         app.launch()
         let bag = app.buttons["tracker-row-fusion:demo-bag"]
         XCTAssertTrue(bag.waitForExistence(timeout: 20))
@@ -99,7 +99,7 @@ final class TrackerUITests: XCTestCase {
     @MainActor
     func testLocalGoogleCanOpenAndReturnToExistingTrackers() {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "-appearance", "light"]
+        app.launchArguments = ["--ui-testing", "-appearance", "light"] + ["-tracker.provider", "all", "-tracker.scope", "all"]
         app.launch()
         let launcher = app.buttons["local-google-launcher"].firstMatch
         XCTAssertTrue(launcher.waitForExistence(timeout: 20))
@@ -119,6 +119,7 @@ final class TrackerUITests: XCTestCase {
             app.launchArguments = ["--ui-testing", "--ui-testing-local-google", "-native.localMode", "NO",
                 "-tracker.provider", provider, "-serverURL", "https://offline.example.invalid"]
             app.launch()
+            expandInspector(app)
             let expectedRow = provider == "apple" ? "tracker-row-apple:demo-keys" : "tracker-row-google:demo-local-tag"
             XCTAssertTrue(app.buttons[expectedRow].waitForExistence(timeout: 20))
             XCTAssertEqual(app.buttons["local-google-launcher"].firstMatch.exists, provider != "apple")
@@ -136,9 +137,11 @@ final class TrackerUITests: XCTestCase {
         app.launchArguments = ["--ui-testing", "--ui-testing-local-google", "--ui-testing-restoring",
             "-native.localMode", "NO", "-tracker.provider", "google", "-serverURL", "https://offline.example.invalid"]
         app.launch()
+        expandInspector(app)
         let tag = app.buttons["tracker-row-google:demo-local-tag"]
         XCTAssertTrue(tag.waitForExistence(timeout: 20))
         tag.tap()
+        expandInspector(app)
         let lab = app.buttons["google-uwb-lab"]
         for _ in 0..<8 {
             if lab.exists && lab.isHittable { break }
@@ -157,6 +160,15 @@ final class TrackerUITests: XCTestCase {
         XCTAssertTrue(probe.exists)
         XCTAssertFalse(probe.isEnabled)
         capture("UWB-Lab-No-Fabricated-Ranging")
+    }
+
+    @MainActor
+    private func expandInspector(_ app: XCUIApplication) {
+        let grabber = app.buttons["Sheet Grabber"].firstMatch
+        if grabber.waitForExistence(timeout: 10) {
+            grabber.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.10)))
+        }
     }
 
     @MainActor

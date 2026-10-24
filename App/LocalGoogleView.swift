@@ -20,20 +20,25 @@ struct LocalGoogleView: View {
 }
 struct GoogleLauncherCard: View {
     var deviceID: String? = nil
+    var compact = false
     @ObservedObject private var google = GoogleTrackerStore.shared
     @State private var open = false
     var body: some View {
         Button { open = true } label: {
-            HStack(spacing: 14) {
-                Image(systemName: "sensor.tag.radiowaves.forward.fill").font(.title2).foregroundStyle(.green)
-                    .frame(width: 48, height: 48).background(.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Google Find Hub").font(.headline).foregroundStyle(.primary)
-                    Text(google.hasCredentials ? "\(google.trackers.count) Objekte · direkt verbunden" : "Google-Konto verbinden")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer(); Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.secondary)
-            }.contentShape(Rectangle()).padding(.vertical, 4)
+            if compact {
+                Label("Google-Konto", systemImage: "person.crop.circle").labelStyle(.iconOnly)
+            } else {
+                HStack(spacing: 14) {
+                    Image(systemName: "sensor.tag.radiowaves.forward.fill").font(.title2).foregroundStyle(.green)
+                        .frame(width: 48, height: 48).background(.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Google Find Hub").font(.headline).foregroundStyle(.primary)
+                        Text(google.hasCredentials ? "\(google.trackers.count) Objekte · direkt verbunden" : "Google-Konto verbinden")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(); Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.secondary)
+                }.contentShape(Rectangle()).padding(.vertical, 4)
+            }
         }.buttonStyle(.plain).accessibilityIdentifier("local-google-launcher")
         .sheet(isPresented: $open) { LocalGoogleView(deviceID: deviceID) }
     }

@@ -18,31 +18,31 @@ struct MoreView: View {
                 Section { Button("Mit Tracker-Server verbinden", systemImage: "network") { model.showingServerConnection = true } }
             }
             if model.serverActionsAvailable {
-            Section("Konto") {
-                NavigationLink { AccountManagementView() } label: { Label("Konto & Sicherheit", systemImage: "person.badge.shield.checkmark") }
-                NavigationLink { InternalSharesView() } label: { Label("Interne Freigaben", systemImage: "person.2") }
-            }
+                Section("Konto") {
+                    NavigationLink { AccountManagementView() } label: { Label("Konto & Sicherheit", systemImage: "person.badge.shield.checkmark") }
+                    NavigationLink { InternalSharesView() } label: { Label("Interne Freigaben", systemImage: "person.2") }
+                }
             }
             if model.showsGoogleControls { Section("Google Find Hub") { GoogleLauncherCard() } }
             if model.serverActionsAvailable {
-            Section("Meine Objekte") {
-                NavigationLink { GroupsView() } label: { Label("Gruppen", systemImage: "folder") }
-                NavigationLink { ArchiveView() } label: { Label("Archiv & ausgeblendete Objekte", systemImage: "archivebox") }
-            }
-            Section {
-                NavigationLink { SystemStatusView() } label: { Label("Serverzentrale", systemImage: "waveform.path.ecg") }
-                NavigationLink { ProviderSetupView() } label: { Label("Accounts, Import & Fusionen", systemImage: "plus.circle.fill") }
-                NavigationLink { ClientAccessView() } label: { Label("Geräte & API-Schlüssel", systemImage: "key.horizontal") }
-            }
-            Section("Server verwalten") {
-                NavigationLink { FindMyMaintenanceView() } label: { Label("FindMy.py & Serverpakete", systemImage: "shippingbox") }
-                NavigationLink { MCPManagementView() } label: { Label("ChatGPT / MCP", systemImage: "bubble.left.and.text.bubble.right") }
-                NavigationLink { BackupsManagementView() } label: { Label("Backups & Wiederherstellung", systemImage: "externaldrive.badge.timemachine") }
-                NavigationLink { NetworkComparisonView() } label: { Label("Netzwerkvergleich", systemImage: "chart.bar.xaxis") }
-                if model.showsGoogleControls { NavigationLink { GoogleRepairView() } label: { Label("Google-Reparatur", systemImage: "wrench.and.screwdriver") } }
-                NavigationLink { StorageCleanupView() } label: { Label("Speicher bereinigen", systemImage: "externaldrive.badge.minus") }
-                NavigationLink { GlobalPollingView() } label: { Label("Automatische Ortung", systemImage: "pause.circle") }
-            }
+                Section("Meine Objekte") {
+                    NavigationLink { GroupsView() } label: { Label("Gruppen", systemImage: "folder") }
+                    NavigationLink { ArchiveView() } label: { Label("Archiv & ausgeblendete Objekte", systemImage: "archivebox") }
+                }
+                Section {
+                    NavigationLink { SystemStatusView() } label: { Label("Serverzentrale", systemImage: "waveform.path.ecg") }
+                    NavigationLink { ProviderSetupView() } label: { Label("Accounts, Import & Fusionen", systemImage: "plus.circle.fill") }
+                    NavigationLink { ClientAccessView() } label: { Label("Geräte & API-Schlüssel", systemImage: "key.horizontal") }
+                }
+                Section("Server verwalten") {
+                    NavigationLink { FindMyMaintenanceView() } label: { Label("FindMy.py & Serverpakete", systemImage: "shippingbox") }
+                    NavigationLink { MCPManagementView() } label: { Label("ChatGPT / MCP", systemImage: "bubble.left.and.text.bubble.right") }
+                    NavigationLink { BackupsManagementView() } label: { Label("Backups & Wiederherstellung", systemImage: "externaldrive.badge.timemachine") }
+                    NavigationLink { NetworkComparisonView() } label: { Label("Netzwerkvergleich", systemImage: "chart.bar.xaxis") }
+                    if model.showsGoogleControls { NavigationLink { GoogleRepairView() } label: { Label("Google-Reparatur", systemImage: "wrench.and.screwdriver") } }
+                    NavigationLink { StorageCleanupView() } label: { Label("Speicher bereinigen", systemImage: "externaldrive.badge.minus") }
+                    NavigationLink { GlobalPollingView() } label: { Label("Automatische Ortung", systemImage: "pause.circle") }
+                }
             }
             Section {
                 NavigationLink { SettingsView() } label: { Label("Einstellungen", systemImage: "gearshape") }

@@ -8,7 +8,7 @@ Google-Keychain-Service, Konto-Preferences, verschlüsselte Archive, bisherige V
 
 ## Google und Filter
 
-Google-Karte, Google-Verbindungsstatus und Google-Einstellungen erscheinen bei **Alle Netze** und **Google**. Unter Apple, Samsung oder Fusion ist die zusätzliche Google-Karte ausgeblendet. Ein leerer Filter erhält eine Leermeldung, auch wenn andere Google-Tracker existieren.
+Kompakter Google-Einstieg in der Objekt-Werkzeugleiste, Google-Verbindungsstatus und Google-Einstellungen erscheinen bei **Alle Netze** und **Google**. Unter Apple, Samsung oder Fusion ist die zusätzliche Google-Karte ausgeblendet. Ein leerer Filter erhält eine Leermeldung, auch wenn andere Google-Tracker existieren.
 
 ## Wenn dein Server ausfällt
 

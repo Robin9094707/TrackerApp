@@ -214,7 +214,6 @@ struct TrackerLibraryView: View {
     var body: some View {
         @Bindable var model = model
         List {
-            if model.showsGoogleControls { Section { GoogleLauncherCard() } }
             Section {
                 SyncStatusView()
                     .listRowBackground(Color.clear)
@@ -289,6 +288,9 @@ struct TrackerLibraryView: View {
                     }
                 } label: { Image(systemName: "line.3.horizontal.decrease") }
                 .accessibilityLabel("Filter und Sortierung")
+            }
+            if model.showsGoogleControls {
+                ToolbarItem(placement: .topBarTrailing) { GoogleLauncherCard(compact: true) }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { Task { await refreshVisibleSources() } } label: {

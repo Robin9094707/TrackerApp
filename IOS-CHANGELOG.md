@@ -2,7 +2,7 @@
 
 - Gespeicherter lokaler Google-Zugang öffnet die Hauptansicht unabhängig vom Server-Verbindungsstatus, auch beim Wiederherstellen. Neuer standardmäßig aktiver lokaler Fallback; altes `native.localMode=false` blockiert ihn nicht.
 - Server-Anmeldung als schließbare Ansicht, Wiederverbindungsversuche im Vordergrund und klar getrennte Serverfunktionen; eigene API-Session-Prüfung mit 8 Sekunden Zeitlimit. Serverabmeldung lässt Google unangetastet.
-- Google-Verbindungs-/Konto-Karten nur bei Alle Netze und Google, leere Apple-/Samsung-/Fusion-Filter zeigen wieder eine Leermeldung.
+- Kompakter Google-Kontoeinstieg in der Objekt-Werkzeugleiste statt großer Bannerkarte; Google-Verbindungs-/Konto-Elemente nur bei Alle Netze und Google, leere Apple-/Samsung-/Fusion-Filter zeigen wieder eine Leermeldung.
 - Automatisches Google-Sammeln pro Tracker/Konto pausierbar, bisherige Daten/Defaults bleiben erhalten; manuelle Abrufe möglich. Optionale iOS-BGAppRefresh-Versuche unabhängig vom eigenen Server, ohne Intervallgarantie.
 - UWB-Labor mit echten iOS-Hardwarefähigkeiten und experimenteller authentifizierter Google-Fähigkeitsabfrage (0x0A). Kein Ranging-Start, keine erfundenen Pfeile. Moto-Tag-/iPhone-Interoperabilität nicht nachgewiesen; technische Untersuchung dokumentiert.
 - Bluetooth-Schreib-/Antwortablauf wartet auf aktivierte Notifications und verwechselt einen Schreib-ACK nicht mit einer Antwort.
