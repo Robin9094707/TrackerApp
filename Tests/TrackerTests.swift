@@ -135,8 +135,15 @@ final class TrackerTests: XCTestCase {
         XCTAssertEqual(prepared.mapSegments.first?.points.first?.id, original.first?.id)
         XCTAssertEqual(prepared.mapSegments.first?.points.last?.id, original.last?.id)
         XCTAssertTrue(prepared.mapSegments.first?.points.contains(where: { $0.id == original[250].id }) == true)
-        XCTAssertEqual(prepared.mapPoints.count, 80)
-        XCTAssertEqual(prepared.indexByID[original[250].id], 250)
+        // Compact mode groups nearby reports in the list; indices address that list.
+        // The complete stream and exact report selection remain available in detailed mode.
+        XCTAssertLessThan(prepared.mapPoints.count, original.count)
+        XCTAssertEqual(prepared.mapPoints.first?.id, original.first?.id)
+        XCTAssertEqual(prepared.mapPoints.last?.id, original.last?.id)
+        XCTAssertEqual(prepared.indexByID[original.last!.id], prepared.mapPoints.count - 1)
+        let detailed = HistoryAnalysis.prepare(original, networks: ["apple"], detailed: true)
+        XCTAssertEqual(detailed.mapPoints.count, 500)
+        XCTAssertEqual(detailed.indexByID[original[250].id], 250)
         XCTAssertEqual(HistoryAnalysis.csv(prepared.points).components(separatedBy: "\r\n").count, 501)
     }
 
