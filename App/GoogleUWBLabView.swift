@@ -50,6 +50,14 @@ struct GoogleUWBLabView: View {
                 }
                 if let message { Text(message).font(.footnote).foregroundStyle(.orange).textSelection(.enabled) }
             }
+            if google.motorolaModel(deviceID) != nil {
+                Section("Motorola-Firmware") {
+                    NavigationLink { MotorolaFirmwareView(deviceID: deviceID) } label: {
+                        Label("Firmware auf dem Tag prüfen", systemImage: "arrow.down.circle")
+                    }
+                    Text("Ein Firmwareupdate allein bestätigt keine UWB-Kompatibilität mit diesem iPhone.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Section("Warum noch kein Pfeil?") {
                 Text("Google und Apple müssen dieselbe UWB-Sitzung aufbauen können. Für den Moto Tag ist eine funktionierende Verbindung zwischen Googles Sitzungsdaten und Apples Nearby Interaction derzeit nicht nachgewiesen. Ein vorhandener UWB-Chip allein reicht dafür nicht.").font(.footnote)
                 Text("Bei älterer Moto-Tag-Firmware kann auch die Fähigkeitsabfrage ausbleiben. Ein Fehler bedeutet deshalb nicht automatisch, dass der Tracker kein UWB hat.").font(.caption).foregroundStyle(.secondary)

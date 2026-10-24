@@ -67,6 +67,13 @@ struct NativeGoogleTrackerView: View {
                     }
                     NavigationLink { GoogleAccountView() } label: { Label("Aktualisierung & Google-Konto", systemImage: "arrow.triangle.2.circlepath") }
                 }
+                if google.motorolaModel(deviceID) != nil {
+                    Section("Motorola") {
+                        NavigationLink { MotorolaFirmwareView(deviceID: deviceID) } label: {
+                            Label("Moto-Tag-Firmware aktualisieren", systemImage: "arrow.down.circle")
+                        }.accessibilityIdentifier("motorola-firmware-link")
+                    }
+                }
                 Section("Verwalten") {
                     Button("Namen ändern", systemImage: "pencil") { name = tracker.name; editing = true }
                     Toggle("Verloren-Modus", isOn: Binding(get: { tracker.isLost }, set: { enabled in run { try await google.setLost(deviceID, enabled: enabled) } }))

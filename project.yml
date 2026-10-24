@@ -10,13 +10,19 @@ settings:
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "18.1"
     TARGETED_DEVICE_FAMILY: "1,2"
-    MARKETING_VERSION: "5.2.0"
-    CURRENT_PROJECT_VERSION: "20"
+    MARKETING_VERSION: "5.3.0"
+    CURRENT_PROJECT_VERSION: "21"
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Manual
     SWIFT_EMIT_LOC_STRINGS: YES
 
 packages:
+  NordicMCU:
+    url: https://github.com/nordicsemi/IOS-nRF-Connect-Device-Manager.git
+    revision: a0443b52b9db4f6524c6dd659bff7deb45a1b963
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation.git
+    exactVersion: 0.9.20
   SwiftECC:
     url: https://github.com/leif-ibsen/SwiftECC.git
     exactVersion: 5.4.0
@@ -65,6 +71,9 @@ targets:
     type: application
     platform: iOS
     dependencies:
+      - package: NordicMCU
+        product: iOSMcuManagerLibrary
+      - package: ZIPFoundation
       - target: SpotIntegration
         embed: true
     sources:
@@ -104,6 +113,7 @@ targets:
         excludes: [GoogleProtocolChecks.swift, GoogleMigrationCheck.swift]
     dependencies:
       - target: RJTracker
+      - package: ZIPFoundation
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: eu.rjuhas.rjtracker.tests

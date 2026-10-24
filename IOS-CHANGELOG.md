@@ -1,3 +1,12 @@
+## 5.3.0 · Motorola-Originalfirmware auf iOS (experimentell)
+
+- Motorola-Modelle anhand bekannter Fast-Pair-Kennungen erkennen; Firmwareansicht am eigenen Google-Tracker und im UWB-Labor.
+- Original-APKM/APK/BIN importieren, sichere Extraktion und exakte SHA-256-Freigabe für XT2445-1 / 2.0.104.
+- Bestätigten Google-Eigentümer, identisches Motorola-Modell, ältere Firmware und mindestens 30 % Batterie vor jedem Update prüfen.
+- Nativer SMP-Updater mit Bluetooth-Fortschritt, Upload-Abbruch und Versionskontrolle nach Neustart; Funkpfad ohne Hardware unbestätigt.
+- XT2561-1-Installation, automatische neueste Motorola-CDS-Downloads und Google-UWB-Pfeilortung weiterhin nicht verfügbar. Keine vorgetäuschte Unterstützung.
+- Bestehende Daten, App-ID und Start-/Release-Pflichtprüfungen bleiben erhalten. [Details](docs/UPGRADE-5.3.0.md).
+
 # 5.2.0 – lokaler Server-Notbetrieb, Filter und UWB-Labor
 
 - Gespeicherter lokaler Google-Zugang öffnet die Hauptansicht unabhängig vom Server-Verbindungsstatus, auch beim Wiederherstellen. Neuer standardmäßig aktiver lokaler Fallback; altes `native.localMode=false` blockiert ihn nicht.

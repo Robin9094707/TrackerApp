@@ -132,6 +132,34 @@ final class TrackerUITests: XCTestCase {
     }
 
     @MainActor
+    func testMotorolaFirmwareScreenRequiresOriginalAndHardwareBeforeInstall() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-local-google", "--ui-test-motorola",
+            "-tracker.provider", "google", "-serverURL", "https://offline.example.invalid"]
+        app.launch()
+        expandInspector(app)
+        let tag = app.buttons["tracker-row-google:demo-local-tag"]
+        XCTAssertTrue(tag.waitForExistence(timeout: 20)); tag.tap()
+        expandInspector(app)
+        let firmware = app.buttons["motorola-firmware-link"]
+        for _ in 0..<10 {
+            if firmware.exists && firmware.isHittable { break }
+            if app.collectionViews.firstMatch.exists { app.collectionViews.firstMatch.swipeUp() }
+            else { app.swipeUp() }
+        }
+        XCTAssertTrue(firmware.exists); firmware.tap()
+        XCTAssertTrue(app.staticTexts["motorola-firmware-hardware-limit"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["motorola-firmware-import"].exists)
+        let install = app.buttons["motorola-firmware-install"]
+        for _ in 0..<8 {
+            if install.exists && install.isHittable { break }
+            if app.collectionViews.firstMatch.exists { app.collectionViews.firstMatch.swipeUp() }
+            else { app.swipeUp() }
+        }
+        XCTAssertTrue(install.exists); XCTAssertFalse(install.isEnabled)
+        capture("Motorola-Firmware-Needs-Original-And-Hardware")
+    }
+
     func testGoogleIsAccessibleWhileServerRestoresAndUWBLabDoesNotPromiseRanging() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-local-google", "--ui-testing-restoring",

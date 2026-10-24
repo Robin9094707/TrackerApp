@@ -31,6 +31,7 @@ open class BluetoothManager: NSObject, CBPeripheralDelegate, CBCentralManagerDel
     /// The requests queue
     private var requests = [BluetoothRequest]()
     private var writeReadStarted = Set<UUID>()
+    private var firmwareReservations = Set<UUID>()
 
     /// The central manager
     var centralManager: CBCentralManager?
@@ -123,9 +124,32 @@ open class BluetoothManager: NSObject, CBPeripheralDelegate, CBCentralManagerDel
         }
     }
 
+    // Serialize the handoff to the dedicated Motorola/SMP transport. Background
+    // scans may continue, but must never reconnect or enqueue commands to this tag.
+    func reserveForFirmware(_ id: UUID) async {
+        await withCheckedContinuation { continuation in
+            bluetoothQueue.async { [self] in
+                firmwareReservations.insert(id)
+                for request in requests.filter({ $0.deviceID == id.uuidString }) {
+                    finishRequest(request: request, withState: .Failure, peripheral: nil)
+                }
+                if let peripheral = centralManager?.retrievePeripherals(withIdentifiers: [id]).first {
+                    centralManager?.cancelPeripheralConnection(peripheral)
+                }
+                continuation.resume()
+            }
+        }
+    }
+    func releaseFromFirmware(_ id: UUID) {
+        bluetoothQueue.async { [self] in firmwareReservations.remove(id) }
+    }
+
     /// Adds a bluetooth request to the queue. -- This needs to run on MAIN thread!
     func addRequest(request: BluetoothRequest) {
         bluetoothQueue.async { [self] in
+            if let id = UUID(uuidString: request.deviceID), firmwareReservations.contains(id) {
+                request.callback(.Failure, nil); return
+            }
             if !turnedOn {
                 finishRequest(request: request, withState: .Timeout, peripheral: nil)
                 return
@@ -323,6 +347,7 @@ open class BluetoothManager: NSObject, CBPeripheralDelegate, CBCentralManagerDel
 
     /// Found new device via scan
     public func centralManager(_: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
+        guard !firmwareReservations.contains(peripheral.identifier) else { return }
         if let id = rssiScanForDevice?.bluetoothDevice, peripheral.identifier.uuidString != id {
             return
         }
@@ -424,6 +449,7 @@ open class BluetoothManager: NSObject, CBPeripheralDelegate, CBCentralManagerDel
 
     /// Connected successfully to device
     public func centralManager(_: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        guard !firmwareReservations.contains(peripheral.identifier) else { centralManager?.cancelPeripheralConnection(peripheral); return }
         let device = storePeripheral(peripheral: peripheral)
 
         device.connected_background = true

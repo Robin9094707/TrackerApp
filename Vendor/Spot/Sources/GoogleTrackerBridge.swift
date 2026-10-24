@@ -62,6 +62,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
     private var restored = false
     private var generation = UUID()
     private var uwbProbes = Set<String>()
+    @Published public private(set) var firmwareDeviceID: String?
     @Published public var backgroundHistoryEnabled: Bool {
         didSet { preferences.set(backgroundHistoryEnabled, forKey: "native.backgroundHistoryEnabled") }
     }
@@ -104,6 +105,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
     public func setFavorite(_ id: String, enabled: Bool) { preferences.set(enabled, forKey: favoriteKey(id)); objectWillChange.send() }
     private func favoriteKey(_ id: String) -> String { "native.favorite." + SHA256.hash(data: Data(((account ?? "") + id).utf8)).hex }
     private func device(_ id: String) throws -> LocalFindMyDevice {
+        guard firmwareDeviceID != id else { throw googleError("Der Moto Tag wird gerade für ein Firmwareupdate verwendet.") }
         guard let device = Settings.sharedInstance.devicesList?.first(where: { $0.id == id }), device.belongsToCurrentAccount else { throw googleError("Google-Tracker ist noch nicht geladen.") }
         return device
     }
@@ -166,12 +168,14 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         cookie.name == "oauth_token" && ["accounts.google.com", ".google.com", "google.com"].contains(cookie.domain)
     }
     public func prepareLogin() async throws -> URL {
+        guard firmwareDeviceID == nil else { throw googleError("Bitte zuerst die Motorola-Aktualisierung beenden.") }
         statusMessage = "Google-Verbindung vorbereiten …"
         defer { statusMessage = nil }
         try await PushReceiver.sharedInstance.prepare()
         return URL(string: "https://accounts.google.com/EmbeddedSetup")!
     }
     public func finishLogin(oauthToken: String) async throws {
+        guard firmwareDeviceID == nil else { throw googleError("Bitte zuerst die Motorola-Aktualisierung beenden.") }
         try await PushReceiver.sharedInstance.prepare()
         guard let id = PushReceiver.sharedInstance.getAndroidId() else { throw googleError("Google-Geräteregistrierung fehlt. Bitte erneut versuchen.") }
         let response: [String: String] = try await googleCallback { done in
@@ -271,6 +275,55 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
             }
         }
     }
+    public func motorolaModel(_ id: String) -> MotorolaTagModel? {
+        #if DEBUG
+        if uiTestState && CommandLine.arguments.contains("--ui-test-motorola") && id == "demo-local-tag" { return .firstGeneration }
+        #endif
+        guard let target = Settings.sharedInstance.devicesList?.first(where: { $0.id == id && $0.belongsToCurrentAccount }),
+              !target.isCustomTracker else { return nil }
+        return MotorolaTagModel.identify(target.fastPairModelID)
+    }
+    public func beginMotorolaFirmwareAccess(_ id: String) async throws -> MotorolaFirmwareTarget {
+        guard firmwareDeviceID == nil else { throw googleError("Eine Motorola-Prüfung oder Aktualisierung läuft bereits.") }
+        let target = try device(id)
+        guard let model = motorolaModel(id), let key = target.accountKey,
+              let bluetooth = target.bluetoothData, !deviceNotCurrentlyReachable(device: bluetooth, currentDate: Date()),
+              let uuid = UUID(uuidString: bluetooth.identifier_background) else {
+            throw googleError("Eigenen Motorola-Tag in Bluetooth-Reichweite bringen und Google-Schlüssel entsperren.")
+        }
+        let token = generation
+        firmwareDeviceID = id
+        do {
+            let _: Bool = try await googleCallback(seconds: 35) { done in
+                let read = BluetoothRequest.readCharacteristic(deviceID: uuid.uuidString, serviceID: Constants.FastPairService,
+                    characteristicID: Constants.FastPairBeaconActionsCharacteristic, stayConnected: true) { state, authentication in
+                    guard state == .Success, let authentication else { done(.failure(googleError("Moto Tag antwortet nicht auf die Authentifizierung."))); return }
+                    do {
+                        let packet = try MotorolaOwnerProof.request(authentication: authentication, key: key)
+                        let write = BluetoothRequest.writeReadCharacteristic(deviceID: uuid.uuidString, serviceID: Constants.FastPairService,
+                            characteristicID: Constants.FastPairBeaconActionsCharacteristic, data: packet) { state, response in
+                            guard state == .Success, let response else { done(.failure(googleError("Eigentümerbestätigung des Moto Tag fehlt."))); return }
+                            do { try MotorolaOwnerProof.verify(response, authentication: authentication, key: key); done(.success(true)) }
+                            catch { done(.failure(error)) }
+                        }
+                        BluetoothManager.sharedInstance.addRequest(request: write)
+                    } catch { done(.failure(error)) }
+                }
+                BluetoothManager.sharedInstance.addRequest(request: read)
+            }
+            guard token == generation, target.belongsToCurrentAccount else { throw CancellationError() }
+            await BluetoothManager.sharedInstance.reserveForFirmware(uuid)
+            return MotorolaFirmwareTarget(deviceID: id, peripheralID: uuid, model: model,
+                fastPairModelID: target.fastPairModelID.lowercased(), generation: token)
+        } catch { firmwareDeviceID = nil; throw error }
+    }
+    public func motorolaAccessIsCurrent(_ target: MotorolaFirmwareTarget) -> Bool {
+        firmwareDeviceID == target.deviceID && generation == target.generation && hasCredentials
+    }
+    public func endMotorolaFirmwareAccess(_ target: MotorolaFirmwareTarget) {
+        BluetoothManager.sharedInstance.releaseFromFirmware(target.peripheralID)
+        if firmwareDeviceID == target.deviceID { firmwareDeviceID = nil }
+    }
     public func probeUWBCapabilities(_ id: String) async throws -> GoogleUWBCapabilities {
         let target = try device(id)
         guard uwbProbes.insert(id).inserted else { throw googleError("Eine UWB-Prüfung läuft bereits für diesen Tracker.") }
@@ -318,6 +371,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         BluetoothManager.sharedInstance.disableFastScan()
     }
     public func repairConnection() async throws {
+        guard firmwareDeviceID == nil else { throw googleError("Bitte zuerst die Motorola-Aktualisierung beenden.") }
         generation = UUID(); locating.removeAll()
         try await PushReceiver.sharedInstance.prepare(force: true)
         await refresh()
@@ -385,6 +439,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         TokenManager.sharedInstance.ownerKeyVersion = Int(info.encryptedOwnerKeyAndMetadata.ownerKeyVersion)
     }
     public func importSecrets(_ data: Data) async throws {
+        guard firmwareDeviceID == nil else { throw googleError("Bitte zuerst die Motorola-Aktualisierung beenden.") }
         guard data.count <= 2_000_000, let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let email = json["username"] as? String, email.contains("@"), let token = json["aas_token"] as? String, !token.isEmpty else { throw googleError("username und aas_token fehlen in der JSON-Datei.") }
         func key(_ name: String) throws -> String? {
@@ -409,6 +464,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         publishSnapshots(); await refresh(); restartPolling()
     }
     public func signOut() {
+        guard firmwareDeviceID == nil else { errorMessage = "Bitte zuerst die Motorola-Aktualisierung beenden."; return }
         generation = UUID(); polling?.cancel(); polling = nil; locating.removeAll()
         Settings.sharedInstance.devicesList = nil
         TokenManager.sharedInstance.deleteTokens(); restored = false; publishSnapshots()
