@@ -14,20 +14,22 @@ struct MoreView: View {
                 }.padding(.vertical, 8)
                 SyncStatusView()
             }
-            if model.connectionState != .connected {
-                Section { Button("Mit Tracker-Server verbinden", systemImage: "network") { model.localMode = false } }
+            if !model.serverActionsAvailable {
+                Section { Button("Mit Tracker-Server verbinden", systemImage: "network") { model.showingServerConnection = true } }
             }
+            if model.serverActionsAvailable {
             Section("Konto") {
                 NavigationLink { AccountManagementView() } label: { Label("Konto & Sicherheit", systemImage: "person.badge.shield.checkmark") }
                 NavigationLink { InternalSharesView() } label: { Label("Interne Freigaben", systemImage: "person.2") }
             }
-            Section("Google Find Hub") { GoogleLauncherCard() }
+            }
+            if model.showsGoogleControls { Section("Google Find Hub") { GoogleLauncherCard() } }
+            if model.serverActionsAvailable {
             Section("Meine Objekte") {
                 NavigationLink { GroupsView() } label: { Label("Gruppen", systemImage: "folder") }
                 NavigationLink { ArchiveView() } label: { Label("Archiv & ausgeblendete Objekte", systemImage: "archivebox") }
             }
             Section {
-                NavigationLink { SettingsView() } label: { Label("Einstellungen", systemImage: "gearshape") }
                 NavigationLink { SystemStatusView() } label: { Label("Serverzentrale", systemImage: "waveform.path.ecg") }
                 NavigationLink { ProviderSetupView() } label: { Label("Accounts, Import & Fusionen", systemImage: "plus.circle.fill") }
                 NavigationLink { ClientAccessView() } label: { Label("Geräte & API-Schlüssel", systemImage: "key.horizontal") }
@@ -37,12 +39,16 @@ struct MoreView: View {
                 NavigationLink { MCPManagementView() } label: { Label("ChatGPT / MCP", systemImage: "bubble.left.and.text.bubble.right") }
                 NavigationLink { BackupsManagementView() } label: { Label("Backups & Wiederherstellung", systemImage: "externaldrive.badge.timemachine") }
                 NavigationLink { NetworkComparisonView() } label: { Label("Netzwerkvergleich", systemImage: "chart.bar.xaxis") }
-                NavigationLink { GoogleRepairView() } label: { Label("Google-Reparatur", systemImage: "wrench.and.screwdriver") }
+                if model.showsGoogleControls { NavigationLink { GoogleRepairView() } label: { Label("Google-Reparatur", systemImage: "wrench.and.screwdriver") } }
                 NavigationLink { StorageCleanupView() } label: { Label("Speicher bereinigen", systemImage: "externaldrive.badge.minus") }
                 NavigationLink { GlobalPollingView() } label: { Label("Automatische Ortung", systemImage: "pause.circle") }
             }
+            }
+            Section {
+                NavigationLink { SettingsView() } label: { Label("Einstellungen", systemImage: "gearshape") }
+            }
             Section("Erweitert") {
-                NavigationLink { AdvancedToolsView() } label: { Label("API-Werkzeuge", systemImage: "terminal") }
+                if model.serverActionsAvailable { NavigationLink { AdvancedToolsView() } label: { Label("API-Werkzeuge", systemImage: "terminal") } }
                 NavigationLink { DebugConsoleView() } label: { Label("Diagnoseprotokoll", systemImage: "ladybug") }
             }
             Section {

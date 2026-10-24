@@ -43,6 +43,8 @@ struct NativeGoogleTrackerView: View {
                     Button("Klingeln lassen", systemImage: "speaker.wave.2.fill") { run { try await google.ring(deviceID); message = tracker.nearby ? "Bluetooth-Klingeln bestätigt." : "Klingeln bei Google angefragt." } }
                     Button("Google-Klingelanfrage stoppen", systemImage: "speaker.slash") { run { try await google.ring(deviceID, stop: true) } }
                     NavigationLink { GoogleNearbyView(deviceID: deviceID) } label: { Label("In der Nähe suchen", systemImage: "dot.radiowaves.left.and.right") }
+                    NavigationLink { GoogleUWBLabView(deviceID: deviceID) } label: { Label("UWB prüfen · experimentell", systemImage: "dot.scope") }
+                        .accessibilityIdentifier("google-uwb-lab")
                     if let lat = tracker.latitude, let lon = tracker.longitude {
                         Button("Route öffnen", systemImage: "arrow.triangle.turn.up.right.diamond") {
                             MKMapItem(placemark: MKPlacemark(coordinate: .init(latitude: lat, longitude: lon))).openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking])
@@ -50,6 +52,8 @@ struct NativeGoogleTrackerView: View {
                     }
                 }
                 Section {
+                    Toggle("Verlauf automatisch sammeln", isOn: Binding(get: { tracker.historyEnabled }, set: { google.setHistoryEnabled(deviceID, enabled: $0) }))
+                    Text("Automatische Abrufe verwenden das Intervall in den Google-Einstellungen. Manuelle Einzelabrufe bleiben möglich und werden ebenfalls gespeichert.").font(.caption).foregroundStyle(.secondary)
                     NavigationLink { NativeGoogleHistoryView(deviceID: deviceID) } label: { Label("Alle \(tracker.reportCount) Reports ansehen", systemImage: "clock.arrow.circlepath") }
                         .accessibilityIdentifier("tracker-history-link")
                     if let serverTracker = model.bootstrap?.trackers.first(where: { $0.provider == "google" && $0.apiID == deviceID }) {

@@ -15,7 +15,7 @@ struct ProviderSetupView: View {
             Section("Accounts & Import") {
                 NavigationLink { AppleAccountSetupView() } label: { provider("Apple Account", "apple", "apple.logo") }
                 NavigationLink { TrackerImportView(provider: "apple") } label: { Label("Apple-Tracker aus JSON importieren", systemImage: "square.and.arrow.down") }
-                NavigationLink { GoogleSetupView() } label: { provider("Google Find Hub", "google", "network") }
+                if model.showsGoogleControls { NavigationLink { GoogleSetupView() } label: { provider("Google Find Hub", "google", "network") } }
                 NavigationLink { SamsungSetupView() } label: { provider("Samsung SmartThings", "samsung", "tag.fill") }
             }
             Section("Objekte") {

@@ -79,6 +79,10 @@
 			<string>Editor</string>
 		</dict>
 	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array><string>eu.rjuhas.rjtracker.google-history</string></array>
+	<key>NSNearbyInteractionUsageDescription</key>
+	<string>Prüfe die Möglichkeiten zur präzisen Nahortung deiner eigenen Tracker.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Finde deine eigenen Google-Tracker in der Nähe und lasse sie klingeln.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

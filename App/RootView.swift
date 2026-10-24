@@ -8,21 +8,20 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            switch model.connectionState {
-            case .restoring:
-                RJLaunchView().transition(.opacity)
-            case .disconnected:
-                if google.hasCredentials && model.localMode { MainTabView() }
-                else { ConnectionView() }
-            case .connecting, .needsTwoFactor:
-                ConnectionView()
-            case .connected:
-                MainTabView().transition(.opacity)
-            }
+            if model.showsMainInterface(localGoogleCredentials: google.hasCredentials) {
+                MainTabView()
+            } else if model.connectionState == .restoring { RJLaunchView().transition(.opacity) }
+            else { ConnectionView() }
+        }
+        .sheet(isPresented: Binding(get: { model.showingServerConnection }, set: { model.showingServerConnection = $0 })) {
+            ConnectionView(allowsClosing: true)
+        }
+        .onChange(of: model.connectionState) { _, state in
+            if state == .connected { model.showingServerConnection = false }
         }
         .tint(.blue)
         .animation(reduceMotion ? nil : .smooth(duration: 0.35), value: model.connectionState)
-        .alert("RJ Tracker", isPresented: Binding(get: { model.connectionState != .connected && model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
+        .alert("RJ Tracker", isPresented: Binding(get: { !model.showsMainInterface(localGoogleCredentials: google.hasCredentials) && model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK") { model.errorMessage = nil }
         } message: {
             Text(model.errorMessage ?? "")

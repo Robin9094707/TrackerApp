@@ -260,7 +260,7 @@ final class APIClient {
         if !query.isEmpty { components.queryItems = query }
         guard let url = components.url else { throw APIError.message("Ungültige API-URL.") }
         let slowOperation = path.contains("/backups") || path.contains("/cleanup") || path.contains("/tools") || path.contains("/import") || path.contains("/auth/complete") || path == "/api/login"
-        let timeout: TimeInterval = slowOperation ? 180 : (path.hasSuffix("/history") ? 60 : 25)
+        let timeout: TimeInterval = path == "/api/mobile/v1/session" ? 8 : (slowOperation ? 180 : (path.hasSuffix("/history") ? 60 : 25))
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         request.httpMethod = method.uppercased()
         request.setValue("application/json", forHTTPHeaderField: "Accept")

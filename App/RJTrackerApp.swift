@@ -14,8 +14,12 @@ struct RJTrackerApp: App {
                 .preferredColorScheme(appearance == "dark" ? .dark : appearance == "light" ? .light : nil)
                 .task { try? ImportStorage.prepare(); await model.start() }
                 .task { await GoogleTrackerStore.shared.restoreIfNeeded() }
-                .onChange(of: scenePhase) { _, phase in GoogleTrackerStore.shared.sceneChanged(active: phase == .active) }
+                .onChange(of: scenePhase) { _, phase in
+                    GoogleTrackerStore.shared.sceneChanged(active: phase == .active)
+                    if phase == .background { GoogleBackgroundRefresh.scheduleIfNeeded() }
+                }
         }
+        .backgroundTask(.appRefresh(GoogleBackgroundRefresh.identifier)) { await GoogleBackgroundRefresh.run() }
     }
 }
 

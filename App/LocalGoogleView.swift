@@ -59,7 +59,7 @@ struct GoogleAccountView: View {
                     .font(.subheadline).foregroundStyle(.secondary)
                 if google.hasCredentials {
                     if model.connectionState != .connected {
-                        Button("Google in der Objektübersicht nutzen", systemImage: "map") { model.localMode = true; dismiss() }
+                        Button("Google in der Objektübersicht nutzen", systemImage: "map") { model.useLocalGoogle(); dismiss() }
                     }
                     Button("Google-Verbindung reparieren", systemImage: "wrench.and.screwdriver") { run { try await google.repairConnection() } }
                     Button("Google-Anmeldung erneuern", systemImage: "person.badge.key.fill") { run { auth = GoogleAuthDestination(url: try await google.prepareLogin(), recovery: false) } }
@@ -88,6 +88,9 @@ struct GoogleAccountView: View {
                     }
                     Text("Jeder Abruf sammelt alle passenden Meldungen im Empfangsfenster. Google bestimmt, wann neue Standorte vorliegen. iOS begrenzt Hintergrundaktivität.")
                         .font(.caption).foregroundStyle(.secondary)
+                    Toggle("Verlauf auch im Hintergrund anfragen", isOn: $google.backgroundHistoryEnabled)
+                        .onChange(of: google.backgroundHistoryEnabled) { _, _ in GoogleBackgroundRefresh.scheduleIfNeeded() }
+                    Text("iOS entscheidet, wann und wie lange Hintergrundabrufe möglich sind. Ein festes Intervall im Hintergrund ist nicht garantiert.").font(.caption).foregroundStyle(.secondary)
                     Button("Bluetooth-Nahsuche aktivieren", systemImage: "dot.radiowaves.left.and.right") { google.requestBluetooth() }
                 }
                 Section("Google-Geräte") {

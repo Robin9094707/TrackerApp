@@ -18,6 +18,7 @@ struct SettingsView: View {
                     }.pickerStyle(.segmented)
                     Text("Die App folgt außerdem deinen Einstellungen für größere Schrift und reduzierte Bewegung.").font(.footnote).foregroundStyle(.secondary)
                 }.rjCard()
+                if model.showsGoogleControls { localGoogleCard }
                 connectionCard
                 notificationCard
                 securityCard
@@ -35,15 +36,26 @@ struct SettingsView: View {
         }
     }
 
+    private var localGoogleCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Google ohne eigenen Server").font(.headline)
+            Toggle("Bei Serverausfall lokal weiterarbeiten", isOn: Binding(get: { model.localGoogleFallbackEnabled }, set: { model.localGoogleFallbackEnabled = $0 }))
+                .accessibilityIdentifier("google-local-fallback")
+            Text("Deine gespeicherte Google-Anmeldung, lokale Verläufe und Bluetooth-Suche bleiben unabhängig von deinem Server. Neue Google-Netzwerkmeldungen benötigen Internet. Hintergrundabrufe hängen von iOS ab.").font(.footnote).foregroundStyle(.secondary)
+        }.rjCard()
+    }
+
     private var connectionCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 RJSectionTitle(title: "Verbindung", subtitle: "Aktive Server-Sitzung", symbol: "network")
                 Spacer()
-                RJStatusPill(text: "Verbunden", symbol: "checkmark.circle.fill", tint: .green)
+                RJStatusPill(text: model.serverActionsAvailable ? "Verbunden" : "Nicht verbunden", symbol: model.serverActionsAvailable ? "checkmark.circle.fill" : "wifi.exclamationmark", tint: model.serverActionsAvailable ? .green : .orange)
             }
             Divider()
-            LabeledContent("Server", value: model.serverURL)
+            LabeledContent("Server", value: model.serverURL.isEmpty ? "Optional · nicht eingerichtet" : model.serverURL)
+            Button("Server-Anmeldung öffnen") { model.showingServerConnection = true }
+            Button("Verbindung erneut prüfen") { Task { await model.retryServerConnection() } }
             LabeledContent("Benutzer", value: model.bootstrap?.session?.user?.displayName ?? model.username)
             if let date = model.lastRefresh {
                 LabeledContent("Letzte Synchronisierung") {

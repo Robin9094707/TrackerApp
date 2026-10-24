@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct ConnectionView: View {
+    var allowsClosing = false
+    @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var model
     @State private var password = ""
     @State private var code = ""
@@ -16,7 +18,7 @@ struct ConnectionView: View {
                 ScrollView {
                     VStack(spacing: 22) {
                         hero
-                        GoogleLauncherCard().padding(16).rjCompactCard()
+                        if model.showsGoogleControls { GoogleLauncherCard().padding(16).rjCompactCard() }
                         connectionCard
                         privacyCard
                     }
@@ -26,6 +28,9 @@ struct ConnectionView: View {
                 }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar {
+                if allowsClosing { ToolbarItem(placement: .cancellationAction) { Button("Schließen") { dismiss() } } }
+            }
         }
     }
 

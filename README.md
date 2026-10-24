@@ -1,3 +1,15 @@
+# RJ Tracker 5.2.0
+
+Google direkt auf dem iPhone bleibt bei Ausfall des optionalen Tracker-Servers erreichbar. Google-Bedienelemente erscheinen nur bei Alle Netze/Google. Pro Tracker pausierbare automatische Verlaufsabfrage, optionale iOS-Hintergrundversuche und ein experimentelles UWB-Prüflabor.
+
+**Moto Tag 1: Keine funktionierende UWB-Pfeilortung bestätigt.** Das Labor prüft Gerätefähigkeiten; es zeigt keine erfundenen Richtungen oder Entfernungen. [Technische Untersuchung](docs/UWB-INVESTIGATION.md).
+
+[Installation und Nutzung 5.2.0](docs/UPGRADE-5.2.0.md) · [Changelog](IOS-CHANGELOG.md)
+
+Die Action erzeugt `RJ-Tracker-v5.2.0-unsigned.ipa` und `SHA256SUMS.txt` nach allen Pflichtprüfungen. Zum Update dieselbe Bundle-ID/Signierungsidentität beibehalten und die bestehende App nicht vorher löschen. iOS 18.1+, Backend unverändert kompatibel.
+
+---
+
 # RJ Tracker 5.1.2
 
 Native iPhone-/iPad-App für Apple-, Google-, Samsung- und Fusion-Tracker, mit Google Find Hub direkt auf dem Gerät. Mindestversion: iOS 18.1.
@@ -86,7 +98,7 @@ Neue Passkeys und Passkey-Anmeldung starten direkt aus der App einen Sicherheits
 
 ## IPA-Build
 
-GitHub Actions baut bei Push nach `main` die Release-App und erzeugt `RJ-Tracker-v5.1.2-unsigned.ipa` mit SHA-256-Prüfsumme. Backend-, Protokoll-, Migrations- sowie Debug- und Release-Startprüfungen sind Pflicht. Die Release-Startprüfung nutzt ein eigenes Scheme ohne Debug-Unit-Test-Abhängigkeiten.
+GitHub Actions baut bei Push nach `main` die Release-App und erzeugt `RJ-Tracker-v5.2.0-unsigned.ipa` mit SHA-256-Prüfsumme. Backend-, Protokoll-, Migrations- sowie Debug- und Release-Startprüfungen sind Pflicht. Die Release-Startprüfung nutzt ein eigenes Scheme ohne Debug-Unit-Test-Abhängigkeiten.
 
 Die IPA ist **unsigniert** und muss für das iPhone mit einem geeigneten Profil signiert werden. APNs benötigt zusätzlich die bestehenden Servervariablen für Team-ID, Key-ID und `.p8` sowie passende App-Entitlements beim Signieren.
 

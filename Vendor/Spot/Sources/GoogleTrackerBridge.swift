@@ -18,6 +18,7 @@ public struct GoogleTrackerSnapshot: Identifiable, Equatable {
     public let nearby: Bool
     public let battery: String?
     public let reportCount: Int
+    public let historyEnabled: Bool
     public let unlocked: Bool
     public let isLost: Bool
     public let sharedWith: [String]
@@ -60,11 +61,20 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
     private var active = true
     private var restored = false
     private var generation = UUID()
+    private var uwbProbes = Set<String>()
+    @Published public var backgroundHistoryEnabled: Bool {
+        didSet { preferences.set(backgroundHistoryEnabled, forKey: "native.backgroundHistoryEnabled") }
+    }
+    #if DEBUG
+    private var uiTestState = false
+    #endif
+    private var lastReportRequest = Date.distantPast
     private var lastCatalog = Date.distantPast
     private var lastMaintenance = Date.distantPast
     nonisolated public static func validInterval(_ value: Int) -> Int { [0, 60, 120, 300, 900].contains(value) ? value : 60 }
 
     private init() {
+        backgroundHistoryEnabled = preferences.bool(forKey: "native.backgroundHistoryEnabled")
         refreshInterval = Self.validInterval(preferences.object(forKey: "native.refreshInterval") as? Int ?? 60)
         contributorMode = preferences.string(forKey: "native.contributorMode") ?? "AtAllAreas"
         Settings.sharedInstance.contributorType = ContributorType(rawValue: contributorMode) ?? .AtAllAreas
@@ -106,7 +116,16 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
                 kind: String(describing: report.status), own: report.isOwnReport, label: report.name)
         }
     }
+    public func setHistoryEnabled(_ id: String, enabled: Bool) {
+        guard let account, hasDevice(id) else { return }
+        GoogleCollectionPreferences.set(enabled, account: account, deviceID: id, defaults: preferences)
+        publishSnapshots()
+        if enabled, refreshInterval > 0 { try? locate(id) }
+    }
     private func publishSnapshots() {
+        #if DEBUG
+        if uiTestState { return }
+        #endif
         account = TokenManager.sharedInstance.username
         hasCredentials = TokenManager.sharedInstance.aasToken != nil
         needsKeys = hasCredentials && TokenManager.sharedInstance.ownerKey == nil
@@ -119,12 +138,15 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
             return GoogleTrackerSnapshot(id: device.id, name: device.userDefinedName, imageURL: device.imageURL,
                 latitude: location?.latitude, longitude: location?.longitude, accuracy: report?.accuracy.map(Double.init),
                 reportedAt: report?.time, nearby: nearby, battery: device.batteryState == .Unknown ? nil : device.batteryState.rawValue,
-                reportCount: reports.count, unlocked: device.eik != nil, isLost: device.isLost,
+                reportCount: reports.count, historyEnabled: GoogleCollectionPreferences.enabled(account: account ?? "", deviceID: device.id, defaults: preferences), unlocked: device.eik != nil, isLost: device.isLost,
                 sharedWith: device.sharingSettings.usersWithAccess, signal: nearby ? device.bluetoothData?.rssi_publisher : nil)
         }
         if snapshots != trackers { trackers = snapshots }
     }
     public func restoreIfNeeded() async {
+        #if DEBUG
+        if uiTestState { return }
+        #endif
         guard !restored else { return }; restored = true
         if hasCredentials {
             if let cached = GoogleReportArchive.catalog() { await processDeviceList(list: cached.deviceMetadata) }
@@ -173,6 +195,9 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
     }
 
     public func refresh() async {
+        #if DEBUG
+        if uiTestState { return }
+        #endif
         guard !isRefreshing, hasCredentials else { return }
         isRefreshing = true; errorMessage = nil
         let generation = self.generation
@@ -220,13 +245,18 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
             self.publishSnapshots()
         }
     }
-    public func requestReportsForAll() {
-        for tracker in trackers { try? locate(tracker.id) }
+    public func requestReportsForAll(automatic: Bool = true) {
+        lastReportRequest = .now
+        for tracker in trackers where !automatic || tracker.historyEnabled { try? locate(tracker.id) }
     }
     public func sceneChanged(active: Bool) {
         self.active = active
         if hasCredentials { Settings.sharedInstance.isBackground = !active }
         restartPolling()
+        if active, hasCredentials, refreshInterval > 0,
+           Date().timeIntervalSince(lastReportRequest) >= Double(Self.validInterval(refreshInterval)) {
+            requestReportsForAll()
+        }
     }
     private func restartPolling() {
         polling?.cancel(); polling = nil
@@ -241,13 +271,52 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
             }
         }
     }
+    public func probeUWBCapabilities(_ id: String) async throws -> GoogleUWBCapabilities {
+        let target = try device(id)
+        guard uwbProbes.insert(id).inserted else { throw googleError("Eine UWB-Prüfung läuft bereits für diesen Tracker.") }
+        defer { uwbProbes.remove(id) }
+        guard let bluetoothID = target.bluetoothData?.identifier_background,
+              let key = target.accountKey else { throw googleError("Tracker zuerst in Bluetooth-Reichweite bringen und Google-Schlüssel entsperren.") }
+        let generation = self.generation
+        let result: GoogleUWBCapabilities = try await googleCallback(seconds: 35) { done in
+            let read = BluetoothRequest.readCharacteristic(deviceID: bluetoothID, serviceID: Constants.FastPairService,
+                characteristicID: Constants.FastPairBeaconActionsCharacteristic, stayConnected: true) { state, authentication in
+                guard state == .Success, let authentication else {
+                    done(.failure(googleError("Die Bluetooth-Authentifizierung hat nicht geantwortet."))); return
+                }
+                do {
+                    let payload = try GoogleUWBProbe.request(authentication: authentication, accountKey: key)
+                    let request = BluetoothRequest.writeReadCharacteristic(deviceID: bluetoothID, serviceID: Constants.FastPairService,
+                        characteristicID: Constants.FastPairBeaconActionsCharacteristic, data: payload) { state, packet in
+                        guard state == .Success, let packet else {
+                            done(.failure(googleError("Keine bestätigte Antwort auf die experimentelle UWB-Abfrage. Das beweist nicht, dass der Tracker kein UWB hat."))); return
+                        }
+                        do { done(.success(try GoogleUWBProbe.response(packet, authentication: authentication, accountKey: key))) }
+                        catch { done(.failure(error)) }
+                    }
+                    BluetoothManager.sharedInstance.addRequest(request: request)
+                } catch { done(.failure(error)) }
+            }
+            BluetoothManager.sharedInstance.addRequest(request: read)
+        }
+        guard generation == self.generation, target.belongsToCurrentAccount else { throw CancellationError() }
+        return result
+    }
     public func beginNearby(_ id: String) {
+        #if DEBUG
+        if uiTestState { return }
+        #endif
         BluetoothManager.sharedInstance.startCentralManager()
         let identifier = try? device(id).bluetoothData?.identifier_background
         let uuids: [UUID] = identifier.flatMap { $0 }.flatMap { UUID(uuidString: $0) }.map { [$0] } ?? []
         BluetoothManager.sharedInstance.enableFastScan(for: RSSIScan(service: Constants.FindMyDeviceService), allowedUUIDs: uuids)
     }
-    public func endNearby() { BluetoothManager.sharedInstance.disableFastScan() }
+    public func endNearby() {
+        #if DEBUG
+        if uiTestState { return }
+        #endif
+        BluetoothManager.sharedInstance.disableFastScan()
+    }
     public func repairConnection() async throws {
         generation = UUID(); locating.removeAll()
         try await PushReceiver.sharedInstance.prepare(force: true)
@@ -344,4 +413,15 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         Settings.sharedInstance.devicesList = nil
         TokenManager.sharedInstance.deleteTokens(); restored = false; publishSnapshots()
     }
+    #if DEBUG
+    // In-memory UI fixture: no Keychain writes, no server or Google network calls.
+    public func useUITestState() {
+        uiTestState = true; restored = true; polling?.cancel(); polling = nil
+        hasCredentials = true; account = "ui-test@example.invalid"; needsKeys = false
+        trackers = [GoogleTrackerSnapshot(id: "demo-local-tag", name: "Lokaler Test-Tracker", imageURL: "",
+            latitude: 52.5163, longitude: 13.3777, accuracy: 10, reportedAt: .now, nearby: false,
+            battery: nil, reportCount: 0, historyEnabled: true, unlocked: true, isLost: false, sharedWith: [], signal: nil)]
+    }
+    #endif
+
 }

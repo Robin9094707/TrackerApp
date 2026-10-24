@@ -14,7 +14,9 @@ final class AppModel {
     private var trackerRevision = 0
     var isRefreshingTrackers = false
     var isRefreshingAlerts = false
+    private let api: APIClient
     private let preferences: UserDefaults
+    private var restoringServer = false
     private var sessionGeneration = UUID()
     var connectionState: ConnectionState = .restoring
     var bootstrap: BootstrapResponse?
@@ -37,7 +39,19 @@ final class AppModel {
     var searchText = ""
 
     var localGoogleTrackers: [Tracker] = []
-    var localMode: Bool = (UserDefaults.standard.object(forKey: "native.localMode") as? Bool) ?? (UserDefaults.standard.string(forKey: "serverURL")?.isEmpty ?? true) { didSet { UserDefaults.standard.set(localMode, forKey: "native.localMode") } }
+    var showingServerConnection = false
+    var localGoogleFallbackEnabled = true { didSet { preferences.set(localGoogleFallbackEnabled, forKey: "native.googleFallbackEnabled") } }
+    var serverReconnectEnabled = true { didSet { preferences.set(serverReconnectEnabled, forKey: "native.serverReconnectEnabled") } }
+    var showsGoogleControls: Bool { providerFilter == "all" || providerFilter == "google" }
+    var serverActionsAvailable: Bool { connectionState == .connected && refreshError == nil }
+    func showsMainInterface(localGoogleCredentials: Bool) -> Bool {
+        connectionState == .connected || (localGoogleCredentials && localGoogleFallbackEnabled)
+    }
+    func useLocalGoogle() {
+        localGoogleFallbackEnabled = true
+        providerFilter = "google"; selectedScope = .all; selectedGroup = nil; searchText = ""
+        showingServerConnection = false
+    }
     @ObservationIgnored private var googleSubscriptions = Set<AnyCancellable>()
     var trackers: [Tracker] {
         var result = bootstrap?.trackers ?? []
@@ -60,7 +74,7 @@ final class AppModel {
             return Tracker(ref: "google:" + snapshot.id, name: snapshot.name, provider: "google", location: location,
                 lastSeenTs: snapshot.reportedAt.map { Int($0.timeIntervalSince1970) }, battery: snapshot.battery,
                 status: snapshot.nearby ? "In der Nähe" : "Google direkt", favorite: GoogleTrackerStore.shared.favorite(snapshot.id),
-                historyActive: true, emoji: "📡", serverID: snapshot.id)
+                historyActive: snapshot.historyEnabled, emoji: "📡", serverID: snapshot.id)
         }
     }
     var filteredTrackers: [Tracker] {
@@ -70,8 +84,12 @@ final class AppModel {
     }
 
 
-    init(preferences: UserDefaults = .standard) {
+    init(preferences: UserDefaults = .standard, api: APIClient? = nil) {
         self.preferences = preferences
+        self.api = api ?? .shared
+        // A legacy native.localMode=false selected the server UI, not a ban on fallback.
+        localGoogleFallbackEnabled = preferences.object(forKey: "native.googleFallbackEnabled") as? Bool ?? true
+        serverReconnectEnabled = preferences.object(forKey: "native.serverReconnectEnabled") as? Bool ?? true
         GoogleTrackerStore.shared.$trackers.receive(on: DispatchQueue.main).sink { [weak self] snapshots in
             Task { @MainActor in self?.receiveGoogle(snapshots) }
         }.store(in: &googleSubscriptions)
@@ -92,37 +110,53 @@ final class AppModel {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
             bootstrap = PreviewFixtures.bootstrap
-            connectionState = .connected
-            lastRefresh = Date()
+            if ProcessInfo.processInfo.arguments.contains("--ui-testing-local-google") {
+                GoogleTrackerStore.shared.useUITestState()
+                connectionState = ProcessInfo.processInfo.arguments.contains("--ui-testing-restoring") ? .restoring : .disconnected
+                refreshError = "Testserver nicht erreichbar"
+            } else { connectionState = .connected; lastRefresh = Date() }
             return
         }
         #endif
-        guard !serverURL.isEmpty else { connectionState = .disconnected; return }
+        await retryServerConnection()
+    }
+
+    func retryServerConnection() async {
+        guard !restoringServer else { return }
+        guard serverReconnectEnabled, !serverURL.isEmpty else { connectionState = .disconnected; return }
+        let generation = sessionGeneration
+        restoringServer = true
+        defer { restoringServer = false }
         do {
-            try APIClient.shared.configure(server: serverURL)
-            let session = try await APIClient.shared.session()
+            try self.api.configure(server: serverURL)
+            let session = try await self.api.session()
+            guard generation == sessionGeneration, !Task.isCancelled else { return }
             if session.authenticated == true {
                 connectionState = .connected
+                refreshError = nil
                 await refresh()
                 await PushManager.shared.registerIfPossible()
             } else { connectionState = .disconnected }
         } catch {
-            DebugLogger.shared.log("Restore failed: \(error.localizedDescription)")
+            guard generation == sessionGeneration else { return }
+            refreshError = error.localizedDescription
             connectionState = .disconnected
+            DebugLogger.shared.log("Server restoration failed: \(error.localizedDescription)")
         }
     }
 
     func connect(password: String) async {
+        serverReconnectEnabled = true
         locationMonitors.values.forEach { $0.cancel() }; locationMonitors.removeAll()
         catalogTask?.cancel(); catalogTask = nil
-        APIClient.shared.clearHistoryCache()
+        self.api.clearHistoryCache()
         sessionGeneration = UUID()
         isRefreshing = false; isRefreshingTrackers = false; isRefreshingAlerts = false; isLocatingAll = false
         locatingRefs.removeAll()
         errorMessage = nil
         connectionState = .connecting
         do {
-            let result = try await APIClient.shared.pair(server: serverURL, username: username, password: password)
+            let result = try await self.api.pair(server: serverURL, username: username, password: password)
             if result.status == "two_factor_required" { connectionState = .needsTwoFactor; return }
             guard result.status == "ok" else { throw APIError.message(result.message ?? "Anmeldung fehlgeschlagen.") }
             connectionState = .connected
@@ -138,7 +172,7 @@ final class AppModel {
 
     func verify2FA(code: String) async {
         do {
-            let result = try await APIClient.shared.pair2FA(code: code)
+            let result = try await self.api.pair2FA(code: code)
             guard result.status == "ok" else { throw APIError.message(result.message ?? "Code ungültig.") }
             connectionState = .connected
             await refresh()
@@ -160,9 +194,9 @@ final class AppModel {
         let revision = trackerRevision
         defer { if generation == sessionGeneration { isRefreshing = false } }
         do {
-            var data = try await APIClient.shared.bootstrap()
+            var data = try await self.api.bootstrap()
             guard connectionState == .connected, generation == sessionGeneration else { return }
-            let alertKey = "lastAlertTimestamp:\(APIClient.shared.baseURL?.absoluteString ?? serverURL):\(data.session?.user?.id ?? username)"
+            let alertKey = "lastAlertTimestamp:\(self.api.baseURL?.absoluteString ?? serverURL):\(data.session?.user?.id ?? username)"
             let previousTimestamp = UserDefaults.standard.integer(forKey: alertKey)
             if revision != trackerRevision, let current = bootstrap?.trackers { data.trackers = current }
             bootstrap = data
@@ -197,7 +231,7 @@ final class AppModel {
         isRefreshingAlerts = true
         defer { if generation == sessionGeneration { isRefreshingAlerts = false } }
         do {
-            let alerts = try await APIClient.shared.alerts(limit: limit, unreadOnly: unreadOnly)
+            let alerts = try await self.api.alerts(limit: limit, unreadOnly: unreadOnly)
             guard generation == sessionGeneration, connectionState == .connected, !Task.isCancelled else { return }
             bootstrap?.alerts = alerts
             try? await UNUserNotificationCenter.current().setBadgeCount(alerts.unreadCount ?? 0)
@@ -216,7 +250,7 @@ final class AppModel {
         if let task = catalogTask { _ = try? await task.value; return }
         let generation = sessionGeneration
         let revision = trackerRevision
-        let task = Task { try await APIClient.shared.trackerCatalog() }
+        let task = Task { try await self.api.trackerCatalog() }
         catalogTask = task; isRefreshingTrackers = true
         defer { if generation == sessionGeneration { catalogTask = nil; isRefreshingTrackers = false } }
         do {
@@ -242,7 +276,7 @@ final class AppModel {
         let generation = sessionGeneration
         do {
             Haptics.impact()
-            _ = try await APIClient.shared.requestJSON(path: "/api/mobile/v1/locate", method: "POST", json: ["tracker": tracker.ref])
+            _ = try await self.api.requestJSON(path: "/api/mobile/v1/locate", method: "POST", json: ["tracker": tracker.ref])
             guard generation == sessionGeneration else { return }
             statusMessage = "Ortung für \(tracker.name) angefordert. Warte auf eine neue Meldung …"
             locationMonitors[tracker.ref] = Task { [weak self] in
@@ -252,7 +286,7 @@ final class AppModel {
                     do {
                         try await Task.sleep(for: .seconds(delay))
                         guard self.sessionGeneration == generation, self.connectionState == .connected else { return }
-                        let updated = try await APIClient.shared.tracker(reference: tracker.ref)
+                        let updated = try await self.api.tracker(reference: tracker.ref)
                         guard self.sessionGeneration == generation, !Task.isCancelled else { return }
                         self.updateTracker(updated)
                         if updated.reportTimestamp > tracker.reportTimestamp {
@@ -267,14 +301,14 @@ final class AppModel {
     }
 
     func locateAll() async {
-        GoogleTrackerStore.shared.requestReportsForAll()
+        GoogleTrackerStore.shared.requestReportsForAll(automatic: false)
         if connectionState != .connected { return }
         guard !isLocatingAll, locatingRefs.isEmpty else { return }
         isLocatingAll = true
         let generation = sessionGeneration
         defer { if generation == sessionGeneration { isLocatingAll = false } }
         do {
-            let result = try await APIClient.shared.requestJSON(path: "/api/mobile/v1/locate", method: "POST", json: ["all": true])
+            let result = try await self.api.requestJSON(path: "/api/mobile/v1/locate", method: "POST", json: ["all": true])
             guard generation == sessionGeneration, connectionState == .connected else { return }
             statusMessage = "Ortung für \(result["count"].integer) Objekte angefordert. Neue Meldungen erscheinen automatisch."
             Haptics.impact()
@@ -302,7 +336,7 @@ final class AppModel {
         defer { updatingRefs.remove(tracker.ref) }
         let newValue = tracker.favorite != true
         do {
-            _ = try await APIClient.shared.requestJSON(
+            _ = try await self.api.requestJSON(
                 path: "/api/v2/trackers/\(tracker.provider)/\(tracker.apiID)/preferences",
                 method: "POST", json: ["favorite": newValue])
             if let index = bootstrap?.trackers.firstIndex(where: { $0.ref == tracker.ref }) {
@@ -314,10 +348,10 @@ final class AppModel {
     }
 
     func runAction(_ action: String, payload: [String: Any]) async throws {
-        _ = try await APIClient.shared.action(action, payload: payload)
-        APIClient.shared.clearHistoryCache()
+        _ = try await self.api.action(action, payload: payload)
+        self.api.clearHistoryCache()
         if let reference = payload["tracker"] as? String {
-            if let tracker = try? await APIClient.shared.tracker(reference: reference) { updateTracker(tracker) }
+            if let tracker = try? await self.api.tracker(reference: reference) { updateTracker(tracker) }
         } else { await refresh() }
         Haptics.success()
     }
@@ -325,8 +359,11 @@ final class AppModel {
     func foregroundUpdates() async {
         var cycle = 0
         while !Task.isCancelled {
-            guard connectionState == .connected else { return }
-            if cycle % 6 == 0 { await refresh() } else { await refreshTrackers() }
+            if connectionState == .connected {
+                if cycle % 6 == 0 { await refresh() } else { await refreshTrackers() }
+            } else if connectionState == .disconnected, serverReconnectEnabled, !serverURL.isEmpty {
+                await retryServerConnection()
+            }
             cycle += 1
             do { try await Task.sleep(for: .seconds(20)) }
             catch { return }
@@ -338,7 +375,7 @@ final class AppModel {
         notificationRefs.insert(tracker.ref)
         defer { notificationRefs.remove(tracker.ref) }
         do {
-            _ = try await APIClient.shared.action("set_found_notification", payload: [
+            _ = try await self.api.action("set_found_notification", payload: [
                 "tracker": tracker.ref,
                 "enabled": enabled,
                 "mode": "once"
@@ -352,13 +389,14 @@ final class AppModel {
     }
 
     func signOut() async {
+        serverReconnectEnabled = false
         locationMonitors.values.forEach { $0.cancel() }; locationMonitors.removeAll()
         catalogTask?.cancel(); catalogTask = nil
-        APIClient.shared.clearHistoryCache()
+        self.api.clearHistoryCache()
         sessionGeneration = UUID()
         isRefreshing = false; isRefreshingTrackers = false; isRefreshingAlerts = false; isLocatingAll = false
         locatingRefs.removeAll()
-        await APIClient.shared.logout()
+        await self.api.logout()
         bootstrap = nil
         refreshError = nil
         statusMessage = nil

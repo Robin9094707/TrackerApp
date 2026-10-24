@@ -1,3 +1,13 @@
+# 5.2.0 – lokaler Server-Notbetrieb, Filter und UWB-Labor
+
+- Gespeicherter lokaler Google-Zugang öffnet die Hauptansicht unabhängig vom Server-Verbindungsstatus, auch beim Wiederherstellen. Neuer standardmäßig aktiver lokaler Fallback; altes `native.localMode=false` blockiert ihn nicht.
+- Server-Anmeldung als schließbare Ansicht, Wiederverbindungsversuche im Vordergrund und klar getrennte Serverfunktionen; eigene API-Session-Prüfung mit 8 Sekunden Zeitlimit. Serverabmeldung lässt Google unangetastet.
+- Google-Verbindungs-/Konto-Karten nur bei Alle Netze und Google, leere Apple-/Samsung-/Fusion-Filter zeigen wieder eine Leermeldung.
+- Automatisches Google-Sammeln pro Tracker/Konto pausierbar, bisherige Daten/Defaults bleiben erhalten; manuelle Abrufe möglich. Optionale iOS-BGAppRefresh-Versuche unabhängig vom eigenen Server, ohne Intervallgarantie.
+- UWB-Labor mit echten iOS-Hardwarefähigkeiten und experimenteller authentifizierter Google-Fähigkeitsabfrage (0x0A). Kein Ranging-Start, keine erfundenen Pfeile. Moto-Tag-/iPhone-Interoperabilität nicht nachgewiesen; technische Untersuchung dokumentiert.
+- Bluetooth-Schreib-/Antwortablauf wartet auf aktivierte Notifications und verwechselt einen Schreib-ACK nicht mit einer Antwort.
+- Zusätzliche Unit-/Simulator-UI-Regressionen; Version 5.2.0 / Build 20. Backend, Bundle-ID, Keychain und Speicherformate bleiben kompatibel.
+
 # 5.1.2 – Release-Build und vollständige Report-Identitäten
 
 - Eigene Release-Startprüfung baut die optimierte Produktions-App mit UI-Runner, ohne Debug-Unit-Tests und ohne `ENABLE_TESTABILITY` in Release. Behebt den Buildabbruch wegen der nur in Debug vorhandenen `PreviewFixtures`.

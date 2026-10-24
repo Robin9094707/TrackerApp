@@ -113,6 +113,53 @@ final class TrackerUITests: XCTestCase {
     }
 
     @MainActor
+    func testLocalGoogleFallbackAndProviderScopedControls() {
+        for provider in ["apple", "google", "all"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--ui-testing", "--ui-testing-local-google", "-native.localMode", "NO",
+                "-tracker.provider", provider, "-serverURL", "https://offline.example.invalid"]
+            app.launch()
+            let expectedRow = provider == "apple" ? "tracker-row-apple:demo-keys" : "tracker-row-google:demo-local-tag"
+            XCTAssertTrue(app.buttons[expectedRow].waitForExistence(timeout: 20))
+            XCTAssertEqual(app.buttons["local-google-launcher"].firstMatch.exists, provider != "apple")
+            app.tabBars.buttons["Ich"].tap()
+            XCTAssertTrue(app.buttons["Mit Tracker-Server verbinden"].waitForExistence(timeout: 10))
+            XCTAssertEqual(app.buttons["local-google-launcher"].firstMatch.exists, provider != "apple")
+            capture("Local-Fallback-" + provider)
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testGoogleIsAccessibleWhileServerRestoresAndUWBLabDoesNotPromiseRanging() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-local-google", "--ui-testing-restoring",
+            "-native.localMode", "NO", "-tracker.provider", "google", "-serverURL", "https://offline.example.invalid"]
+        app.launch()
+        let tag = app.buttons["tracker-row-google:demo-local-tag"]
+        XCTAssertTrue(tag.waitForExistence(timeout: 20))
+        tag.tap()
+        let lab = app.buttons["google-uwb-lab"]
+        for _ in 0..<8 {
+            if lab.exists && lab.isHittable { break }
+            if app.collectionViews.firstMatch.exists { app.collectionViews.firstMatch.swipeUp() }
+            else { app.swipeUp() }
+        }
+        XCTAssertTrue(lab.exists)
+        lab.tap()
+        XCTAssertTrue(app.staticTexts["uwb-compatibility-status"].waitForExistence(timeout: 10))
+        let probe = app.buttons["Fähigkeiten des Trackers prüfen"]
+        for _ in 0..<4 {
+            if probe.exists { break }
+            if app.collectionViews.firstMatch.exists { app.collectionViews.firstMatch.swipeUp() }
+            else { app.swipeUp() }
+        }
+        XCTAssertTrue(probe.exists)
+        XCTAssertFalse(probe.isEnabled)
+        capture("UWB-Lab-No-Fabricated-Ranging")
+    }
+
+    @MainActor
     private func capture(_ name: String) {
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name

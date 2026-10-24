@@ -159,9 +159,9 @@ struct TrackerHomeView: View {
                     }
             }
             .tabItem { Label("Objekte", systemImage: "airtag.radiowaves.forward") }.tag(0)
-            NavigationStack { PlacesHomeView() }
+            NavigationStack { if model.serverActionsAvailable { PlacesHomeView() } else { ServerRequiredView() } }
                 .tabItem { Label("Orte", systemImage: "mappin.and.ellipse") }.tag(1)
-            NavigationStack { AlertsView() }
+            NavigationStack { if model.serverActionsAvailable { AlertsView() } else { ServerRequiredView() } }
                 .tabItem { Label("Meldungen", systemImage: "bell") }
                 .badge(model.bootstrap?.alerts?.unreadCount ?? 0).tag(2)
             NavigationStack { MoreView() }
@@ -214,7 +214,7 @@ struct TrackerLibraryView: View {
     var body: some View {
         @Bindable var model = model
         List {
-            Section { GoogleLauncherCard() }
+            if model.showsGoogleControls { Section { GoogleLauncherCard() } }
             Section {
                 SyncStatusView()
                     .listRowBackground(Color.clear)
@@ -227,7 +227,7 @@ struct TrackerLibraryView: View {
                             .accessibilityLabel("Hinweis schließen")
                     }
                 }
-                if model.filteredTrackers.isEmpty && google.trackers.isEmpty {
+                if model.filteredTrackers.isEmpty {
                     ContentUnavailableView(model.trackers.isEmpty ? "Noch keine Objekte" : "Keine Treffer", systemImage: "airtag", description: Text(model.trackers.isEmpty ? "Füge unter Ich → Accounts, Import & Fusionen deine Tracker hinzu." : "Passe deine Suche oder Filter an."))
                 }
                 ForEach(model.filteredTrackers) { tracker in
@@ -262,7 +262,7 @@ struct TrackerLibraryView: View {
         .navigationTitle("Objekte")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $model.searchText, prompt: "Name, Adresse oder Notiz")
-        .refreshable { await model.refreshTrackers(); await GoogleTrackerStore.shared.refresh() }
+        .refreshable { await refreshVisibleSources() }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Menu {
@@ -291,10 +291,10 @@ struct TrackerLibraryView: View {
                 .accessibilityLabel("Filter und Sortierung")
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button { Task { await model.refreshTrackers() } } label: {
-                    if model.isRefreshingTrackers { ProgressView() } else { Image(systemName: "arrow.clockwise") }
+                Button { Task { await refreshVisibleSources() } } label: {
+                    if model.isRefreshingTrackers || (model.showsGoogleControls && google.isRefreshing) { ProgressView() } else { Image(systemName: "arrow.clockwise") }
                 }
-                .disabled(model.isRefreshingTrackers)
+                .disabled(model.isRefreshingTrackers || (model.showsGoogleControls && google.isRefreshing))
                 .accessibilityLabel("Standorte aktualisieren")
             }
         }
@@ -304,6 +304,17 @@ struct TrackerLibraryView: View {
         .onChange(of: model.selectedSort) { _, sort in
             if sort == .nearest { model.locationService.request() }
         }
+    }
+
+    private func refreshVisibleSources() async {
+        // Start the local Google request before waiting for a slow/unreachable server.
+        async let local: Void = refreshGoogleIfVisible()
+        if model.connectionState == .connected { await model.refreshTrackers() }
+        else { await model.retryServerConnection() }
+        await local
+    }
+    private func refreshGoogleIfVisible() async {
+        if model.showsGoogleControls { await google.refresh() }
     }
 
     private var groupOptions: [(id: String, name: String)] {
@@ -349,22 +360,38 @@ struct TrackerListRow: View {
 
 struct SyncStatusView: View {
     @Environment(AppModel.self) private var model
+    @ObservedObject private var google = GoogleTrackerStore.shared
     var body: some View {
-        HStack(spacing: 6) {
-            if model.isRefreshing || model.isRefreshingTrackers { ProgressView().controlSize(.mini) }
-            else { Image(systemName: model.refreshError == nil ? "checkmark.icloud" : "wifi.exclamationmark") }
-            VStack(alignment: .leading, spacing: 2) {
-                if let date = model.lastRefresh {
-                    Text(model.isRefreshing || model.isRefreshingTrackers ? "Standorte werden aktualisiert …" : "\(model.trackers.count) Objekte · Stand \(date.formatted(date: .omitted, time: .shortened))")
-                } else { Text("Daten werden geladen …") }
-                if model.refreshError != nil { Text("Synchronisierung fehlgeschlagen. Letzter Stand wird angezeigt.").foregroundStyle(.orange) }
+        VStack(alignment: .leading, spacing: 6) {
+            if model.showsGoogleControls, google.hasCredentials {
+                Label(google.isRefreshing ? "Lokale Tracker werden aktualisiert …" : "Google direkt auf diesem iPhone · \(google.trackers.count) Objekte", systemImage: "iphone")
+                if let error = google.errorMessage { Text(error).foregroundStyle(.orange) }
             }
-            Spacer()
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .padding(.vertical, 4)
-        .accessibilityIdentifier("sync-status")
+            if !model.serverURL.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: model.serverActionsAvailable ? "checkmark.icloud" : "wifi.exclamationmark")
+                    if model.isRefreshing || model.isRefreshingTrackers { ProgressView().controlSize(.mini) }
+                    else if model.connectionState == .restoring { Text("Server wird verbunden …") }
+                    else if model.serverActionsAvailable, let date = model.lastRefresh {
+                        Text("Server · Stand \(date.formatted(date: .omitted, time: .shortened))")
+                    } else { Text("Server nicht verbunden · letzter Serverstand, falls vorhanden").foregroundStyle(.orange) }
+                    Spacer()
+                }
+            }
+        }.font(.caption).foregroundStyle(.secondary).padding(.vertical, 4).accessibilityIdentifier("sync-status")
     }
 }
 
+struct ServerRequiredView: View {
+    @Environment(AppModel.self) private var model
+    var body: some View {
+        ContentUnavailableView {
+            Label("Serververbindung erforderlich", systemImage: "network.slash")
+        } description: {
+            Text("Diese Ansicht benötigt deinen Tracker-Server. Lokal verfügbare Objekte bleiben unter Objekte erreichbar.")
+        } actions: {
+            Button("Verbindung erneut prüfen") { Task { await model.retryServerConnection() } }
+            Button("Server-Anmeldung öffnen") { model.showingServerConnection = true }
+        }
+    }
+}
