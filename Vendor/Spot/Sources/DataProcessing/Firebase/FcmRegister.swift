@@ -27,9 +27,12 @@ class FcmRegister {
         session = URLSession(configuration: configuration)
     }
 
-    func checkinOrRegister() async throws -> FcmCredentials {
+    func checkinOrRegister(refreshPushToken: Bool = false) async throws -> FcmCredentials {
         if let credentials {
             if let _ = try await gcmCheckIn(androidId: credentials.gcm.android_id, securityToken: credentials.gcm.security_token) {
+                if refreshPushToken, let fcm = try await fcmInstallAndRegister(gcmData: credentials.gcm, keys: credentials.keys) {
+                    return FcmCredentials(keys: credentials.keys, gcm: credentials.gcm, fcm: fcm, config: credentials.config)
+                }
                 return credentials
             }
         }

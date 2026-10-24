@@ -37,7 +37,7 @@ final class AppModel {
     var searchText = ""
 
     var localGoogleTrackers: [Tracker] = []
-    var localMode: Bool = UserDefaults.standard.bool(forKey: "native.localMode") { didSet { UserDefaults.standard.set(localMode, forKey: "native.localMode") } }
+    var localMode: Bool = (UserDefaults.standard.object(forKey: "native.localMode") as? Bool) ?? (UserDefaults.standard.string(forKey: "serverURL")?.isEmpty ?? true) { didSet { UserDefaults.standard.set(localMode, forKey: "native.localMode") } }
     @ObservationIgnored private var googleSubscriptions = Set<AnyCancellable>()
     var trackers: [Tracker] {
         var result = bootstrap?.trackers ?? []

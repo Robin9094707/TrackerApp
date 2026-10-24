@@ -253,6 +253,11 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         BluetoothManager.sharedInstance.enableFastScan(for: RSSIScan(service: Constants.FindMyDeviceService), allowedUUIDs: uuids)
     }
     public func endNearby() { BluetoothManager.sharedInstance.disableFastScan() }
+    public func repairConnection() async throws {
+        generation = UUID(); locating.removeAll()
+        try await PushReceiver.sharedInstance.prepare(force: true)
+        await refresh()
+    }
     public func requestBluetooth() { BluetoothManager.sharedInstance.startCentralManager() }
     public func ring(_ id: String, stop: Bool = false) async throws {
         let device = try device(id)

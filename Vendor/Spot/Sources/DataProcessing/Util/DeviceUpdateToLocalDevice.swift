@@ -33,9 +33,9 @@ func mergeDeviceUpdate(requestDate: Date, contributorType: ContributorType, devi
         networkLocationsTime.append(recentLocationTime)
     }
 
-    newReports = zip(networkLocations, networkLocationsTime).map { encryptedLocationInfo, time in
+    newReports = networkLocations.enumerated().map { index, encryptedLocationInfo in
         let encryptedLocation = encryptedLocationInfo.geoLocation
-        let time = unixTimeToDate(unixTime: time.seconds)
+        let time = index < networkLocationsTime.count ? unixTimeToDate(unixTime: networkLocationsTime[index].seconds) : requestDate
         let accuracy = encryptedLocationInfo.geoLocation.lastAggregatedAccuracy
         let status = encryptedLocationInfo.status
         let isOwnReport = encryptedLocationInfo.geoLocation.encryptedReport.isOwnReport

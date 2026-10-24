@@ -12,7 +12,7 @@ struct RootView: View {
             case .restoring:
                 RJLaunchView().transition(.opacity)
             case .disconnected:
-                if google.hasCredentials && (model.localMode || model.serverURL.isEmpty) { MainTabView() }
+                if google.hasCredentials && model.localMode { MainTabView() }
                 else { ConnectionView() }
             case .connecting, .needsTwoFactor:
                 ConnectionView()

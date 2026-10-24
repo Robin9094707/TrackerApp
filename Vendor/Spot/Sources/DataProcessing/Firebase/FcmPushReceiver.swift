@@ -108,7 +108,7 @@ final class PushReceiver: SharedInstance {
         let register = FcmRegister(config: fcmConfig, credentials: existing)
         let task = Task { () throws -> FcmCredentials in
             defer { register.close() }
-            return try await register.checkinOrRegister()
+            return try await register.checkinOrRegister(refreshPushToken: force)
         }
         registrationTask = task
         defer { registrationTask = nil }
@@ -117,6 +117,7 @@ final class PushReceiver: SharedInstance {
                 Task { do { done(.success(try await task.value)) } catch { done(.failure(error)) } }
             }
             try storeCredentials(credentials: result)
+            if force { pushQueue.async { self.failPending(); self.stop() } }
         } catch {
             task.cancel(); register.close()
             // An offline device must retain its already working Google identity.

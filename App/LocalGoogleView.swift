@@ -61,6 +61,7 @@ struct GoogleAccountView: View {
                     if model.connectionState != .connected {
                         Button("Google in der Objektübersicht nutzen", systemImage: "map") { model.localMode = true; dismiss() }
                     }
+                    Button("Google-Verbindung reparieren", systemImage: "wrench.and.screwdriver") { run { try await google.repairConnection() } }
                     Button("Google-Anmeldung erneuern", systemImage: "person.badge.key.fill") { run { auth = GoogleAuthDestination(url: try await google.prepareLogin(), recovery: false) } }
                     Button("Tracker und Reports aktualisieren", systemImage: "arrow.clockwise") { run { await google.refresh() } }
                     Button("Google-Schlüssel entsperren", systemImage: "key.fill") { run { auth = GoogleAuthDestination(url: try await google.recoveryURL(), recovery: true) } }
