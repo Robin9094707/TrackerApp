@@ -160,6 +160,7 @@ final class TrackerUITests: XCTestCase {
         capture("Motorola-Firmware-Needs-Original-And-Hardware")
     }
 
+    @MainActor
     func testGoogleIsAccessibleWhileServerRestoresAndUWBLabDoesNotPromiseRanging() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-local-google", "--ui-testing-restoring",

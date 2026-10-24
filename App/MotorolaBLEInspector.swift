@@ -5,7 +5,8 @@ import SpotIntegration
 /// Dedicated read-only vendor connection. It never scans for arbitrary tags and
 /// never writes update data. The SMP transport takes over after this closes.
 @MainActor
-final class MotorolaBLEInspector: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
+// All delegate callbacks are delivered on the explicitly selected main queue.
+final class MotorolaBLEInspector: NSObject, @preconcurrency CBCentralManagerDelegate, @preconcurrency CBPeripheralDelegate {
     private var central: CBCentralManager?
     private var peripheral: CBPeripheral?
     private var command: CBCharacteristic?
