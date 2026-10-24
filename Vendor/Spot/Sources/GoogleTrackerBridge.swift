@@ -134,7 +134,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         } else {
             // Recover a completed Google web login whose final token exchange was interrupted.
             let cookies: [HTTPCookie] = (try? await googleCallback(seconds: 5) { done in
-                WKWebsiteDataStore.default().httpCookieStore.getAllCookies { done(.success($0)) }
+                CookieCache.getAllCookies { done(.success($0)) }
             }) ?? []
             if let cookie = cookies.first(where: { Self.isOAuthCookie($0) }) {
                 do { try await finishLogin(oauthToken: cookie.value) } catch { errorMessage = error.localizedDescription }
@@ -171,12 +171,9 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         manager.clearCachedTokens(); manager.username = email; manager.aasToken = token
         publishSnapshots()
         Task { await self.refresh(); self.restartPolling() }
-        WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
-            for cookie in cookies where Self.isOAuthCookie(cookie) && cookie.value == oauthToken {
-                WKWebsiteDataStore.default().httpCookieStore.delete(cookie)
-            }
-        }
+        CookieCache.removeOAuthCookie(value: oauthToken)
     }
+
     public func refresh() async {
         guard !isRefreshing, hasCredentials else { return }
         isRefreshing = true; errorMessage = nil

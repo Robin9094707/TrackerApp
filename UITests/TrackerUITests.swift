@@ -2,6 +2,24 @@ import XCTest
 
 final class TrackerUITests: XCTestCase {
     @MainActor
+    func testColdStartAndRelaunchWithoutSession() {
+        let app = XCUIApplication()
+        // Exercise production restoration, without the --ui-testing fixture shortcut.
+        app.launchArguments = ["-appearance", "light", "-serverURL", ""]
+        for _ in 0..<2 {
+            app.launch()
+            XCTAssertTrue(app.buttons["local-google-launcher"].firstMatch.waitForExistence(timeout: 20))
+            let terminated = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                app.state != .runningForeground
+            }, object: nil)
+            terminated.isInverted = true
+            wait(for: [terminated], timeout: 6)
+            XCTAssertEqual(app.state, .runningForeground)
+            app.terminate()
+        }
+    }
+
+    @MainActor
     func testMapLibraryDetailsAndPlaces() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "-appearance", "light"]

@@ -1,3 +1,9 @@
+# 5.1.1 – Startabsturz behoben
+
+- Google-Cookie-Wiederherstellung greift ausdrücklich über die Hauptwarteschlange auf WebKit zu. Der generische asynchrone Callback führte zuvor zu SIGTRAP beim Öffnen der App.
+- Auch Schlüsselwiederherstellung und Abmeldung verwenden den abgesicherten Cookie-Zugriff. Bestehende Zugangsdaten und Verlauf bleiben erhalten.
+- Kaltstart und erneuter Start werden in Debug und Release im Simulator geprüft. Die IPA wird erst nach erfolgreichen Pflichtprüfungen veröffentlicht.
+
 # 5.1.0 – native Google-Datenquelle und Migration
 
 - Spot-Oberflächen und LUI-Paket entfernt. Google-Geräte, Details, Reports und Konto sind Teil der nativen TrackerApp.

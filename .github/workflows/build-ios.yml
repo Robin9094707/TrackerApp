@@ -106,6 +106,42 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build 2>&1 | tee RJ-Tracker-build.log
 
+      - name: Required startup and native Google tests
+        timeout-minutes: 12
+        shell: bash
+        run: |
+          set -o pipefail
+          SIM_ID="$(xcrun simctl list devices available --json | python3 -c 'import sys,json; d=json.load(sys.stdin)["devices"]; phones=[p for k,v in d.items() if "iOS" in k for p in v if p["name"].startswith("iPhone")]; phones.sort(key=lambda p: ("Pro" not in p["name"], p["name"])); print(phones[0]["udid"])')"
+          xcrun simctl boot "$SIM_ID" || true
+          xcrun simctl bootstatus "$SIM_ID" -b
+          xcodebuild test \
+            -project RJTracker.xcodeproj -scheme RJTracker \
+            -configuration Debug -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -resultBundlePath RJ-Tracker-tests.xcresult \
+            -parallel-testing-enabled NO \
+            -only-testing:SpotIntegrationTests \
+            -only-testing:RJTrackerUITests/TrackerUITests/testColdStartAndRelaunchWithoutSession \
+            -only-testing:RJTrackerTests \
+            -only-testing:RJTrackerUITests/TrackerUITests/testAccountSecurityAndHistory \
+            -only-testing:RJTrackerUITests/TrackerUITests/testLocalGoogleCanOpenAndReturnToExistingTrackers \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee RJ-Tracker-tests.log
+
+      - name: Required Release cold start and relaunch
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -o pipefail
+          SIM_ID="$(xcrun simctl list devices booted --json | python3 -c 'import sys,json; d=json.load(sys.stdin)["devices"]; print(next(p["udid"] for v in d.values() for p in v if p["name"].startswith("iPhone")))')"
+          xcodebuild test \
+            -project RJTracker.xcodeproj -scheme RJTracker \
+            -configuration Release -destination "platform=iOS Simulator,id=$SIM_ID" \
+            -resultBundlePath RJ-Tracker-release-tests.xcresult \
+            -parallel-testing-enabled NO \
+            -only-testing:RJTrackerUITests/TrackerUITests/testColdStartAndRelaunchWithoutSession \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee RJ-Tracker-release-tests.log
+
       - name: Create unsigned IPA
         if: success()
         shell: bash
@@ -119,10 +155,10 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$APP/Info.plist"
           test -n "$(find "$APP" -name 'AppIcon*.png' -print -quit)"
           cp -R "$APP" Payload/
-          /usr/bin/zip -qry RJ-Tracker-v5.1.0-unsigned.ipa Payload
-          unzip -t RJ-Tracker-v5.1.0-unsigned.ipa
-          ls -lh RJ-Tracker-v5.1.0-unsigned.ipa
-          echo "### RJ Tracker 5.1.0" >> "$GITHUB_STEP_SUMMARY"
+          /usr/bin/zip -qry RJ-Tracker-v5.1.1-unsigned.ipa Payload
+          unzip -t RJ-Tracker-v5.1.1-unsigned.ipa
+          ls -lh RJ-Tracker-v5.1.1-unsigned.ipa
+          echo "### RJ Tracker 5.1.1" >> "$GITHUB_STEP_SUMMARY"
           echo "Commit: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
           echo "Unsigned IPA ready for sideload signing." >> "$GITHUB_STEP_SUMMARY"
 
@@ -130,36 +166,14 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-v5.1.0-unsigned-IPA
-          path: RJ-Tracker-v5.1.0-unsigned.ipa
+          name: RJ-Tracker-v5.1.1-unsigned-IPA
+          path: RJ-Tracker-v5.1.1-unsigned.ipa
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
 
-      - name: Optional focused review
-        timeout-minutes: 12
-        continue-on-error: true
-        if: inputs.review == true || contains(github.event.head_commit.message, '[review]')
-        shell: bash
-        run: |
-          set -o pipefail
-          SIM_ID="$(xcrun simctl list devices available --json | python3 -c 'import sys,json; d=json.load(sys.stdin)["devices"]; phones=[p for k,v in d.items() if "iOS" in k for p in v if p["name"].startswith("iPhone")]; phones.sort(key=lambda p: ("Pro" not in p["name"], p["name"])); print(phones[0]["udid"])')"
-          xcrun simctl boot "$SIM_ID" || true
-          xcrun simctl bootstatus "$SIM_ID" -b
-          xcodebuild test \
-            -project RJTracker.xcodeproj -scheme RJTracker \
-            -configuration Debug -destination "platform=iOS Simulator,id=$SIM_ID" \
-            -resultBundlePath RJ-Tracker-tests.xcresult \
-            -parallel-testing-enabled NO \
-            -only-testing:SpotIntegrationTests \
-            -only-testing:RJTrackerTests \
-            -only-testing:RJTrackerUITests/TrackerUITests/testAccountSecurityAndHistory \
-            -only-testing:RJTrackerUITests/TrackerUITests/testLocalGoogleCanOpenAndReturnToExistingTrackers \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            2>&1 | tee RJ-Tracker-tests.log
-
       - name: Export simulator screenshots
-        if: always() && (inputs.review == true || contains(github.event.head_commit.message, '[review]'))
+        if: always()
         shell: bash
         run: |
           if [ -d RJ-Tracker-tests.xcresult ]; then
@@ -167,12 +181,13 @@ jobs:
           fi
 
       - name: Upload test results
-        if: always() && (inputs.review == true || contains(github.event.head_commit.message, '[review]'))
+        if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-v5.1.0-tests-and-screenshots
+          name: RJ-Tracker-v5.1.1-tests-and-screenshots
           path: |
             RJ-Tracker-tests.log
+            RJ-Tracker-release-tests.log
             TestScreenshots
           if-no-files-found: warn
           retention-days: 30
@@ -181,7 +196,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-v5.1.0-build-log
+          name: RJ-Tracker-v5.1.1-build-log
           path: RJ-Tracker-build.log
           if-no-files-found: ignore
           retention-days: 30
