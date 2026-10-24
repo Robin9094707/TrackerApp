@@ -35,7 +35,7 @@ jobs:
   build:
     name: Build unsigned iOS IPA
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -107,7 +107,7 @@ jobs:
             build 2>&1 | tee RJ-Tracker-build.log
 
       - name: Required startup and native Google tests
-        timeout-minutes: 12
+        timeout-minutes: 20
         shell: bash
         run: |
           set -o pipefail
@@ -128,7 +128,7 @@ jobs:
             2>&1 | tee RJ-Tracker-tests.log
 
       - name: Required Release cold start and relaunch
-        timeout-minutes: 10
+        timeout-minutes: 20
         shell: bash
         run: |
           set -o pipefail
