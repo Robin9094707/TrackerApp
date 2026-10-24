@@ -41,7 +41,7 @@ final class MotorolaFirmwareTests: XCTestCase {
         let empty = try Archive(accessMode: .create)
         XCTAssertThrowsError(try MotorolaFirmwarePackage.decode(try XCTUnwrap(empty.data)))
         let fake = try Archive(accessMode: .create)
-        try fake.addEntry(with: MotorolaFirmwarePackage.assetPath, type: .file, uncompressedSize: 4) { _, _ in Data([1, 2, 3, 4]) }
+        try fake.addEntry(with: MotorolaFirmwarePackage.assetPath, type: .file, uncompressedSize: Int64(4)) { _, _ in Data([1, 2, 3, 4]) }
         XCTAssertThrowsError(try MotorolaFirmwarePackage.decode(try XCTUnwrap(fake.data)))
     }
 }
