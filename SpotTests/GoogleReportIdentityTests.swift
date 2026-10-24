@@ -33,4 +33,28 @@ final class GoogleReportIdentityTests: XCTestCase {
         XCTAssertEqual(uniqueGoogleReports([first, second, a, b, a]).count, 4)
         XCTAssertEqual(Set([first, second, a, b].map(googleReportIdentity)).count, 4)
     }
+
+    func testDiskRoundTripPreservesAccuracyAltitudeLabelsAndReplayDeduplication() {
+        let manager = TokenManager.sharedInstance
+        let previous = manager.username
+        manager.username = "reports-\(UUID().uuidString)@example.invalid"
+        defer { manager.username = previous }
+        var precise = report()
+        precise.accuracy = 5
+        let reports = [report(), precise, report(altitude: 30), report(name: "Beschrifteter Standort"),
+            LocationReportWrapper(time: Date(timeIntervalSince1970: 1000), name: "Zuhause")]
+        let expected = Set(reports.map(googleReportIdentity))
+        // Separate batches reproduce late reports that only differ in accuracy.
+        for report in reports {
+            let refresh = RefreshWrapper(time: report.time, contributorType: .AtAllAreas, reports: [report])
+            storeReportsOnDisk(requestDate: report.time, contributorType: .AtAllAreas,
+                canonicDeviceId: "round-trip", decryptedRefresh: refresh)
+            storeReportsOnDisk(requestDate: report.time, contributorType: .AtAllAreas,
+                canonicDeviceId: "round-trip", decryptedRefresh: refresh)
+        }
+        let restored = loadReportsFromDisk(for: "round-trip").flatMap(\.reports)
+        XCTAssertEqual(restored.count, reports.count)
+        XCTAssertEqual(Set(restored.map(googleReportIdentity)), expected)
+    }
+
 }

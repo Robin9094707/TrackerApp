@@ -21,7 +21,7 @@ Server-Datenordner, Google-Keychain-Service, Konto-Preferences, verschlüsselte 
 
 Die letzten Builds von 5.1.1 scheiterten beim Kompilieren der Release-Tests, weil Unit-Tests auf ausschließlich in Debug vorhandene Beispieldaten zugriffen. Ein separates `RJTrackerReleaseLaunch`-Scheme prüft jetzt die echte optimierte App ohne diese Unit-Test-Abhängigkeit. Die Debug-Tests bleiben unverändert aktiv. Es werden keine Beispieldaten in die Release-App aufgenommen.
 
-Bei Google-Berichten hatten die Dublettenprüfung und die IDs der Verlaufszeilen unterschiedliche Merkmale: Höhe und semantische Namen konnten verloren gehen oder dieselbe Zeilen-ID ergeben. Beide Pfade verwenden nun dieselbe vollständige Identität. Bestehende Daten bleiben lesbar.
+Bei Google-Berichten hatten die Dublettenprüfung und die IDs der Verlaufszeilen unterschiedliche Merkmale: Höhe und semantische Namen konnten verloren gehen oder dieselbe Zeilen-ID ergeben. Beide Pfade verwenden nun dieselbe vollständige Identität. Auch die Datenbank unterscheidet Genauigkeitsänderungen und übernimmt Ortsbezeichnungen beim Neuladen. Ein Test prüft getrennte Speicher-Batches und wiederholtes Einlesen. Bestehende Daten bleiben lesbar.
 
 ## Prüfumfang
 

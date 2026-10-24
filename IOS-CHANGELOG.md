@@ -3,7 +3,7 @@
 - Eigene Release-Startprüfung baut die optimierte Produktions-App mit UI-Runner, ohne Debug-Unit-Tests und ohne `ENABLE_TESTABILITY` in Release. Behebt den Buildabbruch wegen der nur in Debug vorhandenen `PreviewFixtures`.
 - Debug-Unit-/UI-Tests, Google-Protokoll- und Datenbankmigrationstests bleiben Pflicht. Der iOS-Build setzt zusätzlich erfolgreiche Backend-Tests voraus.
 - Google-Report-IDs und Dublettenprüfung verwenden dieselbe Identität einschließlich Höhe und semantischem Namen. Unterschiedliche Meldungen werden nicht zu einer Listenzeile zusammengefasst.
-- Regressionstests für wiederholte, verschlüsselte und semantische Reports sowie Höhen-/Namensunterschiede.
+- Persistente Dublettenprüfung berücksichtigt auch Genauigkeit; Ortsbezeichnungen bleiben beim erneuten Laden erhalten. Regressionstests prüfen wiederholte, verschlüsselte und semantische Reports, Höhen-/Namensunterschiede sowie Speichern/Neuladen in getrennten Batches.
 - IPA mit SHA-256-Prüfsumme; Dokumentation und Versionsangaben aktualisiert. Version 5.1.2 / Build 19, Bundle-ID und Datenformate unverändert.
 
 # 5.1.1 – Startabsturz behoben

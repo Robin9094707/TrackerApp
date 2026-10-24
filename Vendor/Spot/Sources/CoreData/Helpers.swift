@@ -27,7 +27,9 @@ func loadReportsFromDisk(for canonicDeviceId: String) -> [RefreshWrapper] {
                         if status == .semantic, let name = report.name {
                             refreshArray.append(LocationReportWrapper(time: time, name: name))
                         } else {
-                            refreshArray.append(LocationReportWrapper(decryptedLocation: DecryptedLocation(latitude: report.latitude, longitude: report.longitude, altitude: report.altitude), time: time, accuracy: report.accuracy, status: status, isOwnReport: report.isOwnReport))
+                            var restored = LocationReportWrapper(decryptedLocation: DecryptedLocation(latitude: report.latitude, longitude: report.longitude, altitude: report.altitude), time: time, accuracy: report.accuracy, status: status, isOwnReport: report.isOwnReport)
+                            restored.name = report.name
+                            refreshArray.append(restored)
                         }
                     }
                 }
@@ -74,6 +76,7 @@ func storeReportsOnDisk(requestDate: Date, contributorType: ContributorType, can
             let existing = existingReports.contains { stored in
                 stored.time == report.time && stored.status == Int16(report.status.rawValue) &&
                 stored.isOwnReport == report.isOwnReport && stored.name == report.name &&
+                stored.accuracy == (report.accuracy ?? 0) &&
                 (location == nil || (stored.latitude == location?.latitude && stored.longitude == location?.longitude && stored.altitude == location?.altitude))
             }
             if existing { continue }
