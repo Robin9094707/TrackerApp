@@ -134,6 +134,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         if enabled, refreshInterval > 0 { try? locate(id) }
     }
     private var snapshotTask: Task<Void, Never>?
+    private var snapshotsDirty = false
     private var reportSummaries: [String: (revision: UUID, latest: LocationReportWrapper?, count: Int)] = [:]
     private func publishSnapshots() {
         #if DEBUG
@@ -146,13 +147,25 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         if hasCredentials != authenticated { hasCredentials = authenticated }
         let locked = authenticated && manager.ownerKey == nil
         if needsKeys != locked { needsKeys = locked }
-        snapshotTask?.cancel()
-        guard hasCredentials else { if !trackers.isEmpty { trackers = [] }; reportSummaries.removeAll(); return }
+        guard hasCredentials else {
+            snapshotsDirty = false
+            if !trackers.isEmpty { trackers = [] }
+            reportSummaries.removeAll()
+            return
+        }
+        snapshotsDirty = true
+        guard snapshotTask == nil else { return }
         // Combine emits before mutation. Coalesce a burst of metadata/Bluetooth changes,
         // then hash and sort immutable report copies on a worker, never the UI thread.
         snapshotTask = Task { [weak self] in
             do { try await Task.sleep(for: .milliseconds(80)) } catch { return }
-            await self?.rebuildSnapshots()
+            guard let self else { return }
+            while self.snapshotsDirty && self.hasCredentials && !Task.isCancelled {
+                self.snapshotsDirty = false
+                await self.rebuildSnapshots()
+                await Task.yield()
+            }
+            self.snapshotTask = nil
         }
     }
     private func rebuildSnapshots() async {

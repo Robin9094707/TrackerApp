@@ -286,16 +286,21 @@ final class APIClient {
         let (data, response) = try await transport.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.message("Keine HTTP-Antwort erhalten.") }
         if let newCSRF = http.value(forHTTPHeaderField: "X-CSRF-Token"), !newCSRF.isEmpty { saveCSRF(newCSRF) }
+        let metadata = await Task.detached(priority: .userInitiated) {
+            let envelope = try? JSONDecoder().decode(APIMessage.self, from: data)
+            let token = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["csrf_token"] as? String
+            return (envelope, token)
+        }.value
         guard (200..<300).contains(http.statusCode) else {
-            let envelope = try? decoder.decode(APIMessage.self, from: data)
+            let envelope = metadata.0
             let message = envelope?.message ?? "Serverfehler HTTP \(http.statusCode)."
             if http.statusCode == 401 { NotificationCenter.default.post(name: .apiSessionExpired, object: nil) }
             throw APIError.http(http.statusCode, message)
         }
-        if let envelope = try? decoder.decode(APIMessage.self, from: data), envelope.status == "error" {
+        if let envelope = metadata.0, envelope.status == "error" {
             throw APIError.message(envelope.message ?? "Die Aktion konnte nicht ausgeführt werden.")
         }
-        if let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let token = envelope["csrf_token"] as? String, !token.isEmpty { saveCSRF(token) }
+        if let token = metadata.1, !token.isEmpty { saveCSRF(token) }
         return data
     }
 
