@@ -57,4 +57,21 @@ final class GoogleReportIdentityTests: XCTestCase {
         XCTAssertEqual(Set(restored.map(googleReportIdentity)), expected)
     }
 
+    @MainActor
+    func testBackgroundHistoryCompactionKeepsReportsArrivingDuringWork() async throws {
+        var metadata = DeviceMetadata()
+        metadata.trackerInformation.deviceRegistration.canonicID.id = "compaction-" + UUID().uuidString
+        metadata.trackerInformation.deviceRegistration.deviceDescription.userDefinedName = "Test-Tracker"
+        let device = try XCTUnwrap(convertToLocalFindMyDevice(deviceMetadata: metadata, existingDevices: []))
+        let initial = (0..<200).map { report(altitude: Double($0)) }
+        device.appendHistory(RefreshWrapper(time: .now, contributorType: .AtAllAreas, reports: initial))
+        await Task.yield()
+        let late = report(altitude: 999)
+        device.appendHistory(RefreshWrapper(time: .now, contributorType: .AtAllAreas, reports: [late, initial[0]]))
+        await device.historyCompaction?.value
+        let result = device.refreshes.flatMap(\.reports)
+        XCTAssertEqual(result.count, 201)
+        XCTAssertEqual(Set(result.map(googleReportIdentity)), Set((initial + [late]).map(googleReportIdentity)))
+    }
+
 }

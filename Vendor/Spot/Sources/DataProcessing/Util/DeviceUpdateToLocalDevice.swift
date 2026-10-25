@@ -54,26 +54,15 @@ func mergeDeviceUpdate(requestDate: Date, contributorType: ContributorType, devi
 
     let alreadyHasEnoughHighTrafficReports = localDevice.refreshes.first?.reports.filter { $0.status == .aggregated }.count ?? 0 >= 2
 
-    DispatchQueue.main.async {
+    // Decrypt a whole immutable batch first. Publishing every individual report or
+    // sorting the complete archive inside a main-queue animation blocks scrolling.
+    var refresh = RefreshWrapper(time: requestDate, contributorType: contributorType, reports: newReports)
+    refresh.hasNewReport = receivedUpdate
+    LocationCryptor.decryptList(device: localDevice, refresh: refresh) { decryptedRefresh in
         guard localDevice.belongsToCurrentAccount else { return }
-        withAnimation(.spring) {
-            let existing = uniqueGoogleReports(localDevice.refreshes.flatMap(\.reports))
-            let combined = uniqueGoogleReports(existing + newReports)
-            if combined.count == existing.count, localDevice.eik == nil { return }
-            var newRefresh = RefreshWrapper(time: requestDate, contributorType: contributorType, reports: newReports)
-            newRefresh.hasNewReport = receivedUpdate
-            localDevice.refreshes.insert(newRefresh, at: 0)
-
-            LocationCryptor.decryptList(device: localDevice, refresh: newRefresh) { decryptedRefresh in
-                guard localDevice.belongsToCurrentAccount else { return }
-                storeReportsOnDisk(requestDate: requestDate, contributorType: contributorType, canonicDeviceId: localDevice.canonicDeviceId, decryptedRefresh: decryptedRefresh)
-                DispatchQueue.main.async {
-                    guard localDevice.belongsToCurrentAccount else { return }
-                    let reports = uniqueGoogleReports(localDevice.refreshes.flatMap(\.reports))
-                    localDevice.refreshes = [RefreshWrapper(time: requestDate, contributorType: contributorType, reports: reports)]
-                }
-            }
-        }
+        storeReportsOnDisk(requestDate: requestDate, contributorType: contributorType,
+            canonicDeviceId: localDevice.canonicDeviceId, decryptedRefresh: decryptedRefresh)
+        Task { @MainActor in localDevice.appendHistory(decryptedRefresh) }
     }
 
     return receivedUpdate || alreadyHasEnoughHighTrafficReports

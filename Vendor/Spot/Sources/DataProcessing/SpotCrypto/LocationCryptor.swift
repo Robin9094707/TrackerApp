@@ -30,11 +30,6 @@ class LocationCryptor {
                         let decryptedLocation = try LocationCryptor.decrypt(report: report, identityKey: eik, curveType: device.curveType, isCustomTracker: device.isCustomTracker)
                         modifiedRefresh.reports[reportIndex] = decryptedLocation
 
-                        DispatchQueue.main.async {
-                            if let refreshIndex = device.refreshes.firstIndex(where: { $0.id == refresh.id }) {
-                                device.refreshes[refreshIndex] = modifiedRefresh
-                            }
-                        }
                     }
                 } catch {
                     // Keep encrypted reports for key recovery; one failed report must not discard its neighbours.

@@ -103,6 +103,33 @@ class LocalFindMyDevice: ObservableObject, Identifiable, Equatable {
 
     var reportRevision = UUID()
     @Published var refreshes: [RefreshWrapper] { didSet { reportRevision = UUID() } }
+    // One compactor per tracker. Revisions prevent a completed worker from
+    // replacing a report that arrived while the worker was sorting its copy.
+    var historyCompaction: Task<Void, Never>?
+    @MainActor func appendHistory(_ refresh: RefreshWrapper) {
+        guard belongsToCurrentAccount else { return }
+        refreshes.insert(refresh, at: 0)
+        guard historyCompaction == nil else { return }
+        historyCompaction = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.historyCompaction = nil }
+            while self.belongsToCurrentAccount && !Task.isCancelled {
+                let revision = self.reportRevision
+                let batches = self.refreshes
+                let reports = await Task.detached(priority: .utility) {
+                    uniqueGoogleReports(batches.flatMap(\.reports))
+                }.value
+                guard self.belongsToCurrentAccount, !Task.isCancelled else { return }
+                if revision != self.reportRevision { await Task.yield(); continue }
+                if let latest = batches.first {
+                    var merged = RefreshWrapper(time: latest.time, contributorType: latest.contributorType, reports: reports)
+                    merged.hasNewReport = batches.contains { $0.hasNewReport }
+                    self.refreshes = [merged]
+                }
+                return
+            }
+        }
+    }
     var lastReportUpload: Date?
     @Published var lastReportRefresh: Date?
 

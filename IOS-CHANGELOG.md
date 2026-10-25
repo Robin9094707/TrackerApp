@@ -5,6 +5,7 @@
 - Cold startup prepares Google Keychain/catalog and import folders away from the UI thread. Google report summaries are cached by revision, coalesced and built on a worker; history screen snapshots and server response decoding also run off the main actor. Live updates no longer repeatedly recenter a user-panned map.
 - Display-only server catalog cache is isolated by server/account, retained between launches and cleared on logout or rejected authentication. Server actions still require authentication. No credentials enter this cache.
 - APK/APKM/BIN picker now accepts all document types as copies. Coordinated background reads support File Providers; actual firmware contents, size, checksum, model, battery and upgrade policy remain verified. Invalid imports show an explanation and retain an earlier valid package.
+- Google archive decryption publishes whole batches. History compaction runs on a worker and checks revisions before committing, so reports arriving during compaction remain present.
 - No backend changes or server migration required. Existing bundle IDs, Google history databases, import storage and credentials are retained.
 - Focused regression tests cover startup access, cache isolation/clearing and invalid file-provider imports; existing device/simulator build and startup checks remain required.
 
