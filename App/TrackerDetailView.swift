@@ -124,7 +124,7 @@ struct TrackerDetailView: View {
                 .frame(width: 64, height: 64)
                 .background(current.provider.rjProviderColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 22))
             VStack(alignment: .leading, spacing: 6) {
-                Text(current.name).font(.title2.bold())
+                Text(current.name).font(.largeTitle.bold())
                 ResolvedAddressText(location: current.validLocation, fallback: "Noch kein Standort gemeldet")
                     .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                 HStack(spacing: 8) {
@@ -138,7 +138,7 @@ struct TrackerDetailView: View {
             }.buttonStyle(.plain).disabled(model.updatingRefs.contains(current.ref)).accessibilityLabel("Favorit umschalten")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .rjCard()
+        .padding(.vertical, 8)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("tracker-detail-header")
     }
@@ -160,9 +160,8 @@ struct TrackerDetailView: View {
 
     private var locateButton: some View {
         Button { Task { await model.locate(current) } } label: {
-            Label(model.isLocating(current) ? "Wird geortet …" : "Jetzt orten", systemImage: "location.fill")
-                .font(.headline).frame(maxWidth: .infinity, minHeight: 42)
-        }.buttonStyle(RJPrimaryButtonStyle())
+            TrackerActionTile(title: model.isLocating(current) ? "Wird geortet …" : "Jetzt orten", subtitle: "Standort aktualisieren", symbol: "location.fill", color: .green)
+        }.buttonStyle(.plain)
             .disabled(model.isLocating(current) || model.isLocatingAll)
     }
 
@@ -172,9 +171,8 @@ struct TrackerDetailView: View {
             Button("Mit dem Auto", systemImage: "car") { openMaps(mode: MKLaunchOptionsDirectionsModeDriving) }
             Button("Mit Bus & Bahn", systemImage: "tram") { openMaps(mode: MKLaunchOptionsDirectionsModeTransit) }
         } label: {
-            Label("Route", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
-                .font(.headline).frame(maxWidth: .infinity, minHeight: 42)
-        }.buttonStyle(RJSecondaryButtonStyle()).disabled(current.validLocation == nil)
+            TrackerActionTile(title: "Route", subtitle: "In Karten öffnen", symbol: "arrow.triangle.turn.up.right.diamond.fill")
+        }.buttonStyle(.plain).disabled(current.validLocation == nil)
     }
 
     private var information: some View {

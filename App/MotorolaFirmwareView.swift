@@ -73,8 +73,12 @@ struct MotorolaFirmwareView: View {
         .interactiveDismissDisabled(updater.updating)
         .onAppear { expandInspector(); if !updater.updating { google.beginNearby(deviceID) } }
         .onDisappear { google.endNearby() }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.data], allowsMultipleSelection: false) { result in
-            if case .success(let urls) = result, let url = urls.first { Task { await updater.importFile(url) } }
+        .sheet(isPresented: $importing) {
+            AnyDocumentPicker(onPick: { url in
+                importing = false
+                Task { await updater.importFile(url) }
+            }, onCancel: { importing = false })
+                .ignoresSafeArea()
         }
         .alert("Moto Tag aktualisieren?", isPresented: $confirming) {
             Button("Installieren") { Task { await updater.install(deviceID) } }

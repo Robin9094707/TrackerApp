@@ -44,4 +44,18 @@ final class MotorolaFirmwareTests: XCTestCase {
         try fake.addEntry(with: MotorolaFirmwarePackage.assetPath, type: .file, uncompressedSize: Int64(4)) { _, _ in Data([1, 2, 3, 4]) }
         XCTAssertThrowsError(try MotorolaFirmwarePackage.decode(try XCTUnwrap(fake.data)))
     }
+    func testFileProviderImportsRejectDirectoriesEmptyAndSpoofedAndroidFiles() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        XCTAssertThrowsError(try MotorolaFirmwarePackage.load(from: folder))
+        for name in ["download.apk", "download.apkm", "OTA.bin", "unknown.extension"] {
+            let file = folder.appendingPathComponent(name)
+            try Data().write(to: file)
+            XCTAssertThrowsError(try MotorolaFirmwarePackage.load(from: file))
+            try Data("not Motorola firmware".utf8).write(to: file)
+            XCTAssertThrowsError(try MotorolaFirmwarePackage.load(from: file))
+        }
+    }
+
 }

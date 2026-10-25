@@ -19,7 +19,10 @@ final class AppModel {
     private var restoringServer = false
     private var sessionGeneration = UUID()
     var connectionState: ConnectionState = .restoring
-    var bootstrap: BootstrapResponse?
+    var bootstrap: BootstrapResponse? { didSet { mergeTrackers() } }
+    private var cachedServerTrackers: [Tracker] = [] { didSet { mergeTrackers() } }
+    private var hasCachedCatalog = false
+    private var cacheIdentity: String { serverURL.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() + "|" + username.lowercased() }
     var isRefreshing = false
     var locatingRefs: Set<String> = []
     var notificationRefs: Set<String> = []
@@ -38,14 +41,16 @@ final class AppModel {
     var providerFilter = "all" { didSet { preferences.set(providerFilter, forKey: "tracker.provider") } }
     var searchText = ""
 
-    var localGoogleTrackers: [Tracker] = []
+    var localGoogleTrackers: [Tracker] = [] { didSet { mergeTrackers() } }
     var showingServerConnection = false
     var localGoogleFallbackEnabled = true { didSet { preferences.set(localGoogleFallbackEnabled, forKey: "native.googleFallbackEnabled") } }
     var serverReconnectEnabled = true { didSet { preferences.set(serverReconnectEnabled, forKey: "native.serverReconnectEnabled") } }
     var showsGoogleControls: Bool { providerFilter == "all" || providerFilter == "google" }
     var serverActionsAvailable: Bool { connectionState == .connected && refreshError == nil }
     func showsMainInterface(localGoogleCredentials: Bool) -> Bool {
-        connectionState == .connected || (localGoogleCredentials && localGoogleFallbackEnabled)
+        connectionState == .connected || hasCachedCatalog ||
+            (connectionState == .restoring && serverReconnectEnabled && !serverURL.isEmpty && !username.isEmpty) ||
+            (localGoogleCredentials && localGoogleFallbackEnabled)
     }
     func useLocalGoogle() {
         localGoogleFallbackEnabled = true
@@ -53,16 +58,19 @@ final class AppModel {
         showingServerConnection = false
     }
     @ObservationIgnored private var googleSubscriptions = Set<AnyCancellable>()
-    var trackers: [Tracker] {
-        var result = bootstrap?.trackers ?? []
+    private(set) var trackers: [Tracker] = []
+    private func mergeTrackers() {
+        var result = bootstrap?.trackers ?? cachedServerTrackers
+        let googleIndices = Dictionary(result.enumerated().filter { $0.element.provider == "google" }
+            .map { ($0.element.apiID, $0.offset) }, uniquingKeysWith: { first, _ in first })
         for local in localGoogleTrackers {
-            if let index = result.firstIndex(where: { $0.provider == "google" && ($0.apiID == local.apiID || $0.ref == local.ref) }) {
+            if let index = googleIndices[local.apiID] {
                 if local.reportTimestamp >= result[index].reportTimestamp, local.location != nil { result[index].location = local.location; result[index].lastSeenTs = local.lastSeenTs }
                 if let favorite = GoogleTrackerStore.shared.favoriteOverride(local.apiID) { result[index].favorite = favorite }
                 result[index].battery = local.battery ?? result[index].battery
             } else { result.append(local) }
         }
-        return result
+        if result != trackers { trackers = result }
     }
     private func receiveGoogle(_ snapshots: [GoogleTrackerSnapshot]) {
         localGoogleTrackers = snapshots.map { snapshot in
@@ -118,7 +126,25 @@ final class AppModel {
             return
         }
         #endif
+        let identity = cacheIdentity
+        let generation = sessionGeneration
+        if serverReconnectEnabled, !serverURL.isEmpty,
+           let snapshot = await TrackerStartupCache.shared.load(identity: identity),
+           identity == cacheIdentity, generation == sessionGeneration {
+            cachedServerTrackers = snapshot.trackers
+            lastRefresh = snapshot.date
+            hasCachedCatalog = true
+        }
         await retryServerConnection()
+    }
+
+    private func saveCatalog() async {
+        guard let bootstrap else { return }
+        await TrackerStartupCache.shared.save(bootstrap.trackers, date: lastRefresh ?? Date(), identity: cacheIdentity)
+    }
+    private func clearCatalog() async {
+        hasCachedCatalog = false; cachedServerTrackers = []
+        await TrackerStartupCache.shared.clear(identity: cacheIdentity)
     }
 
     func retryServerConnection() async {
@@ -136,9 +162,10 @@ final class AppModel {
                 refreshError = nil
                 await refresh()
                 await PushManager.shared.registerIfPossible()
-            } else { connectionState = .disconnected }
+            } else { await clearCatalog(); connectionState = .disconnected }
         } catch {
             guard generation == sessionGeneration else { return }
+            if case APIError.http(401, _) = error { await clearCatalog() }
             refreshError = error.localizedDescription
             connectionState = .disconnected
             DebugLogger.shared.log("Server restoration failed: \(error.localizedDescription)")
@@ -146,6 +173,8 @@ final class AppModel {
     }
 
     func connect(password: String) async {
+        await clearCatalog()
+        bootstrap = nil
         serverReconnectEnabled = true
         locationMonitors.values.forEach { $0.cancel() }; locationMonitors.removeAll()
         catalogTask?.cancel(); catalogTask = nil
@@ -211,6 +240,7 @@ final class AppModel {
             let newest = events.compactMap(\.ts).max() ?? previousTimestamp
             UserDefaults.standard.set(newest, forKey: alertKey)
             DebugLogger.shared.log("Bootstrap loaded: \(data.trackers.count) trackers")
+            await saveCatalog()
         } catch is CancellationError {
             return
         } catch {
@@ -258,6 +288,7 @@ final class AppModel {
             guard generation == sessionGeneration, connectionState == .connected else { return }
             if revision == trackerRevision { bootstrap?.trackers = items; trackerRevision += 1 }
             lastRefresh = Date(); refreshError = nil
+            await saveCatalog()
         } catch is CancellationError { } catch { refreshError = error.localizedDescription }
     }
 
@@ -396,6 +427,7 @@ final class AppModel {
         sessionGeneration = UUID()
         isRefreshing = false; isRefreshingTrackers = false; isRefreshingAlerts = false; isLocatingAll = false
         locatingRefs.removeAll()
+        await clearCatalog()
         await self.api.logout()
         bootstrap = nil
         refreshError = nil

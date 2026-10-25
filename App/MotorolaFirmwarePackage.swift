@@ -29,9 +29,20 @@ struct MotorolaFirmwarePackage {
     }
 
     static func load(from url: URL) throws -> Self {
-        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard size > 0, size <= maximumArchiveSize else { throw MotorolaFirmwareError.invalid("Originaldatei fehlt oder überschreitet 64 MB.") }
-        return try decode(Data(contentsOf: url, options: .mappedIfSafe))
+        var coordinationError: NSError?
+        var result: Result<Self, Error>?
+        NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinationError) { readableURL in
+            result = Result {
+                let values = try readableURL.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+                guard values.isRegularFile == true else { throw MotorolaFirmwareError.invalid("Bitte eine einzelne APK-, APKM- oder BIN-Datei auswählen.") }
+                let size = values.fileSize ?? 0
+                guard size > 0, size <= maximumArchiveSize else { throw MotorolaFirmwareError.invalid("Originaldatei fehlt oder überschreitet 64 MB.") }
+                return try decode(Data(contentsOf: readableURL, options: .mappedIfSafe))
+            }
+        }
+        if let coordinationError { throw coordinationError }
+        guard let result else { throw MotorolaFirmwareError.invalid("Die Datei konnte nicht geladen werden. Bitte zuerst in Dateien vollständig herunterladen und erneut auswählen.") }
+        return try result.get()
     }
     static func decode(_ data: Data) throws -> Self {
         guard data.count <= maximumArchiveSize else { throw MotorolaFirmwareError.invalid("Die Datei ist zu groß.") }

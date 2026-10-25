@@ -101,7 +101,8 @@ class LocalFindMyDevice: ObservableObject, Identifiable, Equatable {
     @Published var accountKey: Data?
     let encryptedKeys: EncryptedUserSecrets?
 
-    @Published var refreshes: [RefreshWrapper]
+    var reportRevision = UUID()
+    @Published var refreshes: [RefreshWrapper] { didSet { reportRevision = UUID() } }
     var lastReportUpload: Date?
     @Published var lastReportRefresh: Date?
 

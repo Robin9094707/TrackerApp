@@ -1,3 +1,13 @@
+## 5.4.0 · Responsive object inspector and unrestricted firmware picker
+
+- Map-first object library with large title, neutral circular object markers, clearer list rows and an add button. Existing filters, provider controls, swipes, tabs and management tools remain available.
+- Large action tiles in native Google and server detail screens. Native details reuse the main map instead of constructing a second map in the sheet. Object details have a close control.
+- Cold startup prepares Google Keychain/catalog and import folders away from the UI thread. Google report summaries are cached by revision, coalesced and built on a worker; history screen snapshots and server response decoding also run off the main actor. Live updates no longer repeatedly recenter a user-panned map.
+- Display-only server catalog cache is isolated by server/account, retained between launches and cleared on logout or rejected authentication. Server actions still require authentication. No credentials enter this cache.
+- APK/APKM/BIN picker now accepts all document types as copies. Coordinated background reads support File Providers; actual firmware contents, size, checksum, model, battery and upgrade policy remain verified. Invalid imports show an explanation and retain an earlier valid package.
+- No backend changes or server migration required. Existing bundle IDs, Google history databases, import storage and credentials are retained.
+- Focused regression tests cover startup access, cache isolation/clearing and invalid file-provider imports; existing device/simulator build and startup checks remain required.
+
 ## 5.3.0 · Motorola-Originalfirmware auf iOS (experimentell)
 
 - Motorola-Modelle anhand bekannter Fast-Pair-Kennungen erkennen; Firmwareansicht am eigenen Google-Tracker und im UWB-Labor.

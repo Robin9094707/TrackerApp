@@ -16,33 +16,31 @@ struct NativeGoogleTrackerView: View {
         Form {
             if let tracker {
                 Section {
-                    HStack(spacing: 14) {
-                        AsyncImage(url: URL(string: tracker.imageURL)) { image in
-                            if let image = image.image { image.resizable().scaledToFit() }
-                            else { Image(systemName: "sensor.tag.radiowaves.forward.fill").font(.largeTitle).foregroundStyle(.green) }
-                        }.frame(width: 58, height: 58)
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(tracker.name).font(.title2.bold())
-                            Label("Google · direkt verbunden", systemImage: "lock.iphone").font(.caption).foregroundStyle(.secondary)
-                            if let date = tracker.reportedAt { Text(date, style: .relative).font(.caption).foregroundStyle(.secondary) }
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(tracker.name).font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
+                        if tracker.nearby { Text("Bei dir").font(.headline) }
+                        ResolvedAddressText(location: displayLocation(tracker), fallback: "Noch kein Standort gemeldet")
+                            .font(.body).foregroundStyle(.secondary)
+                        if let date = tracker.reportedAt {
+                            Text(date, style: .relative).font(.subheadline).foregroundStyle(tracker.nearby ? .green : .secondary)
                         }
-                    }.padding(.vertical, 8).accessibilityIdentifier("tracker-detail-header")
-                    if let lat = tracker.latitude, let lon = tracker.longitude {
-                        Map(initialPosition: .region(.init(center: .init(latitude: lat, longitude: lon), latitudinalMeters: 1000, longitudinalMeters: 1000))) {
-                            Marker(tracker.name, systemImage: "sensor.tag.radiowaves.forward.fill", coordinate: .init(latitude: lat, longitude: lon)).tint(.green)
-                            if let accuracy = tracker.accuracy, accuracy > 0 { MapCircle(center: .init(latitude: lat, longitude: lon), radius: accuracy).foregroundStyle(.green.opacity(0.12)) }
-                        }.frame(height: 190).clipShape(RoundedRectangle(cornerRadius: 18))
-                    }
-                    if let battery = tracker.battery { LabeledContent("Batterie", value: battery) }
-                    LabeledContent("Gespeicherte Meldungen", value: String(tracker.reportCount))
+                        HStack(spacing: 12) {
+                            Label("Google", systemImage: "lock.iphone")
+                            if let battery = tracker.battery { Label(battery, systemImage: "battery.75percent") }
+                        }.font(.caption).foregroundStyle(.secondary)
+                    }.padding(.vertical, 10).accessibilityIdentifier("tracker-detail-header")
+                }.listRowBackground(Color.clear)
+                Section {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 12) { ringTile(tracker); nearbyTile }
+                        VStack(spacing: 12) { ringTile(tracker); nearbyTile }
+                    }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                 }
                 Section("Finden") {
                     Button { run { try google.locate(deviceID) } } label: {
                         Label(google.locating.contains(deviceID) ? "Sammle weitere Reports …" : "Standort aktualisieren", systemImage: "location.fill")
                     }.disabled(google.locating.contains(deviceID))
-                    Button("Klingeln lassen", systemImage: "speaker.wave.2.fill") { run { try await google.ring(deviceID); message = tracker.nearby ? "Bluetooth-Klingeln bestätigt." : "Klingeln bei Google angefragt." } }
                     Button("Google-Klingelanfrage stoppen", systemImage: "speaker.slash") { run { try await google.ring(deviceID, stop: true) } }
-                    NavigationLink { GoogleNearbyView(deviceID: deviceID) } label: { Label("In der Nähe suchen", systemImage: "dot.radiowaves.left.and.right") }
                     NavigationLink { GoogleUWBLabView(deviceID: deviceID) } label: { Label("UWB prüfen · experimentell", systemImage: "dot.scope") }
                         .accessibilityIdentifier("google-uwb-lab")
                     if let lat = tracker.latitude, let lon = tracker.longitude {
@@ -90,7 +88,6 @@ struct NativeGoogleTrackerView: View {
             if let error = google.errorMessage { Text(error).font(.footnote).foregroundStyle(.orange) }
         }
         .rjListChrome().navigationTitle(tracker?.name ?? "Google-Tracker").navigationBarTitleDisplayMode(.inline)
-        .disabled(busy)
         .refreshable { await google.refresh() }
         .alert("Trackernamen ändern", isPresented: $editing) {
             TextField("Name", text: $name)
@@ -98,7 +95,23 @@ struct NativeGoogleTrackerView: View {
             Button("Abbrechen", role: .cancel) {}
         }
     }
+    private func displayLocation(_ tracker: GoogleTrackerSnapshot) -> TrackerLocation? {
+        guard let lat = tracker.latitude, let lon = tracker.longitude else { return nil }
+        return TrackerLocation(latitude: lat, longitude: lon, accuracyM: tracker.accuracy,
+            timestamp: tracker.reportedAt.map { Int($0.timeIntervalSince1970) }, network: "google", provider: "google")
+    }
+    private func ringTile(_ tracker: GoogleTrackerSnapshot) -> some View {
+        Button { run { try await google.ring(deviceID); message = tracker.nearby ? "Bluetooth-Klingeln bestätigt." : "Klingeln bei Google angefragt." } } label: {
+            TrackerActionTile(title: "Ton abspielen", subtitle: tracker.nearby ? "In deiner Nähe" : "Über Google", symbol: "speaker.wave.2.fill", color: .indigo)
+        }.buttonStyle(.plain).disabled(busy)
+    }
+    private var nearbyTile: some View {
+        NavigationLink { GoogleNearbyView(deviceID: deviceID) } label: {
+            TrackerActionTile(title: "Suchen", subtitle: "In der Nähe", symbol: "arrow.up", color: .green)
+        }.buttonStyle(.plain)
+    }
     private func run(_ action: @escaping @MainActor () async throws -> Void) {
+        guard !busy else { return }
         busy = true; message = nil; google.clearError()
         Task { @MainActor in defer { busy = false }; do { try await action() } catch { message = error.localizedDescription } }
     }
@@ -107,7 +120,7 @@ struct NativeGoogleTrackerView: View {
 struct NativeGoogleHistoryView: View {
     let deviceID: String
     @ObservedObject private var google = GoogleTrackerStore.shared
-    private var reports: [GoogleReportSnapshot] { google.reports(for: deviceID) }
+    @State private var reports: [GoogleReportSnapshot] = []
     var body: some View {
         List {
             Section {
@@ -133,6 +146,10 @@ struct NativeGoogleHistoryView: View {
                 }.padding(.vertical, 5)
             }
         }.rjListChrome().navigationTitle("Google-Verlauf").navigationBarTitleDisplayMode(.inline)
+            .task(id: google.trackers.first(where: { $0.id == deviceID })) {
+                let result = await google.reports(for: deviceID)
+                if !Task.isCancelled { reports = result }
+            }
     }
 }
 

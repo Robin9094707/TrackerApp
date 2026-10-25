@@ -26,12 +26,7 @@ extension EnvironmentValues {
 struct RJGlassBackdrop: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Color(uiColor: .systemGroupedBackground)
-            if !reduceTransparency {
-                LinearGradient(colors: [.blue.opacity(0.08), .cyan.opacity(0.035), .clear], startPoint: .topTrailing, endPoint: .bottomLeading)
-            }
-        }.ignoresSafeArea()
+        Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
     }
 }
 
@@ -301,9 +296,9 @@ struct TrackerMapBubble: View {
         VStack(spacing: 3) {
             ZStack(alignment: .bottomTrailing) {
                 Text(tracker.emoji ?? "📍")
-                    .font(.system(size: selected ? 30 : 25))
-                    .frame(width: selected ? 62 : 52, height: selected ? 62 : 52)
-                    .background(Color(uiColor: .systemBackground), in: Circle())
+                    .font(.system(size: selected ? 40 : 30))
+                    .frame(width: selected ? 78 : 60, height: selected ? 78 : 60)
+                    .background(.regularMaterial, in: Circle())
                     .overlay(Circle().stroke(selected ? Color.accentColor : Color(uiColor: .separator), lineWidth: selected ? 3 : 0.5))
                     .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
                 if locating {
@@ -549,5 +544,26 @@ extension Double {
     var metersText: String {
         if self >= 1000 { return String(format: "%.1f km", self / 1000) }
         return "\(Int(self.rounded())) m"
+    }
+}
+
+/// Large, left-aligned action surface matching the map inspector's visual language.
+struct TrackerActionTile: View {
+    let title: String
+    let subtitle: String
+    let symbol: String
+    var color: Color = .blue
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Image(systemName: symbol).font(.title2.weight(.semibold)).foregroundStyle(color)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.headline).foregroundStyle(.primary)
+                Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 110, alignment: .leading)
+        .padding(18)
+        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 26))
     }
 }

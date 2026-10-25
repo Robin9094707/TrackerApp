@@ -236,7 +236,7 @@ final class APIClient {
 
     func request<T: Decodable>(path: String, method: String = "GET", json: [String: Any]? = nil, query: [URLQueryItem] = [], needsCSRF: Bool? = nil) async throws -> T {
         let data = try await raw(path: path, method: method, json: json, query: query, needsCSRF: needsCSRF)
-        do { return try decoder.decode(T.self, from: data) }
+        do { return try await Task.detached(priority: .userInitiated) { try JSONDecoder().decode(T.self, from: data) }.value }
         catch {
             DebugLogger.shared.log("Decode error for \(path): \(error)")
             throw APIError.message("Die Serverantwort konnte nicht gelesen werden: \(error.localizedDescription)")
@@ -300,6 +300,7 @@ final class APIClient {
     }
 
     private func saveCSRF(_ token: String) {
+        guard token != csrfToken else { return }
         csrfToken = token
         KeychainStore.set(token, for: "csrf")
     }

@@ -79,6 +79,9 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         refreshInterval = Self.validInterval(preferences.object(forKey: "native.refreshInterval") as? Int ?? 60)
         contributorMode = preferences.string(forKey: "native.contributorMode") ?? "AtAllAreas"
         Settings.sharedInstance.contributorType = ContributorType(rawValue: contributorMode) ?? .AtAllAreas
+    }
+    private func startObserving() {
+        guard subscriptions.isEmpty else { publishSnapshots(); return }
         Settings.sharedInstance.$devicesList.receive(on: DispatchQueue.main).sink { [weak self] devices in
             guard let self else { return }
             self.deviceSubscriptions.removeAll()
@@ -96,7 +99,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
             self?.errorMessage = notification.userInfo?["message"] as? String
         }.store(in: &subscriptions)
         Timer.publish(every: 3, on: .main, in: .common).autoconnect().sink { [weak self] _ in self?.publishSnapshots() }.store(in: &subscriptions)
-        publishSnapshots() // v5.0's onboarding flag is deliberately ignored. Valid tokens go straight into the native app.
+        publishSnapshots()
     }
     public func clearError() { errorMessage = nil }
     public func hasDevice(_ id: String) -> Bool { trackers.contains { $0.id == id } }
@@ -109,14 +112,20 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         guard let device = Settings.sharedInstance.devicesList?.first(where: { $0.id == id }), device.belongsToCurrentAccount else { throw googleError("Google-Tracker ist noch nicht geladen.") }
         return device
     }
-    public func reports(for id: String) -> [GoogleReportSnapshot] {
+    public func reports(for id: String) async -> [GoogleReportSnapshot] {
         guard let device = try? device(id) else { return [] }
-        return uniqueGoogleReports(device.refreshes.flatMap(\.reports)).map { report in
+        let refreshes = device.refreshes
+        let token = generation
+        let result = await Task.detached(priority: .userInitiated) {
+            uniqueGoogleReports(refreshes.flatMap(\.reports)).map { report in
             let location = report.decryptedLocation
             return GoogleReportSnapshot(id: googleReportIdentity(report), date: report.time,
                 latitude: location?.latitude, longitude: location?.longitude, accuracy: report.accuracy.map(Double.init),
                 kind: String(describing: report.status), own: report.isOwnReport, label: report.name)
-        }
+            }
+        }.value
+        guard !Task.isCancelled, token == generation, device.belongsToCurrentAccount else { return [] }
+        return result
     }
     public func setHistoryEnabled(_ id: String, enabled: Bool) {
         guard let account, hasDevice(id) else { return }
@@ -124,25 +133,57 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         publishSnapshots()
         if enabled, refreshInterval > 0 { try? locate(id) }
     }
+    private var snapshotTask: Task<Void, Never>?
+    private var reportSummaries: [String: (revision: UUID, latest: LocationReportWrapper?, count: Int)] = [:]
     private func publishSnapshots() {
         #if DEBUG
         if uiTestState { return }
         #endif
-        account = TokenManager.sharedInstance.username
-        hasCredentials = TokenManager.sharedInstance.aasToken != nil
-        needsKeys = hasCredentials && TokenManager.sharedInstance.ownerKey == nil
-        guard hasCredentials else { trackers = []; return }
-        let snapshots = (Settings.sharedInstance.devicesList ?? []).filter(\.belongsToCurrentAccount).map { device in
-            let reports = uniqueGoogleReports(device.refreshes.flatMap(\.reports))
-            let report = reports.first { $0.decryptedLocation != nil }
+        let manager = TokenManager.sharedInstance
+        let newAccount = manager.username
+        if account != newAccount { account = newAccount; reportSummaries.removeAll() }
+        let authenticated = manager.aasToken != nil
+        if hasCredentials != authenticated { hasCredentials = authenticated }
+        let locked = authenticated && manager.ownerKey == nil
+        if needsKeys != locked { needsKeys = locked }
+        snapshotTask?.cancel()
+        guard hasCredentials else { if !trackers.isEmpty { trackers = [] }; reportSummaries.removeAll(); return }
+        // Combine emits before mutation. Coalesce a burst of metadata/Bluetooth changes,
+        // then hash and sort immutable report copies on a worker, never the UI thread.
+        snapshotTask = Task { [weak self] in
+            do { try await Task.sleep(for: .milliseconds(80)) } catch { return }
+            await self?.rebuildSnapshots()
+        }
+    }
+    private func rebuildSnapshots() async {
+        let token = generation
+        var snapshots: [GoogleTrackerSnapshot] = []
+        let devices = (Settings.sharedInstance.devicesList ?? []).filter(\.belongsToCurrentAccount)
+        let validIDs = Set(devices.map(\.id))
+        reportSummaries = reportSummaries.filter { validIDs.contains($0.key) }
+        for device in devices {
+            let revision = device.reportRevision
+            if reportSummaries[device.id]?.revision != revision {
+                let refreshes = device.refreshes
+                let summary = await Task.detached(priority: .utility) {
+                    let reports = uniqueGoogleReports(refreshes.flatMap(\.reports))
+                    return (reports.first { $0.decryptedLocation != nil }, reports.count)
+                }.value
+                guard !Task.isCancelled, token == generation, device.belongsToCurrentAccount,
+                      device.reportRevision == revision else { return }
+                reportSummaries[device.id] = (revision, summary.0, summary.1)
+            }
+            let summary = reportSummaries[device.id]
+            let report = summary?.latest
             let location = report?.decryptedLocation
             let nearby = device.bluetoothData.map { !deviceNotCurrentlyReachable(device: $0, currentDate: Date()) } ?? false
-            return GoogleTrackerSnapshot(id: device.id, name: device.userDefinedName, imageURL: device.imageURL,
+            snapshots.append(GoogleTrackerSnapshot(id: device.id, name: device.userDefinedName, imageURL: device.imageURL,
                 latitude: location?.latitude, longitude: location?.longitude, accuracy: report?.accuracy.map(Double.init),
                 reportedAt: report?.time, nearby: nearby, battery: device.batteryState == .Unknown ? nil : device.batteryState.rawValue,
-                reportCount: reports.count, historyEnabled: GoogleCollectionPreferences.enabled(account: account ?? "", deviceID: device.id, defaults: preferences), unlocked: device.eik != nil, isLost: device.isLost,
-                sharedWith: device.sharingSettings.usersWithAccess, signal: nearby ? device.bluetoothData?.rssi_publisher : nil)
+                reportCount: summary?.count ?? 0, historyEnabled: GoogleCollectionPreferences.enabled(account: account ?? "", deviceID: device.id, defaults: preferences), unlocked: device.eik != nil, isLost: device.isLost,
+                sharedWith: device.sharingSettings.usersWithAccess, signal: nearby ? device.bluetoothData?.rssi_publisher : nil))
         }
+        guard !Task.isCancelled, token == generation else { return }
         if snapshots != trackers { trackers = snapshots }
     }
     public func restoreIfNeeded() async {
@@ -150,8 +191,15 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         if uiTestState { return }
         #endif
         guard !restored else { return }; restored = true
+        // Keychain and persisted protobuf catalogs may take time after a cold launch.
+        // Prepare them off the main actor while the first frame becomes interactive.
+        await Task.detached(priority: .userInitiated) { _ = TokenManager.sharedInstance.aasToken; _ = TokenManager.sharedInstance.ownerKey }.value
+        startObserving()
+        let token = generation
         if hasCredentials {
-            if let cached = GoogleReportArchive.catalog() { await processDeviceList(list: cached.deviceMetadata) }
+            let cached = await Task.detached(priority: .userInitiated) { GoogleReportArchive.catalog() }.value
+            guard token == generation else { return }
+            if let cached { await Task.detached(priority: .userInitiated) { await processDeviceList(list: cached.deviceMetadata) }.value }
             await refresh()
         } else {
             // Recover a completed Google web login whose final token exchange was interrupted.
@@ -210,11 +258,12 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
             try await PushReceiver.sharedInstance.prepare()
             let list = try await NovaApiManager.sharedInstance.requestDeviceList()
             guard generation == self.generation else { return }
-            try GoogleReportArchive.storeCatalog(list)
+            try await Task.detached(priority: .utility) { try GoogleReportArchive.storeCatalog(list) }.value
+            guard generation == self.generation else { return }
             if TokenManager.sharedInstance.ownerKey == nil, let shared = TokenManager.sharedInstance.sharedKey?.dataFromHex {
                 try? await installSharedKey(shared)
             }
-            await processDeviceList(list: list.deviceMetadata)
+            await Task.detached(priority: .userInitiated) { await processDeviceList(list: list.deviceMetadata) }.value
             // processDeviceList commits its observable list on the main queue.
             await Task.yield()
             lastCatalog = .now

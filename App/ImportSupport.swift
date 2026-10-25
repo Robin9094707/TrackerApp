@@ -93,7 +93,10 @@ enum ImportStorage {
     }
 }
 
-struct JSONDocumentPicker: UIViewControllerRepresentable {
+typealias JSONDocumentPicker = AnyDocumentPicker
+
+/// File providers may advertise Android packages as unknown types. Validate bytes after picking.
+struct AnyDocumentPicker: UIViewControllerRepresentable {
     let onPick: (URL) -> Void
     let onCancel: () -> Void
 

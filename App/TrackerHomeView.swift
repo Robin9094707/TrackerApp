@@ -42,14 +42,14 @@ struct TrackerHomeView: View {
                 .interactiveDismissDisabled()
         }
         .task { fitAll(); await google.restoreIfNeeded() }
-        .onChange(of: google.trackers) { _, _ in if selectedRef == nil { fitAll() } }
-        .onChange(of: located.map(\.ref)) { _, _ in if selectedRef == nil { fitAll() } }
+        .onChange(of: google.trackers.map(\.id)) { _, _ in if selectedRef == nil && follow { fitAll() } }
+        .onChange(of: located.map(\.ref)) { _, _ in if selectedRef == nil && follow { fitAll() } }
         .onChange(of: current?.location) { _, _ in if follow { focusCurrent() } }
         .onChange(of: detent) { _, value in
             if value != .large { if selectedRef == nil { fitAll() } else if follow { focusCurrent() } }
         }
         .onChange(of: model.locationService.location) { _, value in
-            guard let value, selectedRef == nil else { return }
+            guard let value, selectedRef == nil, follow else { return }
             animate { position = .region(MKCoordinateRegion(center: value.coordinate, latitudinalMeters: 1500, longitudinalMeters: 1500)) }
         }
         .onChange(of: path) { _, value in
@@ -153,6 +153,12 @@ struct TrackerHomeView: View {
                     .navigationDestination(for: String.self) { ref in
                         if let tracker = model.trackers.first(where: { $0.ref == ref }) {
                             TrackerDetailView(tracker: tracker)
+                                .toolbar {
+                                    ToolbarItem(placement: .topBarTrailing) {
+                                        Button { path = []; selectedRef = nil; fitAll() } label: { Image(systemName: "xmark") }
+                                            .accessibilityLabel("Objekt schließen")
+                                    }
+                                }
                         } else {
                             ContentUnavailableView("Objekt nicht verfügbar", systemImage: "airtag", description: Text("Es wurde entfernt oder ist für dieses Konto nicht sichtbar."))
                         }
@@ -210,14 +216,12 @@ struct TrackerLibraryView: View {
     @Environment(AppModel.self) private var model
     let onSelect: (Tracker) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var addingObject = false
 
     var body: some View {
         @Bindable var model = model
         List {
             Section {
-                SyncStatusView()
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
                 if let message = model.statusMessage {
                     HStack(alignment: .top) {
                         Text(message).font(.footnote).foregroundStyle(.secondary)
@@ -226,12 +230,18 @@ struct TrackerLibraryView: View {
                             .accessibilityLabel("Hinweis schließen")
                     }
                 }
-                if model.filteredTrackers.isEmpty {
+                if model.trackers.isEmpty && (model.connectionState == .restoring || model.isRefreshing) {
+                    HStack(spacing: 10) { ProgressView(); Text("Objekte werden geladen …").foregroundStyle(.secondary) }
+                        .listRowBackground(Color.clear)
+                } else if model.filteredTrackers.isEmpty {
                     ContentUnavailableView(model.trackers.isEmpty ? "Noch keine Objekte" : "Keine Treffer", systemImage: "airtag", description: Text(model.trackers.isEmpty ? "Füge unter Ich → Accounts, Import & Fusionen deine Tracker hinzu." : "Passe deine Suche oder Filter an."))
                 }
                 ForEach(model.filteredTrackers) { tracker in
                     Button { onSelect(tracker) } label: { TrackerListRow(tracker: tracker) }
                         .buttonStyle(.plain)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(EdgeInsets(top: 10, leading: 22, bottom: 10, trailing: 22))
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 70 }
                         .accessibilityIdentifier("tracker-row-\(tracker.ref)")
                         .swipeActions(edge: .leading) {
                             Button { Task { await model.setFavorite(tracker) } } label: {
@@ -249,20 +259,36 @@ struct TrackerLibraryView: View {
                         }
                 }
             } header: {
+                Text("Meine Objekte").font(.title3.weight(.semibold)).textCase(nil).padding(.vertical, 8)
                 if model.selectedScope != .all || model.providerFilter != "all" {
                     Text("\(model.selectedScope.title) · \(model.providerFilter == "all" ? "Alle Netze" : model.providerFilter.rjProviderName)")
                 }
             }
+            Section {
+                SyncStatusView().listRowSeparator(.hidden).listRowBackground(Color.clear)
+            }
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(RJGlassBackdrop())
-        .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: model.filteredTrackers.map(\.ref))
         .navigationTitle("Objekte")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
+        .sheet(isPresented: $addingObject) {
+            NavigationStack {
+                Group {
+                    if model.serverActionsAvailable { ProviderSetupView() }
+                    else { GoogleAccountView() }
+                }
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fertig") { addingObject = false } } }
+            }
+        }
         .searchable(text: $model.searchText, prompt: "Name, Adresse oder Notiz")
         .refreshable { await refreshVisibleSources() }
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { addingObject = true } label: { Image(systemName: "plus").font(.title2.weight(.medium)) }
+                    .accessibilityLabel("Objekt hinzufügen")
+            }
             ToolbarItem(placement: .topBarLeading) {
                 Menu {
                     Picker("Ansicht", selection: $model.selectedScope) {
@@ -332,30 +358,29 @@ struct TrackerListRow: View {
     let tracker: Tracker
     var body: some View {
         HStack(spacing: 14) {
-            Text(tracker.emoji ?? "📍").font(.system(size: 30))
-                .frame(width: 54, height: 54)
-                .background(tracker.provider.rjProviderColor.opacity(0.08), in: Circle())
-            VStack(alignment: .leading, spacing: 4) {
+            Text(tracker.emoji ?? "📍").font(.system(size: 34))
+                .frame(width: 58, height: 58)
+                .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+            VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 5) {
-                    Text(tracker.name).font(.headline).foregroundStyle(.primary)
+                    Text(tracker.name).font(.system(.headline, design: .default).weight(.semibold)).foregroundStyle(.primary).lineLimit(2)
                     if tracker.favorite == true { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.orange) }
                 }
-                ResolvedAddressText(location: tracker.validLocation, fallback: tracker.location == nil ? "Kein Standort" : "Adresse nicht verfügbar")
-                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                HStack(spacing: 6) {
+                HStack(spacing: 4) {
+                    Text(tracker.location?.address?.locality ?? tracker.provider.rjProviderName)
+                    Text("·")
                     FreshnessLabel(timestamp: tracker.reportTimestamp > 0 ? tracker.reportTimestamp : nil)
-                    Text("· \(tracker.latestSourceName?.rjProviderName ?? tracker.provider.rjProviderName)")
-                        .font(.caption).foregroundStyle(.secondary)
-                    if let origin = model.locationService.location, let distance = tracker.distance(from: origin) {
-                        Text("· \(distance.metersText)").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
+                }.font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 6)
             if model.isLocating(tracker) { ProgressView().controlSize(.small) }
-            else { Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary) }
+            else if tracker.status == "In der Nähe" {
+                Text("Bei dir").font(.subheadline).foregroundStyle(.secondary)
+            } else if let origin = model.locationService.location, let distance = tracker.distance(from: origin) {
+                Text(distance.metersText).font(.subheadline).foregroundStyle(.secondary)
+            }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 5)
         .contentShape(Rectangle())
     }
 }

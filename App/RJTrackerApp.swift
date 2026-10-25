@@ -12,7 +12,8 @@ struct RJTrackerApp: App {
         WindowGroup {
             RootView().environment(model)
                 .preferredColorScheme(appearance == "dark" ? .dark : appearance == "light" ? .light : nil)
-                .task { try? ImportStorage.prepare(); await model.start() }
+                .task { await model.start() }
+                .task { _ = await Task.detached(priority: .utility) { try? ImportStorage.prepare() }.value }
                 .task { await GoogleTrackerStore.shared.restoreIfNeeded() }
                 .onChange(of: scenePhase) { _, phase in
                     GoogleTrackerStore.shared.sceneChanged(active: phase == .active)

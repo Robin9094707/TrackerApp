@@ -30,7 +30,7 @@ final class MotorolaFirmwareUpdater: NSObject, ObservableObject, FirmwareUpgrade
             package = original
         }
     }
-    private static func cacheURL() throws -> URL {
+    nonisolated private static func cacheURL() throws -> URL {
         let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent("MotorolaFirmware", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -39,13 +39,17 @@ final class MotorolaFirmwareUpdater: NSObject, ObservableObject, FirmwareUpgrade
     func importFile(_ url: URL) async {
         guard !busy else { return }
         busy = true; errorMessage = nil
+        status = "Datei laden und Motorola-Original prüfen …"
         let allowed = url.startAccessingSecurityScopedResource()
         defer { if allowed { url.stopAccessingSecurityScopedResource() }; busy = false }
         do {
-            let original = try await Task.detached(priority: .userInitiated) { try MotorolaFirmwarePackage.load(from: url) }.value
-            try original.data.write(to: Self.cacheURL(), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            let original = try await Task.detached(priority: .userInitiated) {
+                let original = try MotorolaFirmwarePackage.load(from: url)
+                try original.data.write(to: Self.cacheURL(), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                return original
+            }.value
             package = original; status = "Motorola-Original 2.0.104 geprüft und bereit."
-        } catch { errorMessage = error.localizedDescription }
+        } catch { status = "Datei nicht übernommen."; errorMessage = error.localizedDescription }
     }
     func inspect(_ deviceID: String) async {
         guard !busy else { return }

@@ -64,4 +64,14 @@ import Foundation
         XCTAssertEqual(model.connectionState, .connected)
         XCTAssertTrue(model.serverActionsAvailable)
     }
+    func testSavedServerInterfaceIsAvailableBeforeNetworkRestoration() {
+        let model = AppModel(preferences: defaults(), api: client())
+        model.serverURL = "https://saved.example.invalid"; model.username = "saved-user"
+        model.connectionState = .restoring
+        XCTAssertTrue(model.showsMainInterface(localGoogleCredentials: false))
+        XCTAssertFalse(model.serverActionsAvailable)
+        model.serverReconnectEnabled = false
+        XCTAssertFalse(model.showsMainInterface(localGoogleCredentials: false))
+    }
+
 }
