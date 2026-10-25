@@ -1,7 +1,9 @@
-# Current stable releases verified on 2026-10-06. Python 3.11+.
+# Python 3.11+. Apple compatibility sources reviewed on 2026-10-25.
 Flask==3.1.3
 cryptography==50.0.2
-FindMy==0.10.2
+# October 2026 Apple auth compatibility (upstream PRs #279 / Anisette #6).
+FindMy @ git+https://github.com/sacca97/FindMy.py.git@f2d24c86c3357f93cc19dd605fa9dc34d6d1b1c6
+Anisette @ git+https://github.com/sacca97/Anisette.py.git@627c9c663062bd872182b653113759c9d66b7e13
 httpx[http2]==0.28.1
 Pillow==12.3.0
 reportlab==5.0.1

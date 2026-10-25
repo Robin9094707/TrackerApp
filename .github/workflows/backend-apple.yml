@@ -1,0 +1,52 @@
+name: Check and package Tracker backend
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Backend/**'
+      - 'Tests/test_backend*.py'
+      - '.github/workflows/backend-apple.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: Backend/requirements.txt
+      - name: Install compatibility dependencies
+        run: python -m pip install -r Backend/requirements.txt
+      - name: Extract and verify Apple's official ADI runtime
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y 7zip
+          python Backend/setup_apple_adi.py
+      - name: Compile and run focused regressions
+        run: |
+          python -m compileall -q Backend
+          python Tests/test_backend_calendar_mcp.py -v
+          python Tests/test_backend_apple.py -v
+      - name: Package backend without private data or Apple binaries
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_DEFLATED
+          root = Path('Backend')
+          with ZipFile('RJ-Tracker-Backend-20.4.1-Apple-Fix.zip', 'w', ZIP_DEFLATED) as archive:
+              for path in sorted(root.rglob('*')):
+                  relative = path.relative_to(root)
+                  if path.is_file() and not any(part in {'runtime','data','__pycache__'} for part in relative.parts):
+                      archive.write(path, relative.as_posix())
+          PY
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: RJ-Tracker-Backend-20.4.1-Apple-Fix
+          path: RJ-Tracker-Backend-20.4.1-Apple-Fix.zip
+          if-no-files-found: error
+          retention-days: 30

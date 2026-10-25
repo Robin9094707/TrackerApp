@@ -108,3 +108,7 @@ Die IPA ist **unsigniert** und muss für das iPhone mit einem geeigneten Profil 
 - `backup/ios-without-android-2026-10-06`: unmittelbar nach Android-Entfernung, vor iOS-/API-Umbau.
 
 Für Rollback den Snapshot wiederherstellen oder einen Revert-Commit erstellen; die neuen Dateien allein ersetzen kein Backup der privaten Serverdaten.
+
+### Apple-Anmeldung seit Oktober 2026
+
+Für `Email verification failed` und fehlende Apple-Ortung siehe [Backend-Update 20.4.1](Backend/APPLE-UPDATE.md). Das Paket enthält mehrere Backend-Dateien; der bisherige Ein-Datei-Austausch und ein reines PyPI-Update reichen für diesen Fix nicht. Eine neue IPA ist dafür nicht erforderlich.

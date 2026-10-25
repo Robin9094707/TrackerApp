@@ -1,4 +1,4 @@
-# Universal Tag Studio 20.3.1 · MCP ENDPOINT COMPATIBILITY + FINDMY MAINTENANCE
+# Universal Tag Studio 20.3.2 · APPLE OCTOBER 2026 AUTH COMPATIBILITY
 # Backward-compatible single-file upgrade. Existing data/ directory layout,
 # tracker IDs, histories, shares and provider sessions are intentionally
 # preserved. Google integration: leonboe1/GoogleFindMyTools (GPL-3.0).
@@ -45,6 +45,7 @@ from bisect import bisect_left
 from collections import defaultdict, deque
 from collections.abc import MutableMapping
 from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -63,12 +64,107 @@ from cryptography.hazmat.primitives.padding import PKCS7
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from findmy import (
-    AppleAccount,
+    AppleAccount as UpstreamAppleAccount,
     FindMyAccessory,
     LocalAnisetteProvider,
     LoginState,
     TrustedDeviceSecondFactorMethod,
 )
+# FindMy.py PR #279 supplies identity-aware MobileMe and hsc=409 2FA.
+# Its GSA User-Agent still describes Darwin 18; keep it aligned with the
+# actual provider, including after a persisted session is restored.
+from findmy.util.http import HttpSession as FindMyHttpSession
+
+
+class AppleIdentityHttpSession(FindMyHttpSession):
+    def __init__(self, provider):
+        super().__init__()
+        self.provider = provider
+
+    async def request(self, method, url, **kwargs):
+        if urllib.parse.urlsplit(url).hostname == "gsa.apple.com":
+            headers = dict(kwargs.get("headers") or {})
+            headers["User-Agent"] = self.provider.user_agent
+            kwargs["headers"] = headers
+        return await super().request(method, url, **kwargs)
+
+
+class AppleAccount(UpstreamAppleAccount):
+    def __init__(self, anisette, *, state_info=None):
+        super().__init__(anisette, state_info=state_info)
+        self._asyncacc._http = AppleIdentityHttpSession(anisette)
+
+
+APPLE_ADI_SHA256 = "2eafc3c79c7f41a8afbfbeaaf23ee5dab5ad5bda55ec8e54dbc0ddf1d20ce630"
+APPLE_ADI_DEFAULT = Path(__file__).resolve().parent / "runtime" / "CoreADI.x86_64"
+# Set before the lazy Anisette engine is initialized. No download on startup.
+os.environ.setdefault("MACOS_ADI_BINARY", str(APPLE_ADI_DEFAULT))
+
+
+class AppleSetupError(RuntimeError):
+    pass
+
+
+def validate_apple_runtime():
+    import anisette
+    if not hasattr(anisette, "AsyncAnisetteProvider"):
+        raise AppleSetupError("Apple-Backend benötigt die neuen Abhängigkeiten. Bitte install-apple-backend.sh ausführen und den Server neu starten.")
+    binary = Path(os.environ["MACOS_ADI_BINARY"]).expanduser()
+    if not binary.is_file() or hashlib.sha256(binary.read_bytes()).hexdigest() != APPLE_ADI_SHA256:
+        raise AppleSetupError("Die macOS-ADI-Bibliothek fehlt oder passt nicht. Bitte install-apple-backend.sh ausführen und den Server neu starten.")
+
+
+def require_apple_report_session(account):
+    if account.login_state != LoginState.LOGGED_IN:
+        raise AppleSetupError("Apple-Anmeldung ist noch nicht abgeschlossen. Bitte erneut anmelden und Zwei-Faktor-Bestätigung abschließen.")
+    mapping = account.to_json()
+    tokens = mapping.get("login", {}).get("data", {}).get("mobileme_data", {}).get("tokens", {})
+    if not tokens.get("searchPartyToken"):
+        raise AppleSetupError("Apple hat keinen Ortungszugang ausgestellt (searchPartyToken fehlt). Bitte das Apple-Backend aktualisieren und erneut anmelden.")
+
+
+def close_apple_account(account):
+    if account is None:
+        return
+    try:
+        loop = account._evt_loop
+        if not loop.is_running() and not loop.is_closed():
+            loop.run_until_complete(account.close())
+            loop.close()
+    except Exception:
+        logger.debug("Apple-Sitzung konnte nicht vollständig geschlossen werden.")
+
+
+def apple_account_operation(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        if not fetch_lock.acquire(blocking=False):
+            return jsonify(status="error", message="Eine Apple-Anfrage läuft noch. Bitte kurz warten."), 409
+        try:
+            return function(*args, **kwargs)
+        finally:
+            fetch_lock.release()
+    return wrapped
+
+
+def apple_login_error(exc):
+    if isinstance(exc, AppleSetupError):
+        return str(exc), "apple_setup_required", False
+    message = str(exc).lower()
+    if "email verification failed" in message or "429" in message or "-80045" in message:
+        return ("Apple lehnt derzeit die Geräte-Anmeldung ab. Das kann an der Apple-Protokolländerung oder einer temporären Sperre liegen. Bitte Backend aktualisieren und später erneut versuchen; wiederholte Anmeldungen helfen nicht.", "apple_provider_rejected", True)
+    return "Apple-Anmeldung fehlgeschlagen. Bitte Zugangsdaten und Verbindung prüfen.", "apple_login_failed", False
+
+
+# The public PR currently targets a macOS 26 daemon. The iTunes 4.19
+# framework is directly downloadable from Apple; use its matching emulator.
+# Explicit package path also supports runpy-based maintenance/tests.
+_backend_module_dir = str(Path(__file__).resolve().parent)
+if _backend_module_dir not in sys.path:
+    sys.path.insert(0, _backend_module_dir)
+from apple_adi import install_itunes_adi_backend
+install_itunes_adi_backend()
+
 FINDMY_RUNTIME_VERSION = package_version("FindMy")
 try:
     from findmy import FixedRollingKeyPairAccessory
@@ -1005,10 +1101,18 @@ def restore_apple_account():
     if backup_path.is_file():
         candidates.append(("backup", backup_path))
     last_error = None
-    anisette_path = concrete_tenant_path(ANISETTE_LIBS)
     for source, candidate in candidates:
         try:
-            account = AppleAccount.from_json(candidate, anisette_libs_path=anisette_path)
+            mapping = json.loads(candidate.read_text())
+            provider = mapping.get("anisette", {})
+            if provider.get("type") == "aniLocal" and provider.get("prov_data"):
+                try:
+                    modern = json.loads(base64.b64decode(provider["prov_data"], validate=True))
+                    if not isinstance(modern, dict) or "device" not in modern:
+                        raise ValueError("legacy")
+                except (ValueError, UnicodeDecodeError):
+                    raise AppleSetupError("Gespeicherte Android-ADI-Sitzung benötigt eine neue Apple-Anmeldung; Tracker und Verlauf bleiben erhalten.") from None
+            account = AppleAccount.from_json(candidate)
             status.update({"status": "loaded", "source": source, "error_type": ""})
             state["apple_session_restore"] = status
             if source == "backup":
@@ -1022,7 +1126,7 @@ def restore_apple_account():
             return account
         except Exception as exc:
             last_error = exc
-    status.update({"status": "error", "source": "primary", "error_type": type(last_error).__name__ if last_error else "UnknownError"})
+    status.update({"status": "reauth_required" if isinstance(last_error, AppleSetupError) else "error", "source": "primary", "error_type": type(last_error).__name__ if last_error else "UnknownError"})
     state["apple_session_restore"] = status
     logger.warning("Gespeicherte Apple-Sitzung konnte nicht wiederhergestellt werden (%s).", status["error_type"])
     return None
@@ -11725,7 +11829,7 @@ def tracker_lab_active_job():
     return None
 
 APP_NAME = "Universal Tag Studio"
-APP_VERSION = "20.4.0 API EDITION"
+APP_VERSION = "20.4.1 API EDITION"
 
 
 OPTIMIZED_ROUTE_DEFAULT_POINTS = int(os.environ.get("ULTRA_TRACKER_ROUTE_MAX_DISPLAY_POINTS", "4200"))
@@ -22318,7 +22422,10 @@ def evidence_export_download_api(job_id):
 
 
 @app.route("/api/apple/auth/logout", methods=["POST"])
+@apple_account_operation
 def logout_apple_auth():
+    close_apple_account(state.get("account"))
+    close_apple_account(state.get("temp_acc"))
     state["account"] = None
     state["temp_acc"] = None
     state["twofa_methods"] = None
@@ -23136,21 +23243,32 @@ def reset_device_data(name):
 
 
 @app.route("/api/login", methods=["POST"])
+@apple_account_operation
 def login():
     data = request.json or {}
     email = str(data.get("email", "")).strip()
     password = str(data.get("password", ""))
     if not email or not password:
         return jsonify({"status": "error", "message": "Bitte Apple-ID und Passwort eingeben."}), 400
+    retry_after = max(0, int(state.get("apple_login_retry_after", 0) - time.time()))
+    if retry_after:
+        return jsonify(status="error", code="apple_login_cooldown", retry_after=retry_after,
+            message=f"Bitte noch {retry_after} Sekunden vor einer neuen Apple-Anmeldung warten."), 429
+    acc = None
     try:
-        ani = LocalAnisetteProvider(libs_path=ANISETTE_LIBS)
+        validate_apple_runtime()
+        # Old Android ADI provisioning cannot produce a Find My token anymore.
+        # A fresh Mac identity is persisted only after complete authentication.
+        ani = LocalAnisetteProvider()
         acc = AppleAccount(ani)
         result = acc.login(email, password)
         if result == LoginState.REQUIRE_2FA:
             methods = acc.get_2fa_methods()
             if not methods:
                 return jsonify({"status": "error", "message": "Keine Zwei-Faktor-Methode verfügbar."}), 400
+            close_apple_account(state.get("temp_acc"))
             state["temp_acc"] = acc
+            state["selected_method"] = None
             state["twofa_methods"] = methods
             labels = [
                 "Vertrauenswürdiges Apple-Gerät"
@@ -23159,26 +23277,40 @@ def login():
                 for method in methods
             ]
             return jsonify({"status": "2fa", "methods": labels})
+        require_apple_report_session(acc)
         persist_apple_account(acc)
+        close_apple_account(state.get("account"))
+        close_apple_account(state.get("temp_acc"))
         state["account"] = acc
+        state["sync_failures"] = 0
+        state["sync_backoff_until"] = 0
         state["temp_acc"] = None
         state["twofa_methods"] = None
         state["selected_method"] = None
         return jsonify({"status": "success"})
     except Exception as exc:
-        logger.warning("Apple-ID Anmeldung fehlgeschlagen: %s", exc)
-        return jsonify({"status": "error", "message": "Anmeldung fehlgeschlagen. Bitte Zugangsdaten und Verbindung prüfen."}), 400
+        message, error_code, cooldown = apple_login_error(exc)
+        if cooldown:
+            state["apple_login_retry_after"] = time.time() + 120
+        logger.warning("Apple-ID Anmeldung fehlgeschlagen (%s / %s).", type(exc).__name__, error_code)
+        return jsonify(status="error", message=message, code=error_code), 400
+    finally:
+        if acc is not state.get("account") and acc is not state.get("temp_acc"):
+            close_apple_account(acc)
 
 
 @app.route("/api/2fa/request", methods=["POST"])
+@apple_account_operation
 def request_2fa():
     methods = state.get("twofa_methods") or []
     try:
         index = int((request.json or {}).get("index", -1))
         if index < 0 or index >= len(methods):
             raise ValueError("Ungültige Methode")
-        state["selected_method"] = methods[index]
-        state["selected_method"].request()
+        method = methods[index]
+        state["selected_method"] = None
+        method.request()
+        state["selected_method"] = method
         return jsonify({"status": "requested"})
     except Exception as exc:
         logger.warning("2FA-Code konnte nicht angefordert werden: %s", exc)
@@ -23186,21 +23318,28 @@ def request_2fa():
 
 
 @app.route("/api/2fa/submit", methods=["POST"])
+@apple_account_operation
 def submit_2fa():
     code = str((request.json or {}).get("code", "")).strip()
     if not code or state.get("selected_method") is None or state.get("temp_acc") is None:
         return jsonify({"status": "error", "message": "Bitte zuerst einen Code anfordern."}), 400
     try:
         state["selected_method"].submit(code)
+        require_apple_report_session(state["temp_acc"])
         persist_apple_account(state["temp_acc"])
+        close_apple_account(state.get("account"))
         state["account"] = state["temp_acc"]
+        state["sync_failures"] = 0
+        state["sync_backoff_until"] = 0
         state["temp_acc"] = None
         state["twofa_methods"] = None
         state["selected_method"] = None
         return jsonify({"status": "success"})
     except Exception as exc:
-        logger.warning("2FA-Bestätigung fehlgeschlagen: %s", exc)
-        return jsonify({"status": "error", "message": "Der Bestätigungscode ist ungültig oder abgelaufen."}), 400
+        if isinstance(exc, AppleSetupError):
+            return jsonify(status="error", message=str(exc), code="apple_setup_required"), 400
+        logger.warning("2FA-Bestätigung fehlgeschlagen (%s).", type(exc).__name__)
+        return jsonify({"status": "error", "message": "Der Bestätigungscode ist ungültig oder abgelaufen oder Apple hat die Anmeldung abgelehnt."}), 400
 
 
 @app.route("/api/devices", methods=["POST"])
@@ -27906,57 +28045,12 @@ def findmy_run_pip(args):
 
 
 def findmy_update_worker(target):
-    old = findmy_installed_version()
-    changed = False
-    rollback_wheel = None
+    # The fork has the same version as PyPI 0.10.2, so the former rollback
+    # strategy cannot restore it. Update the tested package set together.
     try:
-        with tempfile.TemporaryDirectory(prefix="rj-findmy-") as folder:
-            root = Path(folder)
-            previous = root / "previous"; previous.mkdir()
-            candidate = root / "candidate"; candidate.mkdir()
-            staged = root / "staged"; staged.mkdir()
-            findmy_update_save(phase="download", message="Aktuelle und neue Version für Prüfung und Rückkehr herunterladen.")
-            for version, destination in ((old, previous), (target, candidate)):
-                if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
-                    raise RuntimeError("Installierte Version ist nicht sicher rückspielbar.")
-                findmy_run_pip(["download", "--index-url", "https://pypi.org/simple", "--only-binary=:all:", "--no-deps", "--dest", str(destination), "FindMy==" + version])
-            rollback_wheel = next(previous.glob("*.whl"))
-            wheel = next(candidate.glob("*.whl"))
-            findmy_run_pip(["install", "--no-deps", "--target", str(staged), str(wheel)])
-            findmy_update_save(phase="preflight", message="API und vorhandene Abhängigkeiten isoliert prüfen.")
-            probe = '''import sys, importlib.metadata as m
-sys.path.insert(0, sys.argv[1])
-from findmy import AppleAccount, FindMyAccessory, LocalAnisetteProvider, LoginState, TrustedDeviceSecondFactorMethod
-from pip._vendor.packaging.requirements import Requirement
-for text in m.distribution('FindMy').requires or []:
- r=Requirement(text)
- if r.marker is None or r.marker.evaluate({'extra':''}):
-  assert r.specifier.contains(m.version(r.name)), 'Dependency mismatch: '+r.name
-assert callable(AppleAccount.fetch_location) and callable(AppleAccount.fetch_location_history)
-'''
-            check = subprocess.run([sys.executable, "-c", probe, str(staged)], capture_output=True, timeout=30)
-            if check.returncode:
-                raise RuntimeError("Neue FindMy-Version passt nicht zur installierten API oder den Abhängigkeiten. Aktuelle Version bleibt aktiv.")
-            findmy_update_save(phase="backup", message="Serverdaten vor der Installation sichern.")
-            with tenant_context("main"):
-                backup, _ = create_server_backup(True, True, "before_findmy_update")
-            findmy_update_save(backup=backup.name, previous_version=old, phase="install", message="Geprüftes Paket installieren.")
-            changed = True
-            try:
-                findmy_run_pip(["install", "--no-deps", "--force-reinstall", str(wheel)])
-                verify = subprocess.run([sys.executable, "-c", "from findmy import AppleAccount, FindMyAccessory, LocalAnisetteProvider"], capture_output=True, timeout=30)
-                if verify.returncode or findmy_installed_version() != target:
-                    raise RuntimeError("Installation konnte nicht bestätigt werden.")
-            except Exception:
-                findmy_update_save(phase="rollback", message="Vorherige Paketversion wiederherstellen.")
-                findmy_run_pip(["install", "--no-deps", "--force-reinstall", str(rollback_wheel)])
-                changed = False
-                raise
-            findmy_update_save(running=False, phase="complete", installed_version=target, restart_required=True,
-                message="FindMy.py aktualisiert. Serverdienst neu starten, damit alle Worker die neue Version laden. Bestehende Daten bleiben erhalten.")
-    except Exception as exc:
-        findmy_update_save(running=False, phase="error", restart_required=changed,
-            message=str(exc)[:350], installed_version=findmy_installed_version())
+        findmy_update_save(running=False, phase="error", restart_required=False,
+            message="Apple-Kompatibilitätsbuild: gemeinsam über install-apple-backend.sh aktualisieren.",
+            installed_version=findmy_installed_version())
     finally:
         _findmy_update_lock.release()
 
@@ -27967,7 +28061,7 @@ def findmy_maintenance_api():
         return jsonify(status="error", message="Nur der Hauptadmin darf Serverpakete verwalten."), 403
     if request.method == "GET":
         return jsonify(status="ok", findmy={**_findmy_update, "installed_version": findmy_installed_version(),
-            "source_url": "https://github.com/malmeloo/FindMy.py", "can_update": sys.prefix != sys.base_prefix,
+            "source_url": "https://github.com/malmeloo/FindMy.py/pull/279", "can_update": False, "update_note": "Apple-Kompatibilitätsbuild: gemeinsam über install-apple-backend.sh aktualisieren.",
             "runtime_version": FINDMY_RUNTIME_VERSION})
     data = request.get_json(silent=True) or {}
     if data.get("action") == "check":
@@ -27987,17 +28081,7 @@ def findmy_maintenance_api():
         valid, _ = verify_two_factor_code("main", data.get("current_code"), consume=True)
         if not valid:
             return jsonify(status="error", message="Gültiger Zwei-Faktor-Code erforderlich."), 403
-    target = str(data.get("version") or "")
-    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", target) or target != _findmy_update.get("latest_version") or time.time() - _findmy_update.get("checked_ts", 0) > 3600:
-        return jsonify(status="error", message="Zuerst neu nach einer offiziellen Version suchen."), 409
-    if not _findmy_update_lock.acquire(blocking=False):
-        return jsonify(status="error", message="Ein FindMy-Update läuft bereits."), 409
-    if target == findmy_installed_version():
-        _findmy_update_lock.release()
-        return jsonify(status="error", message="Diese Version ist bereits installiert."), 409
-    findmy_update_save(running=True, phase="queued", target_version=target, message="Update wird vorbereitet.")
-    threading.Thread(target=findmy_update_worker, args=(target,), daemon=True, name="findmy-update").start()
-    return findmy_maintenance_api_status(), 202
+    return jsonify(status="error", message="Apple-Kompatibilitätsbuild: bitte gemeinsam über install-apple-backend.sh aktualisieren. Ein PyPI-Einzelupdate würde den Apple-Fix ersetzen."), 409
 
 
 def findmy_maintenance_api_status():
