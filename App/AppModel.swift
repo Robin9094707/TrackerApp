@@ -22,7 +22,7 @@ final class AppModel {
     var bootstrap: BootstrapResponse? { didSet { mergeTrackers() } }
     private var cachedServerTrackers: [Tracker] = [] { didSet { mergeTrackers() } }
     private var hasCachedCatalog = false
-    private var cacheIdentity: String { serverURL.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() + "|" + username.lowercased() }
+    private var cacheIdentity: String { serverURL.trimmingCharacters(in: .whitespacesAndNewlines) + "|" + username }
     var isRefreshing = false
     var locatingRefs: Set<String> = []
     var notificationRefs: Set<String> = []
