@@ -339,10 +339,8 @@ struct TrackerLibraryView: View {
         // Start the local Google request before waiting for a slow/unreachable server.
         async let local: Void = refreshGoogleIfVisible()
         // A Google-only refresh must not wait for an unrelated offline server.
-        if model.providerFilter != "google" {
-            if model.connectionState == .connected { await model.refreshTrackers() }
-            else { await model.retryServerConnection() }
-        }
+        if model.connectionState == .connected { await model.refreshTrackers() }
+        else if model.providerFilter != "google" || !google.hasCredentials { await model.retryServerConnection() }
         await local
     }
     private func refreshGoogleIfVisible() async {
