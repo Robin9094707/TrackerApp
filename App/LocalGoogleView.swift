@@ -68,7 +68,7 @@ struct GoogleAccountView: View {
                     }
                     Button("Google-Verbindung reparieren", systemImage: "wrench.and.screwdriver") { run { try await google.repairConnection() } }
                     Button("Google-Anmeldung erneuern", systemImage: "person.badge.key.fill") { run { auth = GoogleAuthDestination(url: try await google.prepareLogin(), recovery: false) } }
-                    Button("Tracker und Reports aktualisieren", systemImage: "arrow.clockwise") { run { await google.refresh(); await google.refreshLocations() } }
+                    Button("Tracker und Reports aktualisieren", systemImage: "arrow.clockwise") { run { Haptics.impact(); await google.refresh(); await google.refreshLocations() } }
                     Button("Google-Schlüssel entsperren", systemImage: "key.fill") { run { auth = GoogleAuthDestination(url: try await google.recoveryURL(), recovery: true) } }
                     if google.needsKeys { Label("Schlüssel noch gesperrt – Anmeldung bleibt erhalten", systemImage: "lock.fill").foregroundStyle(.orange) }
                 } else {

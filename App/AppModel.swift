@@ -296,10 +296,21 @@ final class AppModel {
         if let index = bootstrap?.trackers.firstIndex(where: { $0.ref == tracker.ref }) { bootstrap?.trackers[index] = tracker; trackerRevision += 1 }
     }
 
+    func locateGoogle(_ id: String) async {
+        let google = GoogleTrackerStore.shared
+        guard !google.locating.contains(id) else { return }
+        Haptics.impact()
+        google.clearError()
+        await google.refreshLocation(id)
+        guard !Task.isCancelled else { return }
+        if google.locationSucceeded[id] == true { Haptics.success() }
+        else { Haptics.warning() }
+        if let error = google.errorMessage { errorMessage = error }
+    }
+
     func locate(_ tracker: Tracker) async {
         if tracker.provider == "google", GoogleTrackerStore.shared.hasDevice(tracker.apiID) {
-            do { try GoogleTrackerStore.shared.locate(tracker.apiID); statusMessage = "Google sammelt alle Reports für \(tracker.name) …" }
-            catch { errorMessage = error.localizedDescription }
+            await locateGoogle(tracker.apiID)
             return
         }
         guard !locatingRefs.contains(tracker.ref), !isLocatingAll else { return }
@@ -307,24 +318,43 @@ final class AppModel {
         let generation = sessionGeneration
         do {
             Haptics.impact()
-            _ = try await self.api.requestJSON(path: "/api/mobile/v1/locate", method: "POST", json: ["tracker": tracker.ref])
+            let response = try await self.api.requestJSON(path: "/api/mobile/v1/locate", method: "POST", json: ["tracker": tracker.ref])
+            // The baseline is captured by the server before scheduling, so even
+            // a response arriving before the first GET is observed correctly.
+            let baseline = response["trackers"].arrayValue.first?["refresh"]["completion"].numberValue
             guard generation == sessionGeneration else { return }
             statusMessage = "Ortung für \(tracker.name) angefordert. Warte auf eine neue Meldung …"
             locationMonitors[tracker.ref] = Task { [weak self] in
                 guard let self else { return }
                 defer { if self.sessionGeneration == generation { self.locatingRefs.remove(tracker.ref); self.locationMonitors[tracker.ref] = nil } }
-                for delay in [1, 2, 3, 5, 8, 12, 15] {
+                for _ in 0..<60 {
                     do {
-                        try await Task.sleep(for: .seconds(delay))
+                        try await Task.sleep(for: .seconds(1))
                         guard self.sessionGeneration == generation, self.connectionState == .connected else { return }
                         let updated = try await self.api.tracker(reference: tracker.ref)
                         guard self.sessionGeneration == generation, !Task.isCancelled else { return }
                         self.updateTracker(updated)
+                        if let refresh = updated.refresh, !refresh.available {
+                            self.statusMessage = "Apple-Verbindung nicht verfügbar. Bitte die Anmeldung prüfen."
+                            Haptics.warning(); return
+                        }
+                        if let baseline, let refresh = updated.refresh, refresh.completion > baseline {
+                            self.api.clearHistoryCache()
+                            self.statusMessage = refresh.status == "error"
+                                ? "Ortung für \(tracker.name) fehlgeschlagen. Der letzte Standort bleibt sichtbar."
+                                : (updated.reportTimestamp > tracker.reportTimestamp
+                                    ? "Neuer Standort für \(tracker.name) empfangen."
+                                    : "Abfrage für \(tracker.name) abgeschlossen. Der letzte gemeldete Standort wird angezeigt.")
+                            if refresh.status == "error" { Haptics.warning() } else { Haptics.success() }
+                            await self.saveCatalog(); return
+                        }
                         if updated.reportTimestamp > tracker.reportTimestamp {
-                            self.statusMessage = "Neuer Standort für \(tracker.name) empfangen."; Haptics.success(); return
+                            self.api.clearHistoryCache()
+                            self.statusMessage = "Neuer Standort für \(tracker.name) empfangen."
+                            Haptics.success(); await self.saveCatalog(); return
                         }
                     } catch is CancellationError { return }
-                    catch { self.statusMessage = "Ortung angefordert, Abruf fehlgeschlagen: \(error.localizedDescription)"; return }
+                    catch { guard self.sessionGeneration == generation else { return }; Haptics.warning(); self.statusMessage = "Ortung angefordert, Abruf fehlgeschlagen: \(error.localizedDescription)"; return }
                 }
                 self.statusMessage = "Noch keine neuere Meldung für \(tracker.name). Die Serverortung läuft unabhängig weiter."
             }

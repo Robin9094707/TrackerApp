@@ -32,6 +32,9 @@ struct TrackerDetailView: View {
             VStack(spacing: 14) {
                 header
                 actions
+                if model.isLocating(current) {
+                    ProgressView("Standort wird abgefragt …").font(.footnote)
+                }
                 if current.provider == "google" {
                     GoogleLauncherCard(deviceID: current.apiID).padding(12).rjCompactCard()
                 }

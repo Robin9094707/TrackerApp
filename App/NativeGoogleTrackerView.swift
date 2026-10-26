@@ -96,7 +96,7 @@ struct NativeGoogleTrackerView: View {
         .rjListChrome().navigationTitle(tracker?.name ?? "Google-Tracker").navigationBarTitleDisplayMode(.inline)
         .listSectionSpacing(14)
         .contentMargins(.top, 8, for: .scrollContent)
-        .refreshable { await google.refreshLocation(deviceID) }
+        .refreshable { await model.locateGoogle(deviceID) }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { updateLocation() } label: {
@@ -130,7 +130,7 @@ struct NativeGoogleTrackerView: View {
     }
     private func updateLocation() {
         google.clearError()
-        do { try google.locate(deviceID) } catch { message = error.localizedDescription }
+        Task { await model.locateGoogle(deviceID) }
     }
     private var refreshTile: some View {
         Button { updateLocation() } label: {
