@@ -44,12 +44,12 @@ final class TrackerUITests: XCTestCase {
         capture("04-Dark-Large-Text")
         let navigation = app.navigationBars["Objekte"]
         let initialY = navigation.frame.minY
-        let handle = app.buttons["Sheet Grabber"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let handle = sheetGrabber(in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         handle.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)))
         XCTAssertLessThan(navigation.frame.minY, initialY - 100)
         capture("08-Dark-Expanded")
         let expandedY = navigation.frame.minY
-        let expandedHandle = app.buttons["Sheet Grabber"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let expandedHandle = sheetGrabber(in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         expandedHandle.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)))
         XCTAssertGreaterThan(navigation.frame.minY, expandedY + 100)
         capture("09-Dark-Collapsed")
@@ -209,8 +209,14 @@ final class TrackerUITests: XCTestCase {
     }
 
     @MainActor
+    private func sheetGrabber(in app: XCUIApplication) -> XCUIElement {
+        // UIKit localizes this system control when the app declares German.
+        app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Sheet Grabber", "Aufzeichnungsblatt")).firstMatch
+    }
+
+    @MainActor
     private func expandInspector(_ app: XCUIApplication) {
-        let grabber = app.buttons["Sheet Grabber"].firstMatch
+        let grabber = sheetGrabber(in: app).firstMatch
         if grabber.waitForExistence(timeout: 10) {
             grabber.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                 .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.10)))
