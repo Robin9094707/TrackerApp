@@ -44,12 +44,12 @@ final class TrackerUITests: XCTestCase {
         capture("04-Dark-Large-Text")
         let navigation = app.navigationBars["Objekte"]
         let initialY = navigation.frame.minY
-        let handle = app.buttons["Sheet Grabber"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let handle = sheetGrabber(in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         handle.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)))
         XCTAssertLessThan(navigation.frame.minY, initialY - 100)
         capture("08-Dark-Expanded")
         let expandedY = navigation.frame.minY
-        let expandedHandle = app.buttons["Sheet Grabber"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let expandedHandle = sheetGrabber(in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         expandedHandle.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)))
         XCTAssertGreaterThan(navigation.frame.minY, expandedY + 100)
         capture("09-Dark-Collapsed")
@@ -192,8 +192,31 @@ final class TrackerUITests: XCTestCase {
     }
 
     @MainActor
+    func testGoogleDetailsUseOneTitleAndDirectRefresh() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-local-google", "-tracker.provider", "google", "-AppleLanguages", "(en)"]
+        app.launch()
+        expandInspector(app)
+        let tag = app.buttons["tracker-row-google:demo-local-tag"]
+        XCTAssertTrue(tag.waitForExistence(timeout: 20)); tag.tap()
+        expandInspector(app)
+        XCTAssertTrue(app.buttons["google-refresh-location"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["google-locate-tile"].exists)
+        XCTAssertEqual(app.navigationBars.staticTexts.matching(identifier: "Lokaler Test-Tracker").count, 1)
+        XCTAssertFalse(app.otherElements["tracker-detail-header"].staticTexts["Lokaler Test-Tracker"].exists)
+        XCTAssertFalse(app.staticTexts["1h"].exists)
+        capture("Google-Compact-German-Details")
+    }
+
+    @MainActor
+    private func sheetGrabber(in app: XCUIApplication) -> XCUIElement {
+        // UIKit localizes this system control when the app declares German.
+        app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Sheet Grabber", "Aufzeichnungsblatt")).firstMatch
+    }
+
+    @MainActor
     private func expandInspector(_ app: XCUIApplication) {
-        let grabber = app.buttons["Sheet Grabber"].firstMatch
+        let grabber = sheetGrabber(in: app).firstMatch
         if grabber.waitForExistence(timeout: 10) {
             grabber.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                 .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.10)))
@@ -208,3 +231,4 @@ final class TrackerUITests: XCTestCase {
         add(attachment)
     }
 }
+

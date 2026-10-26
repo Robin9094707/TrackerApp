@@ -11,14 +11,14 @@ struct TrackerHomeView: View {
     @State private var selectedRef: String?
     @State private var path: [String] = []
     @State private var tab = 0
-    @State private var detent: PresentationDetent = .medium
+    @State private var detent: PresentationDetent = .fraction(0.60)
     @State private var follow = true
     @AppStorage("mapAppearance") private var mapAppearance = "standard"
     @AppStorage("showMapZones") private var showZones = false
 
     private var current: Tracker? { model.trackers.first { $0.ref == selectedRef } }
     private var located: [Tracker] { model.filteredTrackers.filter { $0.validLocation != nil } }
-    private var coverage: CGFloat { sizeClass == .regular ? 0 : (detent == .large ? 0.80 : detent == .medium ? 0.48 : 0.22) }
+    private var coverage: CGFloat { sizeClass == .regular ? 0 : (detent == .large ? 0.80 : detent == .fraction(0.60) ? 0.60 : 0.22) }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -34,7 +34,7 @@ struct TrackerHomeView: View {
         }
         .sheet(isPresented: Binding(get: { sizeClass != .regular }, set: { _ in })) {
             inspector
-                .presentationDetents([.height(190), .medium, .large], selection: $detent)
+                .presentationDetents([.height(190), .fraction(0.60), .large], selection: $detent)
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(28)
                 .presentationBackground(Color(uiColor: .systemGroupedBackground))
@@ -179,7 +179,7 @@ struct TrackerHomeView: View {
         .environment(\.rjExpandInspector, { detent = .large })
         .onChange(of: tab) { _, value in
             if value != 0 { detent = .large }
-            else { detent = .medium }
+            else { detent = .fraction(0.60) }
         }
         .alert("RJ Tracker", isPresented: Binding(get: { model.errorMessage != nil || model.locationService.message != nil }, set: { if !$0 { model.errorMessage = nil; model.locationService.message = nil } })) {
             Button("OK") { model.errorMessage = nil; model.locationService.message = nil }
@@ -190,7 +190,7 @@ struct TrackerHomeView: View {
         selectedRef = tracker.ref
         tab = 0
         path = [tracker.ref]
-        detent = .medium
+        detent = .fraction(0.60)
         follow = true
         focusCurrent()
         Haptics.impact()
@@ -320,10 +320,11 @@ struct TrackerLibraryView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { Task { await refreshVisibleSources() } } label: {
-                    if model.isRefreshingTrackers || (model.showsGoogleControls && google.isRefreshing) { ProgressView() } else { Image(systemName: "arrow.clockwise") }
+                    if model.isRefreshingTrackers || (model.showsGoogleControls && (google.isRefreshing || !google.locating.isEmpty)) { ProgressView() } else { Image(systemName: "arrow.clockwise") }
                 }
-                .disabled(model.isRefreshingTrackers || (model.showsGoogleControls && google.isRefreshing))
+                .disabled(model.isRefreshingTrackers || (model.showsGoogleControls && (google.isRefreshing || !google.locating.isEmpty)))
                 .accessibilityLabel("Standorte aktualisieren")
+                .accessibilityIdentifier("refresh-locations")
             }
         }
         .task {
@@ -337,12 +338,13 @@ struct TrackerLibraryView: View {
     private func refreshVisibleSources() async {
         // Start the local Google request before waiting for a slow/unreachable server.
         async let local: Void = refreshGoogleIfVisible()
+        // A Google-only refresh must not wait for an unrelated offline server.
         if model.connectionState == .connected { await model.refreshTrackers() }
-        else { await model.retryServerConnection() }
+        else if model.providerFilter != "google" || !google.hasCredentials { await model.retryServerConnection() }
         await local
     }
     private func refreshGoogleIfVisible() async {
-        if model.showsGoogleControls { await google.refresh() }
+        if model.showsGoogleControls { await google.refreshLocations() }
     }
 
     private var groupOptions: [(id: String, name: String)] {
@@ -422,3 +424,4 @@ struct ServerRequiredView: View {
         }
     }
 }
+

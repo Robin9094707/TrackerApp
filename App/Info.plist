@@ -3,7 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
-	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<string>de</string>
+	<key>CFBundleLocalizations</key>
+	<array><string>de</string></array>
 	<key>CFBundleDisplayName</key>
 	<string>RJ Tracker</string>
 	<key>CFBundleExecutable</key>
@@ -89,3 +91,4 @@
 	<string>Wenn du Hintergrundsuche aktivierst, kann die App deine eigenen Google-Tracker per Bluetooth erkennen und verschlüsselte Sichtungsmeldungen an Google senden.</string>
 </dict>
 </plist>
+

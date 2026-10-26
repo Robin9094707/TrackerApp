@@ -220,14 +220,14 @@ struct FreshnessLabel: View {
     let timestamp: Int?
 
     var body: some View {
-        if let date = Date.fromUnix(timestamp) {
-            Text(date.rjTrackerAgeText)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(date.rjTrackerFreshnessColor)
-        } else {
-            Text("Kein Standort")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            if let date = Date.fromUnix(timestamp) {
+                Text(TrackerTimeText.age(of: date, now: context.date))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(date.rjTrackerFreshnessColor)
+            } else {
+                Text("Kein Standort").font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 }
@@ -512,19 +512,7 @@ extension Date {
     }
 
     var rjTrackerAgeText: String {
-        let age = max(0, Date().timeIntervalSince(self))
-        if age < 45 { return "Jetzt" }
-        if age < 3600 {
-            let minutes = max(1, Int(age / 60))
-            return "vor \(minutes) Min."
-        }
-        if Calendar.current.isDateInToday(self) {
-            return "Heute um " + formatted(date: .omitted, time: .shortened)
-        }
-        if Calendar.current.isDateInYesterday(self) {
-            return "Gestern um " + formatted(date: .omitted, time: .shortened)
-        }
-        return formatted(date: .numeric, time: .shortened)
+        TrackerTimeText.age(of: self)
     }
 
     var rjTrackerFreshnessColor: Color {
@@ -554,16 +542,46 @@ struct TrackerActionTile: View {
     let symbol: String
     var color: Color = .blue
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             Image(systemName: symbol).font(.title2.weight(.semibold)).foregroundStyle(color)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).font(.headline).foregroundStyle(.primary)
                 Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 110, alignment: .leading)
-        .padding(18)
-        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 26))
+        .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
+        .padding(14)
+        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 20))
+    }
+}
+
+
+/// Shared location summary: the tracker name appears once, in the navigation bar.
+struct TrackerLocationSummary: View {
+    let symbol: String
+    let provider: String
+    let location: TrackerLocation?
+    let timestamp: Int?
+    var nearby = false
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(symbol).font(.system(size: 28))
+                .frame(width: 48, height: 48)
+                .background(provider.rjProviderColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 16))
+            VStack(alignment: .leading, spacing: 5) {
+                if nearby { Text("Bei dir").font(.subheadline.weight(.semibold)).foregroundStyle(.green) }
+                ResolvedAddressText(location: location, fallback: "Noch kein Standort gemeldet")
+                    .font(.subheadline.weight(.medium)).lineLimit(2)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { FreshnessLabel(timestamp: timestamp); SourceBadge(source: provider) }
+                    VStack(alignment: .leading, spacing: 4) { FreshnessLabel(timestamp: timestamp); SourceBadge(source: provider) }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("tracker-detail-header")
     }
 }

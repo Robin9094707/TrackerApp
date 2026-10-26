@@ -29,7 +29,7 @@ struct TrackerDetailView: View {
     }
     private var serverBody: some View {
         ScrollView {
-            VStack(spacing: 18) {
+            VStack(spacing: 14) {
                 header
                 actions
                 if current.provider == "google" {
@@ -119,28 +119,13 @@ struct TrackerDetailView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Text(current.emoji ?? "📍").font(.system(size: 34))
-                .frame(width: 64, height: 64)
-                .background(current.provider.rjProviderColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 22))
-            VStack(alignment: .leading, spacing: 6) {
-                Text(current.name).font(.largeTitle.bold())
-                ResolvedAddressText(location: current.validLocation, fallback: "Noch kein Standort gemeldet")
-                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                HStack(spacing: 8) {
-                    FreshnessLabel(timestamp: current.reportTimestamp > 0 ? current.reportTimestamp : nil)
-                    if let source = current.latestSourceName { SourceBadge(source: source) }
-                }
-            }
-            Spacer(minLength: 0)
+        HStack(alignment: .top, spacing: 8) {
+            TrackerLocationSummary(symbol: current.emoji ?? "📍", provider: current.latestSourceName ?? current.provider,
+                location: current.validLocation, timestamp: current.reportTimestamp > 0 ? current.reportTimestamp : nil)
             Button { Task { await model.setFavorite(current) } } label: {
                 Image(systemName: current.favorite == true ? "star.fill" : "star").foregroundStyle(.orange).frame(width: 44, height: 44)
             }.buttonStyle(.plain).disabled(model.updatingRefs.contains(current.ref)).accessibilityLabel("Favorit umschalten")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("tracker-detail-header")
     }
 
     private func removeAppleTracker() async {
@@ -178,7 +163,7 @@ struct TrackerDetailView: View {
     private var information: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Über dieses Objekt").font(.headline)
-            LabeledContent("Batterie", value: current.battery ?? "Unbekannt")
+            LabeledContent("Batterie", value: current.battery.map(TrackerTimeText.battery) ?? "Unbekannt")
             LabeledContent("Netzwerk", value: current.provider.rjProviderName)
             if let date = current.reportDate { LabeledContent("Zuletzt gesehen", value: date.formatted(date: .abbreviated, time: .standard)) }
             if let accuracy = current.location?.accuracyM, accuracy > 0 { LabeledContent("Genauigkeit", value: "±\(accuracy.metersText)") }
@@ -370,5 +355,6 @@ struct TrackerAutomationView: View {
         }
     }
 }
+
 
 

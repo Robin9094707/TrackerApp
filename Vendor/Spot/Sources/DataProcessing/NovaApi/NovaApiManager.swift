@@ -71,10 +71,9 @@ final class NovaApiManager: SharedInstance {
                     self.deviceFetchQueue.async {
                         let contributor: ContributorType = isAllAreas ? .AtAllAreas : .HighTrafficOnly
 
-                        let didReceiveUpdate = mergeDeviceUpdate(requestDate: requestDate, contributorType: contributor, deviceUpdateProtobuf: deviceUpdate, localDevice: device)
+                        _ = mergeDeviceUpdate(requestDate: requestDate, contributorType: contributor, deviceUpdateProtobuf: deviceUpdate, localDevice: device) { callback(true) }
 
                         GoogleReportArchive.store(deviceUpdate)
-                        callback(true)
                     }
 
                     return false // Keep listening for all later packets in this request window.
@@ -94,7 +93,7 @@ final class NovaApiManager: SharedInstance {
         request.timeoutInterval = 20
         request.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer " + androidDeviceManagerOauthToken, forHTTPHeaderField: "Authorization")
-        request.setValue("en-US", forHTTPHeaderField: "Accept-Language")
+        request.setValue("de-DE,de;q=0.9", forHTTPHeaderField: "Accept-Language")
         request.setValue("fmd/20006320; gzip", forHTTPHeaderField: "User-Agent")
 
         request.httpBody = payload
@@ -143,3 +142,4 @@ final class NovaApiManager: SharedInstance {
         return nil
     }
 }
+
