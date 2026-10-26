@@ -42,6 +42,16 @@ jobs:
       - run: python -m py_compile Backend/tracker_backend.py
       - run: python Tests/test_backend_calendar_mcp.py -v
       - run: python Tests/test_backend_refresh.py -v
+      - name: Validate single-file AMP package
+        run: |
+          python Scripts/package_amp_backend.py Tracker_Backend_AMP.py
+          python Tracker_Backend_AMP.py --amp-check
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: RJ-Tracker-Backend-20.4.2-AMP
+          path: Tracker_Backend_AMP.py
+          if-no-files-found: error
+          retention-days: 30
   build:
     needs: backend
     name: Build unsigned iOS IPA

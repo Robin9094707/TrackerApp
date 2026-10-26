@@ -9,7 +9,7 @@
 ## Installation
 
 1. Backend stoppen.
-2. Nur die bisherige Python-Startdatei durch die mitgelieferte `Tracker_Backend_AMP.py` ersetzen. Den bisherigen Startdateinamen bei Bedarf beibehalten. Sie enthält denselben Backend-Code wie `Backend/tracker_backend.py`.
+2. Nur die bisherige Python-Startdatei durch die mitgelieferte `Tracker_Backend_AMP.py` ersetzen. Den bisherigen Startdateinamen bei Bedarf beibehalten. Sie enthält denselben Backend-Code wie `Backend/tracker_backend.py` sowie den bisherigen AMP-Starthelfer. Die Kennung der vorhandenen Python-Umgebung und der eingebetteten Hilfsmodule bleibt unverändert; ein bereits eingerichteter 20.4.1-Server benötigt keine erneute Einrichtung.
 3. Im selben Verzeichnis, mit derselben Datenpfad-Konfiguration und bisherigen Umgebungsvariablen neu starten. Vorhandene Begleitdateien und Python-Umgebung weiterverwenden.
 4. Die neue IPA mit derselben Bundle-ID (`eu.rjuhas.rjtracker`) und derselben bisherigen Signierkonfiguration über die vorhandene App installieren.
 
