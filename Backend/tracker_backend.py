@@ -1,4 +1,4 @@
-# Universal Tag Studio 20.3.2 · APPLE OCTOBER 2026 AUTH COMPATIBILITY
+# Universal Tag Studio 20.4.2 · TRACKER REFRESH QUALITY OF LIFE
 # Backward-compatible single-file upgrade. Existing data/ directory layout,
 # tracker IDs, histories, shares and provider sessions are intentionally
 # preserved. Google integration: leonboe1/GoogleFindMyTools (GPL-3.0).
@@ -10020,6 +10020,7 @@ def polling_attempt_finish(provider, tracker_id, trigger, status, reports=0, new
         started = float(tracker.get("last_start_ts", now_ts) or now_ts)
         tracker.update({
             "last_finish_ts": now_ts,
+            "last_completion_status": str(status or "unknown")[:40],
             "last_status": str(status or "unknown")[:40],
             "last_reports": max(0, int(reports or 0)),
             "last_new_points": max(0, int(new_points or 0)),
@@ -11462,143 +11463,97 @@ def apple_schedule_next(name, immediate=False, base_ts=None):
 
 
 def fetch_from_apple(device_names, trigger="manual"):
-    named_accessories = [(name, state["accessories"][name]) for name in device_names if name in state["accessories"]]
-    if not named_accessories:
-        return False
-    if not state["account"]:
-        polling_note_blocked("apple", "Apple-Account ist nicht angemeldet; aktive Verläufe und Alarme können nicht abgefragt werden.")
-        return False
-    started_monotonic = time.monotonic()
-    started_ts = int(time.time())
+    # FindMy.py iterates rolling accessories serially even when passed a list.
+    # Process each response immediately so one slow tag cannot delay all results.
     with state_lock:
-        # Coalesce all callers (web UI, MCP, history, alerts, geofences and
-        # Recovery Guard) onto the already-running request for this tracker.
-        named_accessories = [
-            (name, accessory) for name, accessory in named_accessories
-            if name not in state.setdefault("apple_inflight", set())
-        ]
+        named_accessories = [(name, state["accessories"][name]) for name in dict.fromkeys(device_names)
+                             if name in state["accessories"] and name not in state.setdefault("apple_inflight", set())]
         if not named_accessories:
             return False
-        for name, _accessory in named_accessories:
-            state.setdefault("apple_inflight", set()).add(name)
-            stats = state.setdefault("report_stats", {}).setdefault("devices", {}).setdefault(name, {})
-            stats.update({"started_ts": started_ts, "last_trigger": str(trigger)[:120], "last_stage": "requesting", "last_result": "running"})
-    poll_started = {
-        name: polling_attempt_begin("apple", name, trigger, apple_active_reasons(name))
-        for name, _accessory in named_accessories
-    }
-    history_targets = [(name, obj) for name, obj in named_accessories if needs_full_report_history(name)]
-    latest_targets = [(name, obj) for name, obj in named_accessories if not needs_full_report_history(name)]
-    with fetch_lock:
-        try:
-            received_total = stored_total = 0
-            if history_targets:
-                try:
-                    history_result = state["account"].fetch_location_history([obj for _, obj in history_targets])
-                    received, stored = process_report_results(history_targets, history_result, "history")
-                except (AttributeError, NotImplementedError) as exc:
-                    logger.warning("fetch_location_history nicht verfügbar (%s); verwende nur den neuesten Standort.", exc)
-                    latest_result = state["account"].fetch_location([obj for _, obj in history_targets])
-                    received, stored = process_report_results(history_targets, latest_result, "latest_fallback")
-                received_total += received
-                stored_total += stored
-            if latest_targets:
-                latest_result = state["account"].fetch_location([obj for _, obj in latest_targets])
-                received, stored = process_report_results(latest_targets, latest_result, "latest_only")
-                received_total += received
-                stored_total += stored
-            batch_mode = "mixed" if history_targets and latest_targets else ("history" if history_targets else "latest_only")
-            sync_mode = f"{batch_mode}:{trigger}"
-            register_sync_batch(received_total, stored_total, len(named_accessories), sync_mode)
-            duration_ms = int((time.monotonic() - started_monotonic) * 1000)
-            for name, _accessory in named_accessories:
-                if name not in state.get("accessories", {}):
-                    continue
-                stats = state["report_stats"].setdefault("devices", {}).setdefault(name, {})
-                batch_received = int(stats.get("last_received", 0) or 0) if int(stats.get("last_sync_ts", 0) or 0) >= started_ts else 0
-                stats.update({
-                    "last_sync_ts": int(time.time()),
-                    "last_received": batch_received,
-                    "last_duration_ms": duration_ms,
-                    "last_trigger": str(trigger)[:120],
-                    "last_stage": "reports_saved",
-                    "last_result": "empty" if batch_received == 0 else "ok",
-                    "last_error": "",
-                    "last_error_detail": "",
-                    "last_success_ts": int(time.time()),
-                    "consecutive_failures": 0,
-                    "successful_syncs": int(stats.get("successful_syncs", 0) or 0) + 1,
-                })
-                append_notification_console(
-                    "info" if batch_received == 0 else "success",
-                    "tracker_sync",
-                    f"Apple-Ortung für {device_display_name(name)} abgeschlossen",
-                    channel="apple",
-                    status="empty" if batch_received == 0 else "success",
-                    tracker_ref=f"apple:{name}",
-                    operation=trigger,
-                    duration_ms=duration_ms,
-                    detail=f"{batch_received} Report(s) empfangen · {sync_mode}",
-                )
-            save_json(REPORT_STATS_FILE, "report_stats")
-            state["sync_failures"] = 0
-            state["sync_backoff_until"] = 0
-            save_account_state()
-            logger.info("Report-Sync abgeschlossen [%s]: %d Reports empfangen, %d neue Verlaufspunkte gespeichert", trigger, received_total, stored_total)
-            return True
-        except Exception as exc:
-            state["sync_failures"] = min(8, int(state.get("sync_failures", 0)) + 1)
-            delay = min(15 * 60, (2 ** state["sync_failures"]) * 15) + random.randint(0, 15)
-            state["sync_backoff_until"] = time.time() + delay
-            duration_ms = int((time.monotonic() - started_monotonic) * 1000)
-            error_code = type(exc).__name__
-            for name, _accessory in named_accessories:
-                if name not in state.get("accessories", {}):
-                    continue
-                stats = state["report_stats"].setdefault("devices", {}).setdefault(name, {})
-                stats.update({
-                    "last_sync_ts": int(time.time()),
-                    "last_duration_ms": duration_ms,
-                    "last_trigger": str(trigger)[:120],
-                    "last_stage": "provider_error",
-                    "last_result": "error",
-                    "last_error": error_code[:120],
-                    "last_error_detail": str(exc)[:500],
-                    "consecutive_failures": int(stats.get("consecutive_failures", 0) or 0) + 1,
-                    "failed_syncs": int(stats.get("failed_syncs", 0) or 0) + 1,
-                })
-                append_notification_console(
-                    "error",
-                    "tracker_sync",
-                    f"Apple-Ortung für {device_display_name(name)} fehlgeschlagen",
-                    channel="apple",
-                    status="error",
-                    tracker_ref=f"apple:{name}",
-                    operation=trigger,
-                    duration_ms=duration_ms,
-                    detail=str(exc),
-                )
-            save_json(REPORT_STATS_FILE, "report_stats")
-            logger.exception("Apple Report-Sync fehlgeschlagen: %s", exc)
+        if not state["account"]:
+            polling_note_blocked("apple", "Apple-Account ist nicht angemeldet; aktive Verläufe und Alarme können nicht abgefragt werden.")
             return False
-        finally:
-            with state_lock:
-                for name, _accessory in named_accessories:
-                    state.setdefault("apple_inflight", set()).discard(name)
-                    if name not in state.get("accessories", {}):
-                        continue
-                    next_due = apple_schedule_next(name, base_ts=poll_started.get(name, started_ts))
-                    stats = state.setdefault("report_stats", {}).setdefault("devices", {}).setdefault(name, {})
-                    result = str(stats.get("last_result") or "empty")
-                    failed = result == "error"
-                    polling_attempt_finish(
-                        "apple", name, trigger,
-                        "error" if failed else ("empty" if result == "empty" else "success"),
-                        reports=0 if failed else int(stats.get("last_received", 0) or 0),
-                        new_points=0 if failed else int(stats.get("last_history_added", 0) or 0),
-                        next_due=next_due,
-                        detail=str(stats.get("last_error_detail") or stats.get("last_stage") or ""),
-                    )
+        for name, _ in named_accessories:
+            state["apple_inflight"].add(name)
+    owned = {name for name, _ in named_accessories}
+    received_total = stored_total = 0
+    succeeded = 0
+    try:
+        # AppleAccount owns a synchronous event loop; keep using its existing lock.
+        with fetch_lock:
+            for name, accessory in named_accessories:
+                if state.get("accessories", {}).get(name) is not accessory:
+                    with state_lock:
+                        state["apple_inflight"].discard(name)
+                        owned.discard(name)
+                    continue
+                started = polling_attempt_begin("apple", name, trigger, apple_active_reasons(name))
+                started_monotonic = time.monotonic()
+                stats = state.setdefault("report_stats", {}).setdefault("devices", {}).setdefault(name, {})
+                stats.update(started_ts=int(started), last_trigger=str(trigger)[:120],
+                             last_stage="requesting", last_result="running")
+                received = stored = 0
+                failed = False
+                mode = "history" if needs_full_report_history(name) else "latest_only"
+                try:
+                    if mode == "history":
+                        try:
+                            result = state["account"].fetch_location_history([accessory])
+                        except (AttributeError, NotImplementedError) as exc:
+                            logger.warning("fetch_location_history nicht verfügbar (%s); verwende nur den neuesten Standort.", exc)
+                            mode = "latest_fallback"
+                            result = state["account"].fetch_location([accessory])
+                    else:
+                        result = state["account"].fetch_location([accessory])
+                    received, stored = process_report_results([(name, accessory)], result, mode)
+                    received_total += received
+                    stored_total += stored
+                    succeeded += 1
+                    stats.update(last_sync_ts=int(time.time()), last_received=received,
+                                 last_stage="reports_saved", last_result="ok" if received else "empty",
+                                 last_error="", last_error_detail="", last_success_ts=int(time.time()),
+                                 consecutive_failures=0, successful_syncs=int(stats.get("successful_syncs", 0) or 0) + 1)
+                except Exception as exc:
+                    failed = True
+                    stats.update(last_sync_ts=int(time.time()), last_received=0,
+                                 last_stage="provider_error", last_result="error",
+                                 last_error=type(exc).__name__[:120], last_error_detail=str(exc)[:500],
+                                 consecutive_failures=int(stats.get("consecutive_failures", 0) or 0) + 1,
+                                 failed_syncs=int(stats.get("failed_syncs", 0) or 0) + 1)
+                    logger.exception("Apple Report-Sync für %s fehlgeschlagen: %s", name, exc)
+                finally:
+                    duration_ms = int((time.monotonic() - started_monotonic) * 1000)
+                    stats["last_duration_ms"] = duration_ms
+                    next_due = apple_schedule_next(name, base_ts=started)
+                    # Publish completion before querying the next accessory, including
+                    # successful empty/unchanged replies. No history timestamp required.
+                    polling_attempt_finish("apple", name, trigger,
+                        "error" if failed else ("success" if received else "empty"),
+                        reports=received, new_points=stored, next_due=next_due,
+                        detail=str(stats.get("last_error_detail") or stats.get("last_stage") or ""))
+                    with state_lock:
+                        state["apple_inflight"].discard(name)
+                        owned.discard(name)
+                    append_notification_console("error" if failed else ("success" if received else "info"),
+                        "tracker_sync", f"Apple-Ortung für {device_display_name(name)} " + ("fehlgeschlagen" if failed else "abgeschlossen"),
+                        channel="apple", status="error" if failed else ("success" if received else "empty"),
+                        tracker_ref=f"apple:{name}", operation=trigger, duration_ms=duration_ms,
+                        detail=str(stats.get("last_error_detail")) if failed else f"{received} Report(s) empfangen · {mode}:{trigger}")
+            register_sync_batch(received_total, stored_total, len(named_accessories), f"history:{trigger}")
+            save_json(REPORT_STATS_FILE, "report_stats")
+            if succeeded == len(named_accessories):
+                state["sync_failures"] = 0
+                state["sync_backoff_until"] = 0
+            else:
+                state["sync_failures"] = min(8, int(state.get("sync_failures", 0)) + 1)
+                delay = min(15 * 60, (2 ** state["sync_failures"]) * 15) + random.randint(0, 15)
+                state["sync_backoff_until"] = time.time() + delay
+            save_account_state()
+            return succeeded > 0
+    finally:
+        # Completed entries may already belong to a newly queued manual request.
+        with state_lock:
+            state.setdefault("apple_inflight", set()).difference_update(owned)
 
 
 def background_poller():
@@ -11829,7 +11784,7 @@ def tracker_lab_active_job():
     return None
 
 APP_NAME = "Universal Tag Studio"
-APP_VERSION = "20.4.1 API EDITION"
+APP_VERSION = "20.4.2 API EDITION"
 
 
 OPTIMIZED_ROUTE_DEFAULT_POINTS = int(os.environ.get("ULTRA_TRACKER_ROUTE_MAX_DISPLAY_POINTS", "4200"))
@@ -15520,6 +15475,7 @@ def mcp_tracker_row(model, detailed=False):
                 "provider_name": str(details.get("provider_name") or "")[:160],
             },
             "polling": tracker_polling_public(model.get("provider"), model.get("id")),
+            "refresh": mobile_tracker_refresh_state(model),
         })
         if model.get("provider") in {"apple", "fusion"}:
             row["recovery"] = model.get("recovery") if isinstance(model.get("recovery"), dict) else recovery_public_summary(model.get("id"))
@@ -19508,7 +19464,8 @@ def mcp_call_tool(name, arguments, grant):
     if name == "get_polling_status":
         if arguments.get("tracker"):
             model = mcp_resolve_tracker(arguments.get("tracker"))
-            data = {"tracker": mcp_tracker_row(model), "polling": tracker_polling_public(model.get("provider"), model.get("id")), "provider_refresh": False, "generated_at": int(time.time())}
+            data = {"tracker": mcp_tracker_row(model), "polling": tracker_polling_public(model.get("provider"), model.get("id")),
+            "refresh": mobile_tracker_refresh_state(model), "provider_refresh": False, "generated_at": int(time.time())}
             return mcp_text_result(data, f"Ortungsintervall für {model.get('name')} geladen; keine Ortung gestartet.")
         data = {"polling": polling_public_state(), "provider_refresh": False}
         return mcp_text_result(data, "Zentrale Ortungsintervalle und aktive gemeinsame Jobs geladen; keine Ortung gestartet.")
@@ -27157,6 +27114,17 @@ def mobile_tracker_api():
         return mobile_json_error(str(exc), 404 if exc.code == "not_found" else 400, exc.code)
 
 
+def mobile_tracker_refresh_state(model):
+    provider, tracker_id = model.get("provider"), str(model.get("id") or "")
+    if provider not in {"apple", "google", "samsung"}:
+        return None
+    with polling_runtime_lock:
+        runtime = state.get("polling_runtime", {}).get("providers", {}).get(provider, {}).get("trackers", {}).get(tracker_id, {})
+        return {"completion": float(runtime.get("last_finish_ts", 0) or 0),
+                "status": str(runtime.get("last_completion_status") or runtime.get("last_status") or "idle"),
+                "available": bool(state.get("account")) if provider == "apple" else True}
+
+
 @app.route(f"{MOBILE_API_PREFIX}/locate", methods=["POST"])
 def mobile_locate_api():
     data = request.get_json(silent=True) or {}
@@ -27175,8 +27143,11 @@ def mobile_locate_api():
             if not ref or ref in seen:
                 continue
             seen.add(ref)
-            scheduled.append({"ref": ref, "name": model.get("name"), "networks": mcp_trigger_locate(model)})
-        return jsonify({"status": "scheduled", "trackers": scheduled, "count": len(scheduled), "check_again_after_seconds": 15})
+            refresh = mobile_tracker_refresh_state(model)
+            if refresh is not None and not refresh["available"]:
+                raise MCPToolError("Apple ist nicht angemeldet. Bitte die Apple-Verbindung prüfen.", "provider_unavailable")
+            scheduled.append({"ref": ref, "name": model.get("name"), "refresh": refresh, "networks": mcp_trigger_locate(model)})
+        return jsonify({"status": "scheduled", "trackers": scheduled, "count": len(scheduled), "check_again_after_seconds": 1})
     except MCPToolError as exc:
         return mobile_json_error(str(exc), 400, exc.code)
 

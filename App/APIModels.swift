@@ -59,6 +59,12 @@ struct TrackerDetails: Codable, Hashable {
 
 struct ToggleSummary: Codable, Hashable { var enabled: Bool? }
 
+struct TrackerRefresh: Codable, Hashable {
+    var completion: Double
+    var status: String
+    var available: Bool
+}
+
 struct Tracker: Codable, Identifiable, Hashable {
     var ref: String
     var name: String
@@ -83,13 +89,14 @@ struct Tracker: Codable, Identifiable, Hashable {
     var serverID: String?
     var historyPolicy: JSONValue?
     var groups: [String]?
+    var refresh: TrackerRefresh?
     var networkDisagreement: JSONValue?
     var capabilities: JSONValue?
 
     var id: String { ref }
 
     enum CodingKeys: String, CodingKey {
-        case ref, name, provider, location, battery, status, favorite, archived, hidden, emoji, kind, details, recovery, polling, capabilities
+        case ref, name, provider, location, battery, status, favorite, archived, hidden, emoji, kind, details, recovery, polling, capabilities, refresh
         case lastSeenTs = "last_seen_ts"
         case historyActive = "history_active"
         case foundNotification = "found_notification"

@@ -1,3 +1,7 @@
+# 5.5.1 · Aktualisierung & Haptik
+
+Apple-Abfragen geben die Schaltfläche beim individuellen Abschluss frei, auch ohne neueren Standort. Apple-Sammelabfragen verarbeiten jeden Tracker sofort. Google erhält Haptik bei manuellen Aktualisierungen und auf der Trackerkarte beim Ergebnis. Bestehende Datenformate und Anmeldekompatibilität bleiben erhalten. Details: `docs/UPGRADE-5.5.1.md`.
+
 ## 5.4.0 · Responsive object inspector and unrestricted firmware picker
 
 - Map-first object library with large title, neutral circular object markers, clearer list rows and an add button. Existing filters, provider controls, swipes, tabs and management tools remain available.

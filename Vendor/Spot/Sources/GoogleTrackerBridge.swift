@@ -46,6 +46,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
     @Published public private(set) var statusMessage: String?
     @Published public private(set) var locating: Set<String> = []
     @Published public private(set) var locationStatus: [String: String] = [:]
+    @Published public private(set) var locationSucceeded: [String: Bool] = [:]
     private var locationRequests = GoogleLocationRequests()
     @Published public var refreshInterval: Int {
         didSet { preferences.set(Self.validInterval(refreshInterval), forKey: "native.refreshInterval"); restartPolling() }
@@ -253,7 +254,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         try KeychainStore.shared.save(token, for: .aasToken)
         if changed {
             manager.ownerKey = nil; manager.sharedKey = nil
-            Settings.sharedInstance.devicesList = nil; generation = UUID(); locating.removeAll(); locationRequests.reset(); locationStatus.removeAll()
+            Settings.sharedInstance.devicesList = nil; generation = UUID(); locating.removeAll(); locationRequests.reset(); locationStatus.removeAll(); locationSucceeded.removeAll()
         }
         manager.clearCachedTokens(); manager.username = email; manager.aasToken = token
         publishSnapshots()
@@ -298,6 +299,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         guard let request = locationRequests.begin(id) else { return }
         locating = locationRequests.pending
         locationStatus[id] = nil
+        locationSucceeded[id] = nil
         let generation = self.generation
         NovaApiManager.sharedInstance.requestLocationDataForDevice(device: device) { [weak self] success in
             Task { @MainActor in
@@ -307,6 +309,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
                 if success { await self.rebuildSnapshots() }
                 guard generation == self.generation,
                       self.locationRequests.finish(id, token: request) else { return }
+                self.locationSucceeded[id] = success
                 self.locationStatus[id] = success
                     ? "Google-Antwort empfangen. Der zuletzt gemeldete Standort wird angezeigt."
                     : "Keine Google-Antwort erhalten. Gespeicherte Standorte bleiben sichtbar. Bitte erneut versuchen."
@@ -318,6 +321,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
             do { try await Task.sleep(for: .seconds(38)) } catch { return }
             guard let self, generation == self.generation,
                   self.locationRequests.finish(id, token: request) else { return }
+            self.locationSucceeded[id] = false
             self.locationStatus[id] = "Noch keine Google-Antwort. Du kannst erneut aktualisieren."
             self.locating = self.locationRequests.pending
         }
@@ -482,7 +486,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
     }
     public func repairConnection() async throws {
         guard firmwareDeviceID == nil else { throw googleError("Bitte zuerst die Motorola-Aktualisierung beenden.") }
-        generation = UUID(); locating.removeAll(); locationRequests.reset(); locationStatus.removeAll()
+        generation = UUID(); locating.removeAll(); locationRequests.reset(); locationStatus.removeAll(); locationSucceeded.removeAll()
         try await PushReceiver.sharedInstance.prepare(force: true)
         await refresh()
     }
@@ -568,14 +572,14 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         let previousToken = manager.aasToken, previousOwner = manager.ownerKey, previousShared = manager.sharedKey
         do { try KeychainStore.shared.save(token, for: .aasToken); try KeychainStore.shared.save(owner, for: .ownerKey); try KeychainStore.shared.save(shared, for: .sharedKey) }
         catch { try? KeychainStore.shared.save(previousToken, for: .aasToken); try? KeychainStore.shared.save(previousOwner, for: .ownerKey); try? KeychainStore.shared.save(previousShared, for: .sharedKey); throw error }
-        generation = UUID(); locating.removeAll(); locationRequests.reset(); locationStatus.removeAll(); Settings.sharedInstance.devicesList = nil
+        generation = UUID(); locating.removeAll(); locationRequests.reset(); locationStatus.removeAll(); locationSucceeded.removeAll(); Settings.sharedInstance.devicesList = nil
         manager.clearCachedTokens(); manager.username = email; manager.aasToken = token; manager.ownerKey = owner; manager.sharedKey = shared
         manager.ownerKeyVersion = json["owner_key_version"] as? Int ?? 1
         publishSnapshots(); await refresh(); restartPolling()
     }
     public func signOut() {
         guard firmwareDeviceID == nil else { errorMessage = "Bitte zuerst die Motorola-Aktualisierung beenden."; return }
-        generation = UUID(); polling?.cancel(); polling = nil; locating.removeAll(); locationRequests.reset(); locationStatus.removeAll()
+        generation = UUID(); polling?.cancel(); polling = nil; locating.removeAll(); locationRequests.reset(); locationStatus.removeAll(); locationSucceeded.removeAll()
         Settings.sharedInstance.devicesList = nil
         TokenManager.sharedInstance.deleteTokens(); restored = false; publishSnapshots()
     }

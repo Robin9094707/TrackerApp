@@ -336,6 +336,7 @@ struct TrackerLibraryView: View {
     }
 
     private func refreshVisibleSources() async {
+        Haptics.impact()
         // Start the local Google request before waiting for a slow/unreachable server.
         async let local: Void = refreshGoogleIfVisible()
         // A Google-only refresh must not wait for an unrelated offline server.
