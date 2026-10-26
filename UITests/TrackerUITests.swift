@@ -202,7 +202,8 @@ final class TrackerUITests: XCTestCase {
         expandInspector(app)
         XCTAssertTrue(app.buttons["google-refresh-location"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["google-locate-tile"].exists)
-        XCTAssertEqual(app.staticTexts["Lokaler Test-Tracker"].count, 1)
+        XCTAssertEqual(app.navigationBars.staticTexts["Lokaler Test-Tracker"].count, 1)
+        XCTAssertFalse(app.otherElements["tracker-detail-header"].staticTexts["Lokaler Test-Tracker"].exists)
         XCTAssertFalse(app.staticTexts["1h"].exists)
         capture("Google-Compact-German-Details")
     }

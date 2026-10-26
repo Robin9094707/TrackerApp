@@ -261,7 +261,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         CookieCache.removeOAuthCookie(value: oauthToken)
     }
 
-    public func refresh() async {
+    public func refresh(requestLocations: Bool = true) async {
         #if DEBUG
         if uiTestState { return }
         #endif
@@ -290,7 +290,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
                 try? UploadPrecomputedPublicKeyIds.sharedInstance.checkAndUpload()
             }
             publishSnapshots()
-            requestReportsForAll()
+            if requestLocations { requestReportsForAll() }
         } catch { if generation == self.generation { errorMessage = error.localizedDescription } }
     }
     public func locate(_ id: String) throws {
@@ -333,8 +333,18 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         if uiTestState { return }
         #endif
         guard hasCredentials else { return }
-        if trackers.isEmpty { await refresh(); await rebuildSnapshots() }
+        let generation = self.generation
+        let loadedIDs = Set(trackers.map(\.id))
         requestReportsForAll(automatic: false)
+        // Existing trackers start immediately; discover additions periodically as well.
+        if trackers.isEmpty || Date().timeIntervalSince(lastCatalog) >= 300 {
+            await refresh(requestLocations: false)
+            guard generation == self.generation else { return }
+            await rebuildSnapshots()
+            for tracker in trackers where !loadedIDs.contains(tracker.id) {
+                do { try locate(tracker.id) } catch { locationStatus[tracker.id] = error.localizedDescription }
+            }
+        }
         await waitForLocations(Set(trackers.map(\.id)))
     }
     private func waitForLocations(_ ids: Set<String>) async {

@@ -20,7 +20,7 @@ struct NativeGoogleTrackerView: View {
                         TrackerLocationSummary(symbol: model.trackers.first(where: { $0.provider == "google" && $0.apiID == deviceID })?.emoji ?? "📡",
                             provider: "google", location: displayLocation(tracker),
                             timestamp: displayLocation(tracker)?.timestamp, nearby: tracker.nearby)
-                        Button { google.setFavorite(deviceID, enabled: !google.favorite(deviceID)) } label: {
+                        Button { toggleFavorite() } label: {
                             Image(systemName: google.favorite(deviceID) ? "star.fill" : "star").foregroundStyle(.orange).frame(width: 44, height: 44)
                         }.buttonStyle(.plain).accessibilityLabel("Favorit umschalten")
                     }
@@ -120,6 +120,11 @@ struct NativeGoogleTrackerView: View {
         guard let lat = tracker.latitude, let lon = tracker.longitude else { return nil }
         return TrackerLocation(latitude: lat, longitude: lon, accuracyM: tracker.accuracy,
             timestamp: tracker.reportedAt.map { Int($0.timeIntervalSince1970) }, network: "google", provider: "google")
+    }
+    private func toggleFavorite() {
+        if let tracker = model.trackers.first(where: { $0.provider == "google" && $0.apiID == deviceID }) {
+            Task { await model.setFavorite(tracker) }
+        } else { google.setFavorite(deviceID, enabled: !google.favorite(deviceID)) }
     }
     private func updateLocation() {
         google.clearError()
