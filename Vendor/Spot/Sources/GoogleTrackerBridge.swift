@@ -354,6 +354,9 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         }
     }
     public func requestReportsForAll(automatic: Bool = true) {
+        #if DEBUG
+        if uiTestState { return }
+        #endif
         lastReportRequest = .now
         for tracker in trackers where !automatic || tracker.historyEnabled {
             do { try locate(tracker.id) }

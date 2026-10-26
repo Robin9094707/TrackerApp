@@ -11,6 +11,7 @@ struct NativeGoogleTrackerView: View {
     @State private var name = ""
     @State private var editing = false
     @State private var share: String?
+    @State private var showNearby = false
     private var tracker: GoogleTrackerSnapshot? { google.trackers.first { $0.id == deviceID } }
     var body: some View {
         Form {
@@ -24,12 +25,12 @@ struct NativeGoogleTrackerView: View {
                             Image(systemName: google.favorite(deviceID) ? "star.fill" : "star").foregroundStyle(.orange).frame(width: 44, height: 44)
                         }.buttonStyle(.plain).accessibilityLabel("Favorit umschalten")
                     }
-                }.listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                }.listRowBackground(Color.clear).listRowInsets(EdgeInsets())
                 Section {
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 12) { refreshTile; routeTile(tracker) }
                         VStack(spacing: 12) { refreshTile; routeTile(tracker) }
-                    }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+                    }.padding(.bottom, 12).listRowInsets(EdgeInsets()).listRowBackground(Color.clear).listRowSeparator(.hidden)
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 12) { ringTile(tracker); nearbyTile }
                         VStack(spacing: 12) { ringTile(tracker); nearbyTile }
@@ -106,6 +107,7 @@ struct NativeGoogleTrackerView: View {
                     .accessibilityIdentifier("google-refresh-location")
             }
         }
+        .navigationDestination(isPresented: $showNearby) { GoogleNearbyView(deviceID: deviceID) }
         .alert("Trackernamen ändern", isPresented: $editing) {
             TextField("Name", text: $name)
             Button("Speichern") { run { try await google.rename(deviceID, name: name) } }
@@ -158,7 +160,7 @@ struct NativeGoogleTrackerView: View {
         }.buttonStyle(.plain).disabled(busy)
     }
     private var nearbyTile: some View {
-        NavigationLink { GoogleNearbyView(deviceID: deviceID) } label: {
+        Button { showNearby = true } label: {
             TrackerActionTile(title: "Suchen", subtitle: "In der Nähe", symbol: "arrow.up", color: .green)
         }.buttonStyle(.plain)
     }
