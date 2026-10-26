@@ -45,6 +45,8 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
     @Published public private(set) var errorMessage: String?
     @Published public private(set) var statusMessage: String?
     @Published public private(set) var locating: Set<String> = []
+    @Published public private(set) var locationStatus: [String: String] = [:]
+    private var locationRequests = GoogleLocationRequests()
     @Published public var refreshInterval: Int {
         didSet { preferences.set(Self.validInterval(refreshInterval), forKey: "native.refreshInterval"); restartPolling() }
     }
@@ -251,7 +253,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         try KeychainStore.shared.save(token, for: .aasToken)
         if changed {
             manager.ownerKey = nil; manager.sharedKey = nil
-            Settings.sharedInstance.devicesList = nil; generation = UUID(); locating.removeAll()
+            Settings.sharedInstance.devicesList = nil; generation = UUID(); locating.removeAll(); locationRequests.reset(); locationStatus.removeAll()
         }
         manager.clearCachedTokens(); manager.username = email; manager.aasToken = token
         publishSnapshots()
@@ -293,27 +295,60 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
     }
     public func locate(_ id: String) throws {
         let device = try device(id)
-        guard !locating.contains(id) else { return }
-        locating.insert(id)
+        guard let request = locationRequests.begin(id) else { return }
+        locating = locationRequests.pending
+        locationStatus[id] = nil
         let generation = self.generation
         NovaApiManager.sharedInstance.requestLocationDataForDevice(device: device) { [weak self] success in
             Task { @MainActor in
                 guard let self, generation == self.generation else { return }
-                self.publishSnapshots()
-                if success { self.statusMessage = "Weitere Google-Meldung für \(device.userDefinedName) empfangen." }
-                else { self.statusMessage = "Empfangsfenster beendet. Bereits empfangene Reports bleiben erhalten." }
+                self.publishSnapshots() // Later packets still update the map and archive.
+                guard self.locationRequests.contains(id, token: request) else { return }
+                if success { await self.rebuildSnapshots() }
+                guard generation == self.generation,
+                      self.locationRequests.finish(id, token: request) else { return }
+                self.locationStatus[id] = success
+                    ? "Google-Antwort empfangen. Der zuletzt gemeldete Standort wird angezeigt."
+                    : "Keine Google-Antwort erhalten. Gespeicherte Standorte bleiben sichtbar. Bitte erneut versuchen."
+                self.locating = self.locationRequests.pending
             }
         }
+        // Safety deadline only; a real response/error clears the spinner immediately.
         Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 38_000_000_000)
-            guard let self, generation == self.generation else { return }
-            self.locating.remove(id)
-            self.publishSnapshots()
+            do { try await Task.sleep(for: .seconds(38)) } catch { return }
+            guard let self, generation == self.generation,
+                  self.locationRequests.finish(id, token: request) else { return }
+            self.locationStatus[id] = "Noch keine Google-Antwort. Du kannst erneut aktualisieren."
+            self.locating = self.locationRequests.pending
+        }
+    }
+    public func refreshLocation(_ id: String) async {
+        do { try locate(id) } catch { errorMessage = error.localizedDescription; return }
+        await waitForLocations([id])
+    }
+    /// Manual requests include trackers with paused automatic history collection.
+    /// Use the loaded catalog immediately instead of waiting for an extra list request.
+    public func refreshLocations() async {
+        #if DEBUG
+        if uiTestState { return }
+        #endif
+        guard hasCredentials else { return }
+        if trackers.isEmpty { await refresh(); await rebuildSnapshots() }
+        requestReportsForAll(automatic: false)
+        await waitForLocations(Set(trackers.map(\.id)))
+    }
+    private func waitForLocations(_ ids: Set<String>) async {
+        let generation = self.generation
+        while generation == self.generation, !locating.isDisjoint(with: ids) {
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
         }
     }
     public func requestReportsForAll(automatic: Bool = true) {
         lastReportRequest = .now
-        for tracker in trackers where !automatic || tracker.historyEnabled { try? locate(tracker.id) }
+        for tracker in trackers where !automatic || tracker.historyEnabled {
+            do { try locate(tracker.id) }
+            catch { locationStatus[tracker.id] = error.localizedDescription }
+        }
     }
     public func sceneChanged(active: Bool) {
         self.active = active
@@ -434,7 +469,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
     }
     public func repairConnection() async throws {
         guard firmwareDeviceID == nil else { throw googleError("Bitte zuerst die Motorola-Aktualisierung beenden.") }
-        generation = UUID(); locating.removeAll()
+        generation = UUID(); locating.removeAll(); locationRequests.reset(); locationStatus.removeAll()
         try await PushReceiver.sharedInstance.prepare(force: true)
         await refresh()
     }
@@ -520,14 +555,14 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         let previousToken = manager.aasToken, previousOwner = manager.ownerKey, previousShared = manager.sharedKey
         do { try KeychainStore.shared.save(token, for: .aasToken); try KeychainStore.shared.save(owner, for: .ownerKey); try KeychainStore.shared.save(shared, for: .sharedKey) }
         catch { try? KeychainStore.shared.save(previousToken, for: .aasToken); try? KeychainStore.shared.save(previousOwner, for: .ownerKey); try? KeychainStore.shared.save(previousShared, for: .sharedKey); throw error }
-        generation = UUID(); locating.removeAll(); Settings.sharedInstance.devicesList = nil
+        generation = UUID(); locating.removeAll(); locationRequests.reset(); locationStatus.removeAll(); Settings.sharedInstance.devicesList = nil
         manager.clearCachedTokens(); manager.username = email; manager.aasToken = token; manager.ownerKey = owner; manager.sharedKey = shared
         manager.ownerKeyVersion = json["owner_key_version"] as? Int ?? 1
         publishSnapshots(); await refresh(); restartPolling()
     }
     public func signOut() {
         guard firmwareDeviceID == nil else { errorMessage = "Bitte zuerst die Motorola-Aktualisierung beenden."; return }
-        generation = UUID(); polling?.cancel(); polling = nil; locating.removeAll()
+        generation = UUID(); polling?.cancel(); polling = nil; locating.removeAll(); locationRequests.reset(); locationStatus.removeAll()
         Settings.sharedInstance.devicesList = nil
         TokenManager.sharedInstance.deleteTokens(); restored = false; publishSnapshots()
     }
@@ -543,3 +578,4 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
     #endif
 
 }
+

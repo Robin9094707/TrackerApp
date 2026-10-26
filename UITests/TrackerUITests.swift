@@ -192,6 +192,22 @@ final class TrackerUITests: XCTestCase {
     }
 
     @MainActor
+    func testGoogleDetailsUseOneTitleAndDirectRefresh() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-local-google", "-tracker.provider", "google", "-AppleLanguages", "(en)"]
+        app.launch()
+        expandInspector(app)
+        let tag = app.buttons["tracker-row-google:demo-local-tag"]
+        XCTAssertTrue(tag.waitForExistence(timeout: 20)); tag.tap()
+        expandInspector(app)
+        XCTAssertTrue(app.buttons["google-refresh-location"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["google-locate-tile"].exists)
+        XCTAssertEqual(app.staticTexts["Lokaler Test-Tracker"].count, 1)
+        XCTAssertFalse(app.staticTexts["1h"].exists)
+        capture("Google-Compact-German-Details")
+    }
+
+    @MainActor
     private func expandInspector(_ app: XCUIApplication) {
         let grabber = app.buttons["Sheet Grabber"].firstMatch
         if grabber.waitForExistence(timeout: 10) {
@@ -208,3 +224,4 @@ final class TrackerUITests: XCTestCase {
         add(attachment)
     }
 }
+

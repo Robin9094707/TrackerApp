@@ -16,40 +16,37 @@ struct NativeGoogleTrackerView: View {
         Form {
             if let tracker {
                 Section {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(tracker.name).font(.largeTitle.bold()).fixedSize(horizontal: false, vertical: true)
-                        if tracker.nearby { Text("Bei dir").font(.headline) }
-                        ResolvedAddressText(location: displayLocation(tracker), fallback: "Noch kein Standort gemeldet")
-                            .font(.body).foregroundStyle(.secondary)
-                        if let date = tracker.reportedAt {
-                            Text(date, style: .relative).font(.subheadline).foregroundStyle(tracker.nearby ? .green : .secondary)
-                        }
-                        HStack(spacing: 12) {
-                            Label("Google", systemImage: "lock.iphone")
-                            if let battery = tracker.battery { Label(battery, systemImage: "battery.75percent") }
-                        }.font(.caption).foregroundStyle(.secondary)
-                    }.padding(.vertical, 10).accessibilityIdentifier("tracker-detail-header")
-                }.listRowBackground(Color.clear)
+                    HStack(alignment: .top, spacing: 8) {
+                        TrackerLocationSummary(symbol: model.trackers.first(where: { $0.provider == "google" && $0.apiID == deviceID })?.emoji ?? "📡",
+                            provider: "google", location: displayLocation(tracker),
+                            timestamp: displayLocation(tracker)?.timestamp, nearby: tracker.nearby)
+                        Button { google.setFavorite(deviceID, enabled: !google.favorite(deviceID)) } label: {
+                            Image(systemName: google.favorite(deviceID) ? "star.fill" : "star").foregroundStyle(.orange).frame(width: 44, height: 44)
+                        }.buttonStyle(.plain).accessibilityLabel("Favorit umschalten")
+                    }
+                }.listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 Section {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 12) { refreshTile; routeTile(tracker) }
+                        VStack(spacing: 12) { refreshTile; routeTile(tracker) }
+                    }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 12) { ringTile(tracker); nearbyTile }
                         VStack(spacing: 12) { ringTile(tracker); nearbyTile }
                     }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                 }
+                if google.locating.contains(deviceID) {
+                    Section { ProgressView("Warte auf Google-Antwort …").font(.footnote) }
+                } else if let status = google.locationStatus[deviceID] {
+                    Section { Text(status).font(.footnote).foregroundStyle(.secondary) }
+                }
                 Section("Finden") {
-                    Button { run { try google.locate(deviceID) } } label: {
-                        Label(google.locating.contains(deviceID) ? "Sammle weitere Reports …" : "Standort aktualisieren", systemImage: "location.fill")
-                    }.disabled(google.locating.contains(deviceID))
                     Button("Google-Klingelanfrage stoppen", systemImage: "speaker.slash") { run { try await google.ring(deviceID, stop: true) } }
                     NavigationLink { GoogleUWBLabView(deviceID: deviceID) } label: { Label("UWB prüfen · experimentell", systemImage: "dot.scope") }
                         .accessibilityIdentifier("google-uwb-lab")
-                    if let lat = tracker.latitude, let lon = tracker.longitude {
-                        Button("Route öffnen", systemImage: "arrow.triangle.turn.up.right.diamond") {
-                            MKMapItem(placemark: MKPlacemark(coordinate: .init(latitude: lat, longitude: lon))).openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking])
-                        }
-                    }
+
                 }
-                Section {
+                Section("Standortverlauf") {
                     Toggle("Verlauf automatisch sammeln", isOn: Binding(get: { tracker.historyEnabled }, set: { google.setHistoryEnabled(deviceID, enabled: $0) }))
                     Text("Automatische Abrufe verwenden das Intervall in den Google-Einstellungen. Manuelle Einzelabrufe bleiben möglich und werden ebenfalls gespeichert.").font(.caption).foregroundStyle(.secondary)
                     NavigationLink { NativeGoogleHistoryView(deviceID: deviceID) } label: { Label("Alle \(tracker.reportCount) Reports ansehen", systemImage: "clock.arrow.circlepath") }
@@ -72,6 +69,14 @@ struct NativeGoogleTrackerView: View {
                         }.accessibilityIdentifier("motorola-firmware-link")
                     }
                 }
+                Section("Über dieses Objekt") {
+                    LabeledContent("Netzwerk", value: "Google")
+                    LabeledContent("Batterie", value: tracker.battery.map(TrackerTimeText.battery) ?? "Unbekannt")
+                    if let date = tracker.reportedAt {
+                        LabeledContent("Zuletzt gesehen", value: date.formatted(.dateTime.locale(TrackerTimeText.locale).day().month().year().hour().minute()))
+                    }
+                    if let accuracy = tracker.accuracy, accuracy > 0 { LabeledContent("Genauigkeit", value: "±" + accuracy.metersText) }
+                }
                 Section("Verwalten") {
                     Button("Namen ändern", systemImage: "pencil") { name = tracker.name; editing = true }
                     Toggle("Verloren-Modus", isOn: Binding(get: { tracker.isLost }, set: { enabled in run { try await google.setLost(deviceID, enabled: enabled) } }))
@@ -88,7 +93,19 @@ struct NativeGoogleTrackerView: View {
             if let error = google.errorMessage { Text(error).font(.footnote).foregroundStyle(.orange) }
         }
         .rjListChrome().navigationTitle(tracker?.name ?? "Google-Tracker").navigationBarTitleDisplayMode(.inline)
-        .refreshable { await google.refresh() }
+        .listSectionSpacing(14)
+        .contentMargins(.top, 8, for: .scrollContent)
+        .refreshable { await google.refreshLocation(deviceID) }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { updateLocation() } label: {
+                    if google.locating.contains(deviceID) { ProgressView() }
+                    else { Image(systemName: "arrow.clockwise") }
+                }.disabled(google.locating.contains(deviceID))
+                    .accessibilityLabel("Standort aktualisieren")
+                    .accessibilityIdentifier("google-refresh-location")
+            }
+        }
         .alert("Trackernamen ändern", isPresented: $editing) {
             TextField("Name", text: $name)
             Button("Speichern") { run { try await google.rename(deviceID, name: name) } }
@@ -96,9 +113,39 @@ struct NativeGoogleTrackerView: View {
         }
     }
     private func displayLocation(_ tracker: GoogleTrackerSnapshot) -> TrackerLocation? {
+        if let merged = model.trackers.first(where: { $0.provider == "google" && $0.apiID == deviceID }),
+           merged.reportTimestamp >= Int(tracker.reportedAt?.timeIntervalSince1970 ?? 0), let location = merged.validLocation {
+            return location
+        }
         guard let lat = tracker.latitude, let lon = tracker.longitude else { return nil }
         return TrackerLocation(latitude: lat, longitude: lon, accuracyM: tracker.accuracy,
             timestamp: tracker.reportedAt.map { Int($0.timeIntervalSince1970) }, network: "google", provider: "google")
+    }
+    private func updateLocation() {
+        google.clearError()
+        do { try google.locate(deviceID) } catch { message = error.localizedDescription }
+    }
+    private var refreshTile: some View {
+        Button { updateLocation() } label: {
+            TrackerActionTile(title: google.locating.contains(deviceID) ? "Wird geortet …" : "Jetzt orten",
+                subtitle: "Standort aktualisieren", symbol: "location.fill", color: .green)
+        }.buttonStyle(.plain).disabled(google.locating.contains(deviceID))
+            .accessibilityIdentifier("google-locate-tile")
+    }
+    private func routeTile(_ tracker: GoogleTrackerSnapshot) -> some View {
+        Menu {
+            Button("Zu Fuß", systemImage: "figure.walk") { openMaps(tracker, mode: MKLaunchOptionsDirectionsModeWalking) }
+            Button("Mit dem Auto", systemImage: "car") { openMaps(tracker, mode: MKLaunchOptionsDirectionsModeDriving) }
+            Button("Mit Bus & Bahn", systemImage: "tram") { openMaps(tracker, mode: MKLaunchOptionsDirectionsModeTransit) }
+        } label: {
+            TrackerActionTile(title: "Route", subtitle: "In Karten öffnen", symbol: "arrow.triangle.turn.up.right.diamond.fill")
+        }.buttonStyle(.plain).disabled(tracker.latitude == nil || tracker.longitude == nil)
+    }
+    private func openMaps(_ tracker: GoogleTrackerSnapshot, mode: String) {
+        guard let location = displayLocation(tracker) else { return }
+        let item = MKMapItem(placemark: MKPlacemark(coordinate: location.coordinate))
+        item.name = tracker.name
+        item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: mode])
     }
     private func ringTile(_ tracker: GoogleTrackerSnapshot) -> some View {
         Button { run { try await google.ring(deviceID); message = tracker.nearby ? "Bluetooth-Klingeln bestätigt." : "Klingeln bei Google angefragt." } } label: {
@@ -134,7 +181,7 @@ struct NativeGoogleHistoryView: View {
                     HStack {
                         Text(report.own ? "Eigene Sichtung" : "Google-Netzwerk")
                         if let accuracy = report.accuracy, accuracy > 0 { Text("± \(Int(accuracy)) m") }
-                        Text(report.kind)
+                        Text(googleReportKind(report.kind))
                     }.font(.caption).foregroundStyle(.secondary)
                     if let lat = report.latitude, let lon = report.longitude {
                         NavigationLink("Auf Karte ansehen") {
@@ -150,6 +197,15 @@ struct NativeGoogleHistoryView: View {
                 let result = await google.reports(for: deviceID)
                 if !Task.isCancelled { reports = result }
             }
+    }
+}
+
+private func googleReportKind(_ kind: String) -> String {
+    switch kind.lowercased() {
+    case "aggregated": return "Gebündelte Meldung"
+    case "recent", "lastknown": return "Letzter bekannter Standort"
+    case "unknown", "unspecified": return "Standortmeldung"
+    default: return "Standortmeldung"
     }
 }
 
@@ -176,3 +232,4 @@ struct GoogleNearbyView: View {
             .onAppear { google.beginNearby(deviceID) }.onDisappear { google.endNearby() }
     }
 }
+

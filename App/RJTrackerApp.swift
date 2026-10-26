@@ -11,6 +11,7 @@ struct RJTrackerApp: App {
     var body: some Scene {
         WindowGroup {
             RootView().environment(model)
+                .environment(\.locale, TrackerTimeText.locale)
                 .preferredColorScheme(appearance == "dark" ? .dark : appearance == "light" ? .light : nil)
                 .task { await model.start() }
                 .task { _ = await Task.detached(priority: .utility) { try? ImportStorage.prepare() }.value }
@@ -23,5 +24,6 @@ struct RJTrackerApp: App {
         .backgroundTask(.appRefresh(GoogleBackgroundRefresh.identifier)) { await GoogleBackgroundRefresh.run() }
     }
 }
+
 
 
