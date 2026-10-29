@@ -386,10 +386,12 @@ struct HistoryView: View {
     private var rangeText: String {
         guard let first = prepared.points.first, let last = prepared.points.last else { return "" }
         let start = Date(timeIntervalSince1970: TimeInterval(first.timestamp)), end = Date(timeIntervalSince1970: TimeInterval(last.timestamp))
+        let time = Date.FormatStyle(date: .omitted, time: .shortened, locale: TrackerTimeText.locale, timeZone: historyCalendar.timeZone)
         if historyCalendar.isDate(start, inSameDayAs: end) {
-            return start.formatted(date: .omitted, time: .shortened) + " – " + end.formatted(date: .omitted, time: .shortened)
+            return start.formatted(time) + " – " + end.formatted(time)
         }
-        return start.formatted(.dateTime.day().month(.abbreviated)) + " – " + end.formatted(.dateTime.day().month(.abbreviated))
+        let day = Date.FormatStyle(locale: TrackerTimeText.locale, timeZone: historyCalendar.timeZone).day().month(.abbreviated)
+        return start.formatted(day) + " – " + end.formatted(day)
     }
 
     private var historyMap: some View {
@@ -408,7 +410,7 @@ struct HistoryView: View {
                     }
                 }.buttonStyle(.plain).font(.body.weight(.medium)).padding(12)
             }
-            .overlay(alignment: .bottomLeading) {
+            .overlay(alignment: .bottomTrailing) {
                 HStack(spacing: 10) {
                     legendDot(.systemTeal, "Früher")
                     LinearGradient(colors: [Color(uiColor: .systemTeal), Color(uiColor: .systemBlue), Color(uiColor: .systemIndigo)], startPoint: .leading, endPoint: .trailing)
@@ -417,7 +419,7 @@ struct HistoryView: View {
                 }
                 .font(.caption2.weight(.semibold))
                 .padding(.horizontal, 12).padding(.vertical, 8)
-                .rjGlass(in: Capsule()).padding(12)
+                .rjGlass(in: Capsule()).padding(.trailing, 12).padding(.bottom, 30)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Farbverlauf von früheren zu späteren Meldungen")
             }
