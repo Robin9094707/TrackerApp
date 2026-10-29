@@ -199,7 +199,7 @@ func getInformation(deviceMetadata: DeviceMetadata) -> DeviceMetadata.DeviceInfo
     deviceMetadata.hasTrackerInformation ? deviceMetadata.trackerInformation : deviceMetadata.phoneInformation.information
 }
 
-func convertToLocalFindMyDevice(deviceMetadata: DeviceMetadata, existingDevices: [LocalFindMyDevice]) -> LocalFindMyDevice? {
+func convertToLocalFindMyDevice(deviceMetadata: DeviceMetadata, existingDevices: [LocalFindMyDevice], ownerKey: Data? = TokenManager.sharedInstance.ownerKey?.dataFromHex) -> LocalFindMyDevice? {
     let deviceInformation = getInformation(deviceMetadata: deviceMetadata)
     let deviceRegistration = deviceInformation.deviceRegistration
     let accessInformation = deviceInformation.accessInformation
@@ -223,7 +223,7 @@ func convertToLocalFindMyDevice(deviceMetadata: DeviceMetadata, existingDevices:
 
         if let encryptedInviteePrivateKey = myEntry?.sharingKeys.inviteeKey,
            let encryptedOwnerPublicKey = myEntry?.sharingKeys.inviterKey,
-           let ownerKey = TokenManager.sharedInstance.ownerKey?.dataFromHex,
+           let ownerKey,
            let email = myEntry?.email
         {
             do {
@@ -235,7 +235,7 @@ func convertToLocalFindMyDevice(deviceMetadata: DeviceMetadata, existingDevices:
         }
     }
 
-    if sharingState == .SharedWithOthersPending, let ownerKey = TokenManager.sharedInstance.ownerKey?.dataFromHex {
+    if sharingState == .SharedWithOthersPending, let ownerKey {
         for theirEntry in accessInformation.filter({ !$0.hasAccess_p && $0.hasSharingKeys }) {
             do {
                 let sharingInviterPrivateKey = try PrivateKeyWrapper(serializedBytes: AESGCM.decrypt(key: ownerKey, encryptedDataAndIV: theirEntry.sharingKeys.inviterKey))
@@ -252,7 +252,7 @@ func convertToLocalFindMyDevice(deviceMetadata: DeviceMetadata, existingDevices:
     var ownerKeyVersion = Int(deviceRegistration.encryptedKeys.ownerKeyVersion)
     var keyDate = deviceRegistration.encryptedKeys.creationDate.seconds.date
 
-    if deviceRegistration.hasEncryptedKeys, let ownerKey = TokenManager.sharedInstance.ownerKey?.dataFromHex {
+    if deviceRegistration.hasEncryptedKeys, let ownerKey {
         let encryptedEIK = deviceRegistration.encryptedKeys.encryptedIdentityKey
         let encryptedAccountKey = deviceRegistration.encryptedKeys.encryptedAccountKey
 

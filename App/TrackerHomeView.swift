@@ -433,7 +433,8 @@ struct SyncStatusView: View {
                         .accessibilityIdentifier("sync-server-retry")
                 }
             }
-        }.font(.caption).foregroundStyle(.secondary).padding(.vertical, 4).accessibilityIdentifier("sync-status")
+        }.font(.caption).foregroundStyle(.secondary).padding(.vertical, 4)
+            .accessibilityElement(children: .contain)
     }
 }
 
