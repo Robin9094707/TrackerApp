@@ -43,7 +43,7 @@ struct TrackerHomeView: View {
         }
         .task { fitAll(); await google.restoreIfNeeded() }
         .onChange(of: google.trackers.map(\.id)) { _, _ in if selectedRef == nil && follow { fitAll() } }
-        .onChange(of: located.map(\.ref)) { _, _ in if selectedRef == nil && follow { fitAll() } }
+        .onChange(of: located.compactMap(\.validLocation)) { _, _ in if selectedRef == nil && follow { fitAll() } }
         .onChange(of: current?.location) { _, _ in if follow { focusCurrent() } }
         .onChange(of: detent) { _, value in
             if value != .large { if selectedRef == nil { fitAll() } else if follow { focusCurrent() } }
@@ -391,21 +391,46 @@ struct TrackerListRow: View {
 struct SyncStatusView: View {
     @Environment(AppModel.self) private var model
     @ObservedObject private var google = GoogleTrackerStore.shared
+    @State private var retryingServer = false
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if model.showsGoogleControls, google.hasCredentials {
-                Label(google.isRefreshing ? "Lokale Tracker werden aktualisiert …" : "Google direkt auf diesem iPhone · \(google.trackers.count) Objekte", systemImage: "iphone")
+                HStack(spacing: 6) {
+                    if google.isRefreshing || !google.locating.isEmpty { ProgressView().controlSize(.mini) }
+                    Label(google.isRefreshing ? "Google-Objekte werden geladen …"
+                          : (!google.locating.isEmpty ? "Google · warte auf \(google.locating.count) Ortungen …"
+                             : "Google direkt auf diesem iPhone · \(google.trackers.count) Objekte"), systemImage: "iphone")
+                }
                 if let error = google.errorMessage { Text(error).foregroundStyle(.orange) }
             }
             if !model.serverURL.isEmpty {
                 HStack(spacing: 6) {
                     Image(systemName: model.serverActionsAvailable ? "checkmark.icloud" : "wifi.exclamationmark")
-                    if model.isRefreshing || model.isRefreshingTrackers { ProgressView().controlSize(.mini) }
+                    if model.isRefreshing || model.isRefreshingTrackers || retryingServer {
+                        ProgressView().controlSize(.mini)
+                        Text("Server wird aktualisiert …")
+                    }
                     else if model.connectionState == .restoring { Text("Server wird verbunden …") }
                     else if model.serverActionsAvailable, let date = model.lastRefresh {
                         Text("Server · Stand \(date.formatted(date: .omitted, time: .shortened))")
-                    } else { Text("Server nicht verbunden · letzter Serverstand, falls vorhanden").foregroundStyle(.orange) }
+                    } else {
+                        Text(model.connectionState == .connected ? "Server-Aktualisierung fehlgeschlagen" : "Server nicht verbunden").foregroundStyle(.orange)
+                    }
                     Spacer()
+                }
+                if model.refreshError != nil || model.connectionState == .disconnected {
+                    Text("Gespeicherte Standorte bleiben sichtbar. Die Uhrzeit am Objekt zeigt, wann es zuletzt gesehen wurde.")
+                    if let error = model.refreshError { Text(error).foregroundStyle(.orange).lineLimit(3) }
+                    Button("Erneut verbinden", systemImage: "arrow.clockwise") {
+                        retryingServer = true
+                        Task {
+                            defer { retryingServer = false }
+                            if model.connectionState == .connected { await model.refreshTrackers() }
+                            else { await model.retryServerConnection() }
+                        }
+                    }.buttonStyle(.borderless)
+                        .disabled(retryingServer || model.isRefreshing || model.isRefreshingTrackers)
+                        .accessibilityIdentifier("sync-server-retry")
                 }
             }
         }.font(.caption).foregroundStyle(.secondary).padding(.vertical, 4).accessibilityIdentifier("sync-status")

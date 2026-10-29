@@ -1,4 +1,4 @@
-# Universal Tag Studio 20.4.2 · TRACKER REFRESH QUALITY OF LIFE
+# Universal Tag Studio 20.4.3 · GOOGLE RELIABILITY AND DATA RECOVERY
 # Backward-compatible single-file upgrade. Existing data/ directory layout,
 # tracker IDs, histories, shares and provider sessions are intentionally
 # preserved. Google integration: leonboe1/GoogleFindMyTools (GPL-3.0).
@@ -889,36 +889,70 @@ def _path_lock(path):
 def safe_load_json(path, default, accepted_types=None):
     path = Path(path)
     expected = accepted_types or (type(default),)
-    if not path.exists():
-        return default
-    try:
-        with _path_lock(path), open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, expected):
-            return data
-        raise ValueError(f"Unerwarteter JSON-Wurzeltyp: {type(data).__name__}")
-    except Exception as exc:
-        # Never silently overwrite a damaged production file. Keep an evidence
-        # copy and prefer the last atomically-created .bak generation.
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        corrupt_copy = path.with_name(f"{path.name}.corrupt.{stamp}")
+    with _path_lock(path):
         try:
-            if path.exists() and not corrupt_copy.exists():
-                shutil.copy2(path, corrupt_copy)
-        except OSError:
-            pass
-        backup = path.with_name(f"{path.name}.bak")
-        try:
-            if backup.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, expected):
+                return data
+            raise ValueError(f"Unerwarteter JSON-Wurzeltyp: {type(data).__name__}")
+        except Exception as exc:
+            # Keep evidence before repairing the primary generation. Recovery
+            # also covers a missing primary after a filesystem interruption.
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            corrupt_copy = path.with_name(f"{path.name}.corrupt.{stamp}")
+            try:
+                if path.exists() and not corrupt_copy.exists():
+                    shutil.copy2(path, corrupt_copy)
+            except OSError:
+                pass
+            backup = path.with_name(f"{path.name}.bak")
+            try:
                 with open(backup, "r", encoding="utf-8") as f:
                     restored = json.load(f)
                 if isinstance(restored, expected):
-                    logger.warning("JSON %s beschädigt; gültige .bak-Generation wird verwendet (%s).", path.name, type(exc).__name__)
+                    try:
+                        # Do not rotate the damaged primary into the valid
+                        # backup on the first normal save after startup.
+                        atomic_write_json(path, restored, create_backup=False, private=True)
+                    except OSError as repair_exc:
+                        logger.warning("JSON %s aus .bak geladen; Reparatur fehlgeschlagen (%s).", path.name, type(repair_exc).__name__)
+                    logger.warning("JSON %s aus gültiger .bak-Generation wiederhergestellt (%s).", path.name, type(exc).__name__)
                     return restored
-        except Exception:
-            pass
-        logger.error("JSON %s konnte nicht sicher geladen werden (%s). Original bleibt erhalten.", path.name, type(exc).__name__)
-        return default
+            except (OSError, ValueError, TypeError):
+                pass
+            if path.exists():
+                logger.error("JSON %s konnte nicht sicher geladen werden (%s). Original bleibt erhalten.", path.name, type(exc).__name__)
+            return default
+
+
+def backup_json_generation(path, *, private=False):
+    """Rotate only valid JSON, atomically, keeping a good backup on failure.
+
+    Caller holds the path lock. A corrupt primary must never replace the last
+    good backup, including if repairing it during startup was not possible.
+    """
+    if not path.exists():
+        return
+    backup = path.with_name(f"{path.name}.bak")
+    tmp_name = None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            json.load(f)
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{backup.name}.", suffix=".tmp", dir=str(path.parent))
+        os.close(fd)
+        shutil.copy2(path, tmp_name)
+        if private:
+            os.chmod(tmp_name, 0o600)
+        os.replace(tmp_name, backup)
+    except (OSError, ValueError, TypeError) as exc:
+        logger.debug("Backup für %s bleibt unverändert: %s", path.name, type(exc).__name__)
+    finally:
+        if tmp_name is not None:
+            try:
+                os.remove(tmp_name)
+            except FileNotFoundError:
+                pass
 
 
 def atomic_write_json(path, data, *, create_backup=True, private=False):
@@ -937,14 +971,8 @@ def atomic_write_json(path, data, *, create_backup=True, private=False):
                 json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
                 f.flush()
                 os.fsync(f.fileno())
-            if create_backup and path.exists():
-                backup = path.with_name(f"{path.name}.bak")
-                try:
-                    shutil.copy2(path, backup)
-                    if private:
-                        os.chmod(backup, 0o600)
-                except OSError as exc:
-                    logger.debug("Backup für %s konnte nicht geschrieben werden: %s", path.name, exc)
+            if create_backup:
+                backup_json_generation(path, private=private)
             os.replace(tmp_name, path)
             if private:
                 try:
@@ -999,14 +1027,8 @@ def atomic_external_json_write(path, writer, *, create_backup=True, private=Fals
                     os.chmod(tmp_path, 0o600)
                 except OSError:
                     pass
-            if create_backup and path.exists():
-                backup = path.with_name(f"{path.name}.bak")
-                try:
-                    shutil.copy2(path, backup)
-                    if private:
-                        os.chmod(backup, 0o600)
-                except OSError as exc:
-                    logger.debug("Backup für %s konnte nicht geschrieben werden: %s", path.name, exc)
+            if create_backup:
+                backup_json_generation(path, private=private)
             os.replace(tmp_path, path)
             if private:
                 try:
@@ -5299,14 +5321,7 @@ def google_store_recording(device_id, points, now_ts):
     session_id = int(recording.get("id") or recording.get("start") or now_ts)
     session_file = GOOGLE_SESSIONS_DIR / f"{google_device_safe_id(device_id)}_{session_id}.json"
     session_data = {"id": session_id, "device_id": device_id, "start": session_id, "end": now_ts, "points": []}
-    if session_file.exists():
-        try:
-            with open(session_file, "r", encoding="utf-8") as file:
-                loaded = json.load(file)
-            if isinstance(loaded, dict):
-                session_data = loaded
-        except Exception:
-            pass
+    session_data = safe_load_json(session_file, session_data)
     session_data["points"], added = merge_unique_report_points(session_data.get("points", []), points, 365 * 24 * 60 * 60, GOOGLE_SESSION_HISTORY_LIMIT)
     session_data["end"] = now_ts
     atomic_write_json(session_file, session_data)
@@ -5490,14 +5505,21 @@ def sync_google_devices():
     if not raw_devices and state.get("google_devices"):
         # A temporary empty response must not erase devices, links or histories.
         raise GoogleBridgeError("empty_response", "empty_device_list: Vorhandene Google Tags wurden zum Schutz beibehalten.")
-    devices = {}
+    # Find Hub can return a partial catalog. Absence in one listing is not a
+    # deletion signal: retain saved IDs, local metadata, links and histories.
+    devices = dict(state.get("google_devices", {}))
+    discovered = 0
     now_ts = int(time.time())
     for raw in raw_devices:
+        if not isinstance(raw, dict):
+            continue
         device_id = str(raw.get("id") or "").strip()
         if not device_id:
             continue
-        previous = state.get("google_devices", {}).get(device_id, {})
+        discovered += 1
+        previous = devices.get(device_id, {})
         devices[device_id] = {
+            **previous,
             "id": device_id,
             "name": str(previous.get("name_override") or raw.get("name") or previous.get("name") or "Google Tag")[:120],
             "name_override": str(previous.get("name_override") or "")[:120],
@@ -5513,13 +5535,11 @@ def sync_google_devices():
             "battery_info": google_battery_from_probe(raw.get("battery_probe")) or previous.get("battery_info"),
             "fetched_ts": now_ts,
         }
+    if raw_devices and not discovered:
+        raise GoogleBridgeError("invalid_response", "Die Google-Geräteliste enthält keine gültigen Geräte-IDs. Vorhandene Daten bleiben erhalten.")
     state["google_devices"] = devices
     valid_ids = set(devices)
-    for apple_name, link in list(state.get("google_links", {}).items()):
-        if link.get("google_id") not in valid_ids or apple_name not in state.get("accessories", {}):
-            state["google_links"].pop(apple_name, None)
     save_json(GOOGLE_DEVICES_FILE, "google_devices")
-    save_json(GOOGLE_LINKS_FILE, "google_links")
     # Stagger the first automatic cycle instead of hammering all tags at once.
     for index, device_id in enumerate(sorted(valid_ids)):
         if device_id not in state["google_next_fetch"]:
@@ -5548,12 +5568,13 @@ def normalize_google_report(raw, batch_id):
         lat = float(raw.get("lat"))
         lon = float(raw.get("lon"))
         ts = float(raw.get("ts"))
-        if not -90 <= lat <= 90 or not -180 <= lon <= 180 or ts <= 0:
+        acc = float(raw.get("acc", 0) or 0)
+        if not all(math.isfinite(value) for value in (lat, lon, ts, acc)) or not -90 <= lat <= 90 or not -180 <= lon <= 180 or ts <= 0:
             return None
         point = {
             "lat": lat,
             "lon": lon,
-            "acc": max(0, float(raw.get("acc", 0) or 0)),
+            "acc": max(0, acc),
             "ts": ts,
             "source": "google",
             "provider": "Google Find Hub",
@@ -5561,7 +5582,9 @@ def normalize_google_report(raw, batch_id):
             "batch_id": batch_id,
         }
         if raw.get("alt") is not None:
-            point["alt"] = float(raw.get("alt") or 0)
+            altitude = float(raw.get("alt") or 0)
+            if math.isfinite(altitude):
+                point["alt"] = altitude
         if raw.get("status") is not None:
             try:
                 point["status"] = int(raw.get("status"))
@@ -11784,7 +11807,7 @@ def tracker_lab_active_job():
     return None
 
 APP_NAME = "Universal Tag Studio"
-APP_VERSION = "20.4.2 API EDITION"
+APP_VERSION = "20.4.3 API EDITION"
 
 
 OPTIMIZED_ROUTE_DEFAULT_POINTS = int(os.environ.get("ULTRA_TRACKER_ROUTE_MAX_DISPLAY_POINTS", "4200"))

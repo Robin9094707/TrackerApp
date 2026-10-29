@@ -82,7 +82,7 @@ class LocalFindMyDevice: ObservableObject, Identifiable, Equatable {
     @Published var imageURL: String
     let pairDate: Date
     @Published var ownerKeyVersion: Int
-    let keyDate: Date
+    var keyDate: Date
     let manufacturer: String
     let model: String
     let curveType: CurveType
@@ -99,7 +99,7 @@ class LocalFindMyDevice: ObservableObject, Identifiable, Equatable {
 
     @Published var eik: Data?
     @Published var accountKey: Data?
-    let encryptedKeys: EncryptedUserSecrets?
+    var encryptedKeys: EncryptedUserSecrets?
 
     var reportRevision = UUID()
     @Published var refreshes: [RefreshWrapper] { didSet { reportRevision = UUID() } }
@@ -250,8 +250,9 @@ func convertToLocalFindMyDevice(deviceMetadata: DeviceMetadata, existingDevices:
     var eik: Data? = nil
     var accountKey: Data? = nil
     var ownerKeyVersion = Int(deviceRegistration.encryptedKeys.ownerKeyVersion)
+    var keyDate = deviceRegistration.encryptedKeys.creationDate.seconds.date
 
-    if let ownerKey = TokenManager.sharedInstance.ownerKey?.dataFromHex {
+    if deviceRegistration.hasEncryptedKeys, let ownerKey = TokenManager.sharedInstance.ownerKey?.dataFromHex {
         let encryptedEIK = deviceRegistration.encryptedKeys.encryptedIdentityKey
         let encryptedAccountKey = deviceRegistration.encryptedKeys.encryptedAccountKey
 
@@ -289,12 +290,16 @@ func convertToLocalFindMyDevice(deviceMetadata: DeviceMetadata, existingDevices:
 
                         eik = newEik
                         lastCreationDate = rotatedEIK.creationDate
+                        keyDate = max(keyDate, rotatedEIK.creationDate.seconds.date)
                     }
                 }
 
                 // EIK was updated, upload re-encrypted EIK to server
-                if let date = lastCreationDate, let eik, let accountKey {
+                let previousKeyDate = existingDevices.first(where: { $0.canonicDeviceId == canonicId && $0.belongsToCurrentAccount })?.keyDate ?? .distantPast
+                let account = TokenManager.sharedInstance.username?.lowercased()
+                if let date = lastCreationDate, let eik, let accountKey, keyDate >= previousKeyDate {
                     Task {
+                        guard account == TokenManager.sharedInstance.username?.lowercased() else { return }
                         do {
                             try await UpdateBleDevice.setEncryptedUserSecrets(canonicDeviceId: canonicId, EIK: eik, accountKey: accountKey, creationDate: date)
                         } catch {}
@@ -304,18 +309,31 @@ func convertToLocalFindMyDevice(deviceMetadata: DeviceMetadata, existingDevices:
         } catch {}
     }
 
-    if let existing = existingDevices.first(where: { $0.canonicDeviceId == canonicId }) {
-        DispatchQueue.main.async {
-            withAnimation(.smooth) {
-                existing.userDefinedName = deviceName
-                existing.imageURL = deviceMetadata.imageInformation.imageURL
-                existing.isLost = deviceRegistration.lostModeInformation.lostModeEnabled
+    if let existing = existingDevices.first(where: { $0.canonicDeviceId == canonicId && $0.belongsToCurrentAccount }) {
+        let applyMetadata = {
+            guard existing.belongsToCurrentAccount else { return }
+            // FCM updates are partial, and archived packets may predate key rotation.
+            // Keep working secrets unless a valid, current replacement was decrypted.
+            if !deviceName.isEmpty { existing.userDefinedName = deviceName }
+            if !deviceMetadata.imageInformation.imageURL.isEmpty { existing.imageURL = deviceMetadata.imageInformation.imageURL }
+            if deviceRegistration.hasLostModeInformation { existing.isLost = deviceRegistration.lostModeInformation.lostModeEnabled }
+            if !accessInformation.isEmpty {
                 existing.sharingSettings = SharingSettings(sharingState: sharingState, pendingShareOperations: sharedWith, usersWithAccess: usersWithAccess)
-                existing.ownerKeyVersion = ownerKeyVersion
-                existing.eik = eik
-                existing.accountKey = accountKey
+            }
+            if keyDate >= existing.keyDate || existing.eik == nil {
+                if let eik { existing.eik = eik }
+                if let accountKey { existing.accountKey = accountKey }
+                if eik != nil || accountKey != nil {
+                    existing.ownerKeyVersion = ownerKeyVersion
+                    existing.keyDate = max(existing.keyDate, keyDate)
+                    existing.encryptedKeys = deviceRegistration.encryptedKeys
+                }
             }
         }
+        // A location packet may rotate keys. Commit the validated metadata before
+        // decryptList starts on its worker, rather than racing a queued UI update.
+        if Thread.isMainThread { applyMetadata() }
+        else { DispatchQueue.main.sync(execute: applyMetadata) }
 
         return existing
     } else {
@@ -334,7 +352,7 @@ func convertToLocalFindMyDevice(deviceMetadata: DeviceMetadata, existingDevices:
                                  imageURL: deviceMetadata.imageInformation.imageURL,
                                  pairDate: pairDate,
                                  ownerKeyVersion: ownerKeyVersion,
-                                 keyDate: deviceRegistration.encryptedKeys.creationDate.seconds.date,
+                                 keyDate: keyDate,
                                  eik: eik,
                                  accountKey: accountKey,
                                  encryptedKeys: deviceRegistration.encryptedKeys,

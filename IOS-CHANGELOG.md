@@ -1,3 +1,12 @@
+# 5.6.0 · Google-Ortung und Zuverlässigkeit
+
+- Google-Push-Verbindungen behalten wartende Anfragen beim Wiederverbinden. Zeitlimits entfernen nur die zugehörige Anmeldung; parallele Standort-/Klingelabfragen verlieren ihre Zuordnung nicht.
+- Der erste Google-Sammelabruf verwendet den geladenen Gerätekatalog direkt, statt auf eine spätere Aktualisierung der Oberfläche angewiesen zu sein.
+- Native Google-Details zeigen den tatsächlich verfügbaren Standort samt passender Zeit und Route; ungültige Koordinaten verdrängen keinen gültigen Serverstandort.
+- API-Antworten aus einer abgelösten Sitzung können die aktuelle Sitzung nicht mehr überschreiben. Serveradressen werden ohne versehentliche Query-/Fragmentparameter verwendet.
+- Backend 20.4.3 erhält gespeicherte Google-Geräte bei unvollständigen Listen und schützt die Wiederherstellung vorhandener JSON-Sicherungen. Keine neuen Datenpfade oder Datenformate.
+- Version 5.6.0 / Build 25, unveränderte Bundle-ID, Google-Keychain und AMP-Python-Umgebung. [Update-Anleitung](docs/UPGRADE-5.6.0.md).
+
 # 5.5.1 · Aktualisierung & Haptik
 
 Apple-Abfragen geben die Schaltfläche beim individuellen Abschluss frei, auch ohne neueren Standort. Apple-Sammelabfragen verarbeiten jeden Tracker sofort. Google erhält Haptik bei manuellen Aktualisierungen und auf der Trackerkarte beim Ergebnis. Bestehende Datenformate und Anmeldekompatibilität bleiben erhalten. Details: `docs/UPGRADE-5.5.1.md`.

@@ -12,6 +12,9 @@ import SwiftUI
 
 class AESGCM {
     static func decrypt(key: Data, encryptedDataAndIV: Data, ivLength: Int = 12) throws -> Data {
+        guard ivLength > 0, encryptedDataAndIV.count >= ivLength + 16 else {
+            throw googleError("Verschlüsselte Google-Daten sind unvollständig.")
+        }
         let iv = encryptedDataAndIV.prefix(ivLength)
         let ciphertextAndTag = encryptedDataAndIV.dropFirst(ivLength)
         let tag = ciphertextAndTag.suffix(16)

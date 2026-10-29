@@ -42,16 +42,20 @@ jobs:
       - run: python -m py_compile Backend/tracker_backend.py
       - run: python Tests/test_backend_calendar_mcp.py -v
       - run: python Tests/test_backend_refresh.py -v
+      - run: python Tests/test_backend_google.py -v
+      - run: python Tests/test_backend_apple.py -v
       - name: Validate single-file AMP package
         run: |
           python Scripts/package_amp_backend.py Tracker_Backend_AMP.py
           python Tracker_Backend_AMP.py --amp-check
       - uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-Backend-20.4.2-AMP
+          name: RJ-Tracker-Backend-20.4.3-AMP
           path: Tracker_Backend_AMP.py
           if-no-files-found: error
           retention-days: 30
+      - name: Publish backend download link
+        run: echo "Backend 20.4.3 AMP is available in this run’s Artifacts. Keep the existing data directory and start configuration." >> "$GITHUB_STEP_SUMMARY"
   build:
     needs: backend
     name: Build unsigned iOS IPA
@@ -144,6 +148,7 @@ jobs:
             -only-testing:RJTrackerUITests/TrackerUITests/testColdStartAndRelaunchWithoutSession \
             -only-testing:RJTrackerTests \
             -only-testing:RJTrackerUITests/TrackerUITests/testGoogleDetailsUseOneTitleAndDirectRefresh \
+            -only-testing:RJTrackerUITests/TrackerUITests/testGoogleRouteUsesSavedServerLocationAndOfflineStatusOffersRetry \
             -only-testing:RJTrackerUITests/TrackerUITests/testAccountSecurityAndHistory \
             -only-testing:RJTrackerUITests/TrackerUITests/testMapLibraryDetailsAndPlaces \
             -only-testing:RJTrackerUITests/TrackerUITests/testLocalGoogleCanOpenAndReturnToExistingTrackers \
@@ -181,11 +186,11 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$APP/Info.plist"
           test -n "$(find "$APP" -name 'AppIcon*.png' -print -quit)"
           cp -R "$APP" Payload/
-          /usr/bin/zip -qry RJ-Tracker-v5.5.1-unsigned.ipa Payload
-          unzip -t RJ-Tracker-v5.5.1-unsigned.ipa
-          shasum -a 256 RJ-Tracker-v5.5.1-unsigned.ipa > SHA256SUMS.txt
-          ls -lh RJ-Tracker-v5.5.1-unsigned.ipa
-          echo "### RJ Tracker 5.5.1" >> "$GITHUB_STEP_SUMMARY"
+          /usr/bin/zip -qry RJ-Tracker-v5.6.0-unsigned.ipa Payload
+          unzip -t RJ-Tracker-v5.6.0-unsigned.ipa
+          shasum -a 256 RJ-Tracker-v5.6.0-unsigned.ipa > SHA256SUMS.txt
+          ls -lh RJ-Tracker-v5.6.0-unsigned.ipa
+          echo "### RJ Tracker 5.6.0" >> "$GITHUB_STEP_SUMMARY"
           echo "Commit: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
           echo "Unsigned IPA ready for sideload signing." >> "$GITHUB_STEP_SUMMARY"
 
@@ -193,9 +198,9 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-v5.5.1-unsigned-IPA
+          name: RJ-Tracker-v5.6.0-unsigned-IPA
           path: |
-            RJ-Tracker-v5.5.1-unsigned.ipa
+            RJ-Tracker-v5.6.0-unsigned.ipa
             SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
@@ -213,8 +218,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-v5.5.1-tests-and-screenshots
+          name: RJ-Tracker-v5.6.0-tests-and-screenshots
           path: |
+            RJ-Tracker-tests.xcresult
+            RJ-Tracker-release-tests.xcresult
             RJ-Tracker-tests.log
             RJ-Tracker-release-tests.log
             TestScreenshots
@@ -225,7 +232,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-v5.5.1-build-log
+          name: RJ-Tracker-v5.6.0-build-log
           path: RJ-Tracker-build.log
           if-no-files-found: ignore
           retention-days: 30

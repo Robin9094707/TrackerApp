@@ -8,7 +8,7 @@
 import Foundation
 import SwiftUI
 
-func mergeDeviceUpdate(requestDate: Date, contributorType: ContributorType, deviceUpdateProtobuf: DeviceUpdate, localDevice: LocalFindMyDevice, completion: @escaping () -> Void = {}) -> Bool {
+func mergeDeviceUpdate(requestDate: Date, contributorType: ContributorType, deviceUpdateProtobuf: DeviceUpdate, localDevice: LocalFindMyDevice, completion: @escaping (Bool) -> Void = { _ in }) -> Bool {
     guard localDevice.belongsToCurrentAccount else { return false }
     // also update keys if necessary
     let _ = convertToLocalFindMyDevice(deviceMetadata: deviceUpdateProtobuf.deviceMetadata, existingDevices: [localDevice])
@@ -65,7 +65,7 @@ func mergeDeviceUpdate(requestDate: Date, contributorType: ContributorType, devi
         Task { @MainActor in
             guard localDevice.belongsToCurrentAccount else { return }
             localDevice.appendHistory(decryptedRefresh)
-            completion()
+            completion(receivedUpdate || alreadyHasEnoughHighTrafficReports)
         }
     }
 

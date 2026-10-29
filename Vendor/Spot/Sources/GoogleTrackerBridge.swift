@@ -318,7 +318,7 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         }
         // Safety deadline only; a real response/error clears the spinner immediately.
         Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(38)) } catch { return }
+            do { try await Task.sleep(for: .seconds(75)) } catch { return }
             guard let self, generation == self.generation,
                   self.locationRequests.finish(id, token: request) else { return }
             self.locationSucceeded[id] = false
@@ -362,9 +362,12 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
         if uiTestState { return }
         #endif
         lastReportRequest = .now
-        for tracker in trackers where !automatic || tracker.historyEnabled {
-            do { try locate(tracker.id) }
-            catch { locationStatus[tracker.id] = error.localizedDescription }
+        // The visible snapshots are coalesced asynchronously and can still be empty
+        // just after the catalog loads. Schedule from the authoritative device list.
+        for device in Settings.sharedInstance.devicesList ?? [] where device.belongsToCurrentAccount {
+            guard !automatic || GoogleCollectionPreferences.enabled(account: account ?? "", deviceID: device.id, defaults: preferences) else { continue }
+            do { try locate(device.id) }
+            catch { locationStatus[device.id] = error.localizedDescription }
         }
     }
     public func sceneChanged(active: Bool) {
@@ -585,11 +588,12 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
     }
     #if DEBUG
     // In-memory UI fixture: no Keychain writes, no server or Google network calls.
-    public func useUITestState() {
+    public func useUITestState(hasLocation: Bool = true) {
         uiTestState = true; restored = true; polling?.cancel(); polling = nil
         hasCredentials = true; account = "ui-test@example.invalid"; needsKeys = false
         trackers = [GoogleTrackerSnapshot(id: "demo-local-tag", name: "Lokaler Test-Tracker", imageURL: "",
-            latitude: 52.5163, longitude: 13.3777, accuracy: 10, reportedAt: .now, nearby: false,
+            latitude: hasLocation ? 52.5163 : nil, longitude: hasLocation ? 13.3777 : nil,
+            accuracy: hasLocation ? 10 : nil, reportedAt: hasLocation ? .now : nil, nearby: false,
             battery: nil, reportCount: 0, historyEnabled: true, unlocked: true, isLost: false, sharedWith: [], signal: nil)]
     }
     #endif

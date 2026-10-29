@@ -10,6 +10,8 @@ final class APIClient {
     private let encoder = JSONEncoder()
     private var historyCache: [String: (Date, HistoryResponse)] = [:]
     private var historyGeneration = UUID()
+    // Requests from a previous server/session must not update the current session.
+    private var requestGeneration = UUID()
     private var historyTasks: [String: Task<HistoryResponse, Error>] = [:]
 
     func clearHistoryCache() {
@@ -29,16 +31,23 @@ final class APIClient {
         var text = server.trimmingCharacters(in: .whitespacesAndNewlines)
         while text.hasSuffix("/") { text.removeLast() }
         if !text.contains("://") { text = "https://" + text }
-        guard let url = URL(string: text), let scheme = url.scheme?.lowercased(), ["https", "http"].contains(scheme), url.host != nil else {
+        guard var components = URLComponents(string: text), let scheme = components.scheme?.lowercased(),
+              ["https", "http"].contains(scheme), let host = components.host, !host.isEmpty,
+              components.user == nil, components.password == nil else {
             throw APIError.message("Die Serveradresse ist ungültig.")
         }
-        if baseURL != url { clearHistoryCache() }
+        components.query = nil
+        components.fragment = nil
+        guard let url = components.url else { throw APIError.message("Die Serveradresse ist ungültig.") }
+        if baseURL != url { requestGeneration = UUID(); clearHistoryCache() }
         baseURL = url
         UserDefaults.standard.set(url.absoluteString, forKey: "serverURL")
     }
 
     func pair(server: String, username: String, password: String) async throws -> PairResponse {
         try configure(server: server)
+        requestGeneration = UUID()
+        clearHistoryCache()
         let body: [String: Any] = ["username": username, "pw": password]
         let response: PairResponse = try await request(path: "/api/mobile/v1/pair", method: "POST", json: body, needsCSRF: false)
         if let token = response.csrfToken { saveCSRF(token) }
@@ -47,6 +56,8 @@ final class APIClient {
     }
 
     func pair2FA(code: String) async throws -> PairResponse {
+        requestGeneration = UUID()
+        clearHistoryCache()
         let response: PairResponse = try await request(path: "/api/mobile/v1/pair/2fa", method: "POST", json: ["code": code], needsCSRF: false)
         if let token = response.csrfToken { saveCSRF(token) }
         return response
@@ -75,8 +86,13 @@ final class APIClient {
     func history(tracker: String, days: Int, dates: [String] = [], force: Bool = false) async throws -> HistoryResponse {
         let key = "\(baseURL?.absoluteString ?? "")|\(csrfToken)|\(tracker)|\(days)|\(dates.sorted().joined(separator: ","))"
         if !force, let (date, response) = historyCache[key], Date().timeIntervalSince(date) < 45 { return response }
-        if let task = historyTasks[key] { return try await task.value }
         let generation = historyGeneration
+        if let task = historyTasks[key] {
+            let response = try await task.value
+            try Task.checkCancellation()
+            guard generation == historyGeneration else { throw CancellationError() }
+            return response
+        }
         let task = Task<HistoryResponse, Error> {
             try await self.request(path: "/api/mobile/v1/history", query: [
                 .init(name: "ref", value: tracker), .init(name: "days", value: String(days)),
@@ -147,10 +163,14 @@ final class APIClient {
     }
 
     func logout() async {
+        requestGeneration = UUID()
+        let generation = requestGeneration
+        let server = baseURL
         clearHistoryCache()
         _ = try? await requestJSON(path: "/api/logout", method: "POST", json: [:])
-        if let baseURL {
-            HTTPCookieStorage.shared.cookies(for: baseURL)?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
+        guard generation == requestGeneration else { return }
+        if let server {
+            HTTPCookieStorage.shared.cookies(for: server)?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
         }
         csrfToken = ""
         KeychainStore.delete("csrf")
@@ -235,8 +255,15 @@ final class APIClient {
     }
 
     func request<T: Decodable>(path: String, method: String = "GET", json: [String: Any]? = nil, query: [URLQueryItem] = [], needsCSRF: Bool? = nil) async throws -> T {
+        let generation = requestGeneration
         let data = try await raw(path: path, method: method, json: json, query: query, needsCSRF: needsCSRF)
-        do { return try await Task.detached(priority: .userInitiated) { try JSONDecoder().decode(T.self, from: data) }.value }
+        do {
+            let result = try await Task.detached(priority: .userInitiated) { try JSONDecoder().decode(T.self, from: data) }.value
+            try Task.checkCancellation()
+            guard generation == requestGeneration else { throw CancellationError() }
+            return result
+        }
+        catch is CancellationError { throw CancellationError() }
         catch {
             DebugLogger.shared.log("Decode error for \(path): \(error)")
             throw APIError.message("Die Serverantwort konnte nicht gelesen werden: \(error.localizedDescription)")
@@ -244,6 +271,7 @@ final class APIClient {
     }
 
     private func raw(path: String, method: String, json: [String: Any]?, query: [URLQueryItem], needsCSRF: Bool? = nil, form: [String: String]? = nil, multipart: Data? = nil, boundary: String = "") async throws -> Data {
+        let generation = requestGeneration
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
             guard method == "GET", let data = PreviewFixtures.response(path: path) else { throw APIError.message("Im UI-Test sind Serveränderungen deaktiviert.") }
@@ -257,7 +285,8 @@ final class APIClient {
         }
         let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         components.path = "/" + ([basePath, cleanPath.removingPercentEncoding ?? cleanPath].filter { !$0.isEmpty }.joined(separator: "/"))
-        if !query.isEmpty { components.queryItems = query }
+        components.queryItems = query.isEmpty ? nil : query
+        components.fragment = nil
         guard let url = components.url else { throw APIError.message("Ungültige API-URL.") }
         let slowOperation = path.contains("/backups") || path.contains("/cleanup") || path.contains("/tools") || path.contains("/import") || path.contains("/auth/complete") || path == "/api/login"
         let timeout: TimeInterval = path == "/api/mobile/v1/session" ? 8 : (slowOperation ? 180 : (path.hasSuffix("/history") ? 60 : 25))
@@ -285,12 +314,14 @@ final class APIClient {
         DebugLogger.shared.log("API \(request.httpMethod ?? "GET") \(url.path)")
         let (data, response) = try await transport.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.message("Keine HTTP-Antwort erhalten.") }
-        if let newCSRF = http.value(forHTTPHeaderField: "X-CSRF-Token"), !newCSRF.isEmpty { saveCSRF(newCSRF) }
         let metadata = await Task.detached(priority: .userInitiated) {
             let envelope = try? JSONDecoder().decode(APIMessage.self, from: data)
             let token = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["csrf_token"] as? String
             return (envelope, token)
         }.value
+        try Task.checkCancellation()
+        guard generation == requestGeneration else { throw CancellationError() }
+        if let newCSRF = http.value(forHTTPHeaderField: "X-CSRF-Token"), !newCSRF.isEmpty { saveCSRF(newCSRF) }
         guard (200..<300).contains(http.statusCode) else {
             let envelope = metadata.0
             let message = envelope?.message ?? "Serverfehler HTTP \(http.statusCode)."

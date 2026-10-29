@@ -19,7 +19,7 @@ final class PushReceiver: SharedInstance {
 
     private let MCS_VERSION: UInt8 = 41
 
-    private var newMessageCallbacks = [MessageCallback]()
+    private var messageSubscriptions = GooglePushSubscriptions<FcmPush>()
     private var fcmConfig: FcmRegisterConfig
     private let credentialLock = NSLock()
     private var storedCredentials: FcmCredentials?
@@ -30,7 +30,6 @@ final class PushReceiver: SharedInstance {
     @MainActor private var registrationTask: Task<FcmCredentials, Error>?
     private var connectionGeneration = UUID()
     private var ready = false
-    private var readyCallbacks: [() -> Void] = []
     private var persistentIds = [String]()
     private var config: FcmPushClientConfig
     private var doListen: Bool = false
@@ -81,22 +80,16 @@ final class PushReceiver: SharedInstance {
 
     func registerForMessageUpdates(isListening: @escaping () -> Void, callback: @escaping (FcmPush?) -> Bool) {
         pushQueue.async { [self] in
-            let newCallback = MessageCallback(callback: callback)
-            newMessageCallbacks.append(newCallback)
-
-            guard credentials != nil else { callback(nil); newMessageCallbacks.removeAll { $0 == newCallback }; return }
-            if ready { isListening() } else { readyCallbacks.append(isListening) }
+            guard credentials != nil else { _ = callback(nil); return }
+            let subscriptionID = messageSubscriptions.insert(whenReady: isListening, receive: callback)
+            if ready { messageSubscriptions.takeReadyCallbacks().forEach { $0() } }
             if !doListen { start() }
 
             pushQueue.asyncAfter(deadline: .now() + 35) { [self] in
-                if newMessageCallbacks.contains(newCallback) {
-                    newMessageCallbacks.removeAll { $0 == newCallback }
-                    _ = callback(nil)
+                if let subscription = messageSubscriptions.remove(subscriptionID) {
+                    _ = subscription.receive(nil)
                 }
-
-                if newMessageCallbacks.isEmpty {
-                    stop()
-                }
+                if messageSubscriptions.isEmpty { stop() }
             }
         }
     }
@@ -128,7 +121,7 @@ final class PushReceiver: SharedInstance {
     func signOut() {
         pushQueue.async {
             self.stop()
-            self.newMessageCallbacks.removeAll()
+            self.failPending()
             do {
                 try self.removeCredentials()
             } catch {
@@ -395,8 +388,7 @@ final class PushReceiver: SharedInstance {
                 resetErrorCount(errorType: .login)
                 persistentIds = []
                 ready = true
-                let callbacks = readyCallbacks; readyCallbacks.removeAll()
-                callbacks.forEach { $0() }
+                messageSubscriptions.takeReadyCallbacks().forEach { $0() }
             }
             return
         }
@@ -450,22 +442,13 @@ final class PushReceiver: SharedInstance {
         do {
             let decrypted = try FcmDecryptor.decryptRawData(rawData: msg.rawData, serverPublicKeyString: cryptoKey, saltString: salt, ownPrivateKeyDer: credentials.keys.privateKey, ownSecretString: credentials.keys.secret)
 
-            var removeList = [MessageCallback]()
-
-            for messageCallback in newMessageCallbacks {
-                let callback = messageCallback.callback
-                let wasSuccessful = callback(FcmPush(data: decrypted, persistentId: msg.persistentID))
-
-                if wasSuccessful {
-                    removeList.append(messageCallback)
+            // Iterate an immutable copy: callbacks may enqueue new subscriptions.
+            for subscription in messageSubscriptions.subscriptions {
+                if subscription.receive(FcmPush(data: decrypted, persistentId: msg.persistentID)) {
+                    messageSubscriptions.remove(subscription.id)
                 }
             }
-
-            newMessageCallbacks.removeAll { removeList.contains($0) }
-
-            if newMessageCallbacks.isEmpty {
-                stop()
-            }
+            if messageSubscriptions.isEmpty { stop() }
 
             resetErrorCount(errorType: .notify)
         } catch {}
@@ -495,21 +478,20 @@ final class PushReceiver: SharedInstance {
     private func stop() {
         connectionGeneration = UUID()
         doListen = false; ready = false
-        readyCallbacks.removeAll()
         DispatchQueue.main.async { self.heartbeatTimer?.invalidate(); self.heartbeatTimer = nil }
         connection?.stateUpdateHandler = nil
         connection?.cancel(); connection = nil
         buffer.removeAll(); frameDecoder = GoogleMCSDecoder()
     }
     private func failPending() {
-        let callbacks = newMessageCallbacks; newMessageCallbacks.removeAll()
-        callbacks.forEach { _ = $0.callback(nil) }
+        let callbacks = messageSubscriptions.removeAll()
+        callbacks.forEach { _ = $0.receive(nil) }
     }
     func reset() {
         stop()
-        if !newMessageCallbacks.isEmpty {
+        if !messageSubscriptions.isEmpty {
             pushQueue.asyncAfter(deadline: .now() + 2) { [weak self] in
-                guard let self, !self.newMessageCallbacks.isEmpty, !self.doListen else { return }
+                guard let self, !self.messageSubscriptions.isEmpty, !self.doListen else { return }
                 self.start()
             }
         }
@@ -533,12 +515,4 @@ final class PushReceiver: SharedInstance {
         return true
     }
 
-    private struct MessageCallback: Identifiable, Equatable {
-        static func == (lhs: PushReceiver.MessageCallback, rhs: PushReceiver.MessageCallback) -> Bool {
-            lhs.id == rhs.id
-        }
-
-        let id = UUID()
-        let callback: (FcmPush?) -> Bool
-    }
 }
