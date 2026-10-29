@@ -93,8 +93,13 @@ class DurableStoreTests(unittest.TestCase):
         M['atomic_write_json'](self.path, {'new': True})
         self.assertEqual(json.loads(self.backup.read_text()), self.saved)
 
-    def test_missing_primary_recovers_existing_backup(self):
-        self.assertEqual(M['safe_load_json'](self.path, {}), self.saved)
+    def test_missing_primary_keeps_intentionally_deleted_credentials_deleted(self):
+        self.assertEqual(M['safe_load_json'](self.path, {}), {})
+        self.assertFalse(self.path.exists())
+        self.assertEqual(json.loads(self.backup.read_text()), self.saved)
+
+    def test_missing_primary_recovers_existing_backup_when_explicitly_enabled(self):
+        self.assertEqual(M['safe_load_json'](self.path, {}, recover_missing=True), self.saved)
         self.assertEqual(json.loads(self.path.read_text()), self.saved)
 
     def test_invalid_backup_type_is_not_restored(self):
@@ -131,12 +136,16 @@ class DurableStoreTests(unittest.TestCase):
         path = Path(self.temp.name) / f"{M['google_device_safe_id']('recover')}_{now - 60}.json"
         old = {'lat': 51, 'lon': 6, 'ts': now - 20, 'acc': 10, 'report_id': 'old'}
         new = {**old, 'ts': now, 'report_id': 'new'}
-        path.write_text('interrupted')
-        path.with_name(path.name + '.bak').write_text(json.dumps({'id': now - 60, 'points': [old]}))
         try:
-            with patch.dict(G, GOOGLE_SESSIONS_DIR=Path(self.temp.name)):
-                self.assertEqual(M['google_store_recording']('recover', [new], now), 1)
-            self.assertEqual({point['report_id'] for point in json.loads(path.read_text())['points']}, {'old', 'new'})
+            for missing in (False, True):
+                with self.subTest(missing_primary=missing):
+                    path.unlink(missing_ok=True)
+                    if not missing:
+                        path.write_text('interrupted')
+                    path.with_name(path.name + '.bak').write_text(json.dumps({'id': now - 60, 'points': [old]}))
+                    with patch.dict(G, GOOGLE_SESSIONS_DIR=Path(self.temp.name)):
+                        self.assertEqual(M['google_store_recording']('recover', [new], now), 1)
+                    self.assertEqual({point['report_id'] for point in json.loads(path.read_text())['points']}, {'old', 'new'})
         finally:
             STATE['google_recordings'] = original
 

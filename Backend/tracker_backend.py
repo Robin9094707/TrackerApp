@@ -886,10 +886,14 @@ def _path_lock(path):
         return lock
 
 
-def safe_load_json(path, default, accepted_types=None):
+def safe_load_json(path, default, accepted_types=None, *, recover_missing=False):
     path = Path(path)
     expected = accepted_types or (type(default),)
     with _path_lock(path):
+        # Absence normally means intentional removal (for example logout or
+        # clearing a saved PIN). Only history recovery opts into resurrection.
+        if not path.exists() and not recover_missing:
+            return default
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -897,8 +901,8 @@ def safe_load_json(path, default, accepted_types=None):
                 return data
             raise ValueError(f"Unerwarteter JSON-Wurzeltyp: {type(data).__name__}")
         except Exception as exc:
-            # Keep evidence before repairing the primary generation. Recovery
-            # also covers a missing primary after a filesystem interruption.
+            # Keep evidence before repairing the primary generation. Histories
+            # can opt into missing-primary recovery after an interruption.
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
             corrupt_copy = path.with_name(f"{path.name}.corrupt.{stamp}")
             try:
@@ -5321,7 +5325,7 @@ def google_store_recording(device_id, points, now_ts):
     session_id = int(recording.get("id") or recording.get("start") or now_ts)
     session_file = GOOGLE_SESSIONS_DIR / f"{google_device_safe_id(device_id)}_{session_id}.json"
     session_data = {"id": session_id, "device_id": device_id, "start": session_id, "end": now_ts, "points": []}
-    session_data = safe_load_json(session_file, session_data)
+    session_data = safe_load_json(session_file, session_data, recover_missing=True)
     session_data["points"], added = merge_unique_report_points(session_data.get("points", []), points, 365 * 24 * 60 * 60, GOOGLE_SESSION_HISTORY_LIMIT)
     session_data["end"] = now_ts
     atomic_write_json(session_file, session_data)

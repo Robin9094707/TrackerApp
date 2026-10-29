@@ -12,7 +12,7 @@ Google liefert nicht bei jedem Abruf einen neueren Standort. Die Korrekturen beh
 
 ## Server und Daten
 
-Backend 20.4.3 ergänzt vorhandene Google-Geräte, statt bei einer unvollständigen Liste fehlende Geräte samt Verknüpfungen aus dem Katalog zu entfernen. Standortwerte wie NaN/Infinity gelangen nicht mehr in Google-Historien. JSON-Backups werden atomar ersetzt; eine beschädigte Primärdatei verdrängt keine gültige Sicherung. Ein gültiges `.bak` kann eine beschädigte oder fehlende Primärdatei wiederherstellen. Dies ersetzt kein eigenes externes Backup.
+Backend 20.4.3 ergänzt vorhandene Google-Geräte, statt bei einer unvollständigen Liste fehlende Geräte samt Verknüpfungen aus dem Katalog zu entfernen. Standortwerte wie NaN/Infinity gelangen nicht mehr in Google-Historien. JSON-Backups werden atomar ersetzt; eine beschädigte Primärdatei verdrängt keine gültige Sicherung. Ein gültiges `.bak` kann eine beschädigte Primärdatei wiederherstellen. Bei Google-Aufzeichnungen ist dies ausdrücklich auch für fehlende Dateien aktiviert; bewusst gelöschte Zugangsdaten bleiben gelöscht. Dies ersetzt kein eigenes externes Backup.
 
 Neue App und Backend funktionieren mit den bisherigen API-/Speicherformaten. Datenpfade, Tracker-IDs, Kontositzungen, Google-Keychain-Service, Preferences, Core-Data-Modell und Historienformat bleiben unverändert. Bestehende Anmelde-/Abhängigkeitskorrekturen für Apple bleiben erhalten. Anfragen einer abgelösten Server-Sitzung können die neue App-Sitzung nicht mehr überschreiben.
 
@@ -21,7 +21,7 @@ Neue App und Backend funktionieren mit den bisherigen API-/Speicherformaten. Dat
 1. Backend stoppen und den bisherigen Serverordner einschließlich `data/` bzw. des konfigurierten Datenverzeichnisses sichern.
 2. Aus den Artefakten der GitHub Action **Build RJ Tracker IPA** die Datei `Tracker_Backend_AMP.py` herunterladen. Nur die bisherige Python-Startdatei damit ersetzen, am selben Ort und bei Bedarf unter dem bisherigen Dateinamen.
 3. Bestehende Begleitdateien, `.tracker-apple-python-20.4.1`, `.tracker-apple-support`, `runtime/`, Datenverzeichnis, Startparameter und Umgebungsvariablen beibehalten. `ULTRA_TRACKER_DATA_DIR` muss weiterhin auf das bisherige Verzeichnis zeigen. Neu starten. Für dieses Update sind keine neuen Abhängigkeiten erforderlich.
-4. `RJ-Tracker-v5.6.0-unsigned.ipa` aus demselben Action-Lauf mit der bisherigen Signierkonfiguration signieren und über die vorhandene App installieren. Bundle-ID bleibt `eu.rjuhas.rjtracker`. App vorher **nicht deinstallieren**; dieselbe Signierungsidentität/Keychain-Gruppe ist für den Zugriff auf bestehende geschützte Daten erforderlich.
+4. `RJ-Tracker-v5.6.0-unsigned.ipa` aus den Artefakten mit der bisherigen Signierkonfiguration signieren und über die vorhandene App installieren. Bundle-ID bleibt `eu.rjuhas.rjtracker`. App vorher **nicht deinstallieren**; dieselbe Signierungsidentität/Keychain-Gruppe ist für den Zugriff auf bestehende geschützte Daten erforderlich.
 5. Vorhandene Tracker und Verlauf prüfen, dann einen Google-Tracker manuell aktualisieren. Der Zeitstempel zeigt die letzte Meldung des Netzes, nicht den Zeitpunkt des Tastendrucks.
 
 Die IPA ist wie im bisherigen Workflow unsigniert. Signierungszertifikate werden durch dieses Update nicht neu erzeugt. Der Pull Request muss für den Download und die Prüfung nicht zusammengeführt werden.
