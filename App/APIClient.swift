@@ -48,8 +48,10 @@ final class APIClient {
         try configure(server: server)
         requestGeneration = UUID()
         clearHistoryCache()
+        let generation = requestGeneration
         let body: [String: Any] = ["username": username, "pw": password]
         let response: PairResponse = try await request(path: "/api/mobile/v1/pair", method: "POST", json: body, needsCSRF: false)
+        guard generation == requestGeneration, !Task.isCancelled else { throw CancellationError() }
         if let token = response.csrfToken { saveCSRF(token) }
         if !username.isEmpty { UserDefaults.standard.set(username, forKey: "username") }
         return response
@@ -58,13 +60,17 @@ final class APIClient {
     func pair2FA(code: String) async throws -> PairResponse {
         requestGeneration = UUID()
         clearHistoryCache()
+        let generation = requestGeneration
         let response: PairResponse = try await request(path: "/api/mobile/v1/pair/2fa", method: "POST", json: ["code": code], needsCSRF: false)
+        guard generation == requestGeneration, !Task.isCancelled else { throw CancellationError() }
         if let token = response.csrfToken { saveCSRF(token) }
         return response
     }
 
     func session() async throws -> SessionResponse {
+        let generation = requestGeneration
         let response: SessionResponse = try await request(path: "/api/mobile/v1/session")
+        guard generation == requestGeneration, !Task.isCancelled else { throw CancellationError() }
         if let token = response.csrfToken { saveCSRF(token) }
         return response
     }

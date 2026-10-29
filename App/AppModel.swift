@@ -16,7 +16,7 @@ final class AppModel {
     var isRefreshingAlerts = false
     private let api: APIClient
     private let preferences: UserDefaults
-    private var restoringServer = false
+    private var restoringServer: UUID?
     private var sessionGeneration = UUID()
     var connectionState: ConnectionState = .restoring
     var bootstrap: BootstrapResponse? { didSet { mergeTrackers() } }
@@ -162,11 +162,12 @@ final class AppModel {
     }
 
     func retryServerConnection() async {
-        guard !restoringServer else { return }
+        guard connectionState != .connecting, connectionState != .needsTwoFactor,
+              restoringServer != sessionGeneration else { return }
         guard serverReconnectEnabled, !serverURL.isEmpty else { connectionState = .disconnected; return }
         let generation = sessionGeneration
-        restoringServer = true
-        defer { restoringServer = false }
+        restoringServer = generation
+        defer { if restoringServer == generation { restoringServer = nil } }
         do {
             try self.api.configure(server: serverURL)
             let session = try await self.api.session()
@@ -175,11 +176,17 @@ final class AppModel {
                 connectionState = .connected
                 refreshError = nil
                 await refresh()
+                guard generation == sessionGeneration, !Task.isCancelled else { return }
                 await PushManager.shared.registerIfPossible()
-            } else { await clearCatalog(); connectionState = .disconnected }
+            } else {
+                await clearCatalog()
+                guard generation == sessionGeneration, !Task.isCancelled else { return }
+                connectionState = .disconnected
+            }
         } catch {
-            guard generation == sessionGeneration else { return }
+            guard generation == sessionGeneration, !Task.isCancelled else { return }
             if case APIError.http(401, _) = error { await clearCatalog() }
+            guard generation == sessionGeneration, !Task.isCancelled else { return }
             refreshError = error.localizedDescription
             connectionState = .disconnected
             DebugLogger.shared.log("Server restoration failed: \(error.localizedDescription)")
@@ -187,18 +194,21 @@ final class AppModel {
     }
 
     func connect(password: String) async {
-        await clearCatalog()
+        // Invalidate earlier work before the first suspension, including a logout
+        // or restoration still waiting for its network response.
+        sessionGeneration = UUID()
+        let generation = sessionGeneration
         bootstrap = nil
         serverReconnectEnabled = true
         locationMonitors.values.forEach { $0.cancel() }; locationMonitors.removeAll()
         catalogTask?.cancel(); catalogTask = nil
         self.api.clearHistoryCache()
-        sessionGeneration = UUID()
-        let generation = sessionGeneration
         isRefreshing = false; isRefreshingTrackers = false; isRefreshingAlerts = false; isLocatingAll = false
         locatingRefs.removeAll()
         errorMessage = nil
         connectionState = .connecting
+        await clearCatalog()
+        guard generation == sessionGeneration, !Task.isCancelled else { return }
         do {
             let result = try await self.api.pair(server: serverURL, username: username, password: password)
             guard generation == sessionGeneration, !Task.isCancelled else { return }
@@ -206,7 +216,9 @@ final class AppModel {
             guard result.status == "ok" else { throw APIError.message(result.message ?? "Anmeldung fehlgeschlagen.") }
             connectionState = .connected
             await refresh()
+            guard generation == sessionGeneration, !Task.isCancelled else { return }
             await PushManager.shared.registerIfPossible()
+            guard generation == sessionGeneration, !Task.isCancelled else { return }
             Haptics.success()
         } catch {
             guard generation == sessionGeneration, !Task.isCancelled else { return }
@@ -224,7 +236,9 @@ final class AppModel {
             guard result.status == "ok" else { throw APIError.message(result.message ?? "Code ungültig.") }
             connectionState = .connected
             await refresh()
+            guard generation == sessionGeneration, !Task.isCancelled else { return }
             await PushManager.shared.registerIfPossible()
+            guard generation == sessionGeneration, !Task.isCancelled else { return }
             Haptics.success()
         } catch {
             guard generation == sessionGeneration, !Task.isCancelled else { return }
@@ -474,15 +488,14 @@ final class AppModel {
     }
 
     func signOut() async {
+        sessionGeneration = UUID()
+        let generation = sessionGeneration
         serverReconnectEnabled = false
         locationMonitors.values.forEach { $0.cancel() }; locationMonitors.removeAll()
         catalogTask?.cancel(); catalogTask = nil
         self.api.clearHistoryCache()
-        sessionGeneration = UUID()
         isRefreshing = false; isRefreshingTrackers = false; isRefreshingAlerts = false; isLocatingAll = false
         locatingRefs.removeAll()
-        await clearCatalog()
-        await self.api.logout()
         bootstrap = nil
         refreshError = nil
         statusMessage = nil
@@ -493,6 +506,9 @@ final class AppModel {
         locatingRefs.removeAll()
         notificationRefs.removeAll()
         connectionState = .disconnected
+        await clearCatalog()
+        guard generation == sessionGeneration else { return }
+        await self.api.logout()
     }
 }
 
