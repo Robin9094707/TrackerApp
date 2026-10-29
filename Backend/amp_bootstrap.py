@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RJ Tracker 20.4.2: single-file AMP edition.
+"""RJ Tracker 20.5.0: single-file AMP edition.
 Replace the previous backend file in the same directory, keeping its name.
 On first start this script prepares its own Python environment and downloads
 Apple's verified ADI runtime. Existing data/, ports and environment settings

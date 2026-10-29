@@ -30,6 +30,10 @@ struct PreparedHistory {
     var medianAccuracy: Double?
     var longestGap: TimeInterval = 0
     var sourceCounts: [String: Int] = [:]
+    /// Sum of plausible movement between consecutive reports of the same network.
+    var distanceM: Double = 0
+    /// Report density across the selected time span, normalized to 0...1 for the scrubber.
+    var activity: [Double] = []
 }
 
 enum HistoryAnalysis {
@@ -52,7 +56,32 @@ enum HistoryAnalysis {
         let counts = Dictionary(grouping: points) { ($0.network ?? "unknown").rjNormalizedProvider }.mapValues(\.count)
         return PreparedHistory(displayPoints: display, points: points, mapSegments: mapSegments, mapPoints: display, days: days,
                                indexByID: Dictionary(uniqueKeysWithValues: display.enumerated().map { ($0.element.id, $0.offset) }),
-                               availableDays: available, medianAccuracy: median, longestGap: gap, sourceCounts: counts)
+                               availableDays: available, medianAccuracy: median, longestGap: gap, sourceCounts: counts,
+                               distanceM: distance(mapSegments), activity: activity(display))
+    }
+
+    /// Ignores movement inside the reported accuracy so a parked object does not "travel".
+    static func distance(_ segments: [HistorySegment]) -> Double {
+        segments.reduce(0) { total, segment in
+            zip(segment.points, segment.points.dropFirst()).reduce(total) { sum, pair in
+                let meters = CLLocation(latitude: pair.0.latitude, longitude: pair.0.longitude)
+                    .distance(from: CLLocation(latitude: pair.1.latitude, longitude: pair.1.longitude))
+                let noise = max(pair.0.accuracyM ?? 0, pair.1.accuracyM ?? 0, 25)
+                return meters > noise ? sum + meters : sum
+            }
+        }
+    }
+
+    static func activity(_ points: [HistoryPoint], buckets: Int = 48) -> [Double] {
+        guard let first = points.first?.timestamp, let last = points.last?.timestamp, last > first, buckets > 0 else { return [] }
+        var counts = Array(repeating: 0.0, count: buckets)
+        let span = Double(last - first)
+        for point in points {
+            let index = min(buckets - 1, Int(Double(point.timestamp - first) / span * Double(buckets)))
+            counts[index] += 1
+        }
+        let peak = counts.max() ?? 1
+        return counts.map { peak > 0 ? $0 / peak : 0 }
     }
 
     /// Display-only grouping: storage, report identity and exports remain untouched.

@@ -1,3 +1,7 @@
+# 6.0.0 · Neues Design & Standortverlauf
+
+Komplett überarbeitetes Erscheinungsbild nach dem Vorbild der aktuellen „Wo ist?“-App, neu gestalteter Standortverlauf (Farbverlaufsroute, Kalenderleiste, Wiedergabe mit Meldungsdichte, Kennzahlen, Zeitleiste) auch für lokale Google-Verläufe, 30-Sekunden-Google-Abruf und pausierbare Google-Erfassung auf dem Server (Backend 20.5.0). Daten, Anmeldungen und Bundle-ID bleiben erhalten. Details: `docs/UPGRADE-6.0.0.md`.
+
 # 5.5.1 · Aktualisierung & Haptik
 
 Apple-Abfragen geben die Schaltfläche beim individuellen Abschluss frei, auch ohne neueren Standort. Apple-Sammelabfragen verarbeiten jeden Tracker sofort. Google erhält Haptik bei manuellen Aktualisierungen und auf der Trackerkarte beim Ergebnis. Bestehende Datenformate und Anmeldekompatibilität bleiben erhalten. Details: `docs/UPGRADE-5.5.1.md`.

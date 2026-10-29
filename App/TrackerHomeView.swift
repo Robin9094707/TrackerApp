@@ -98,43 +98,45 @@ struct TrackerHomeView: View {
         }
         .ignoresSafeArea()
         .safeAreaInset(edge: .top, alignment: .trailing) {
-            RJGlassControls {
-            VStack(spacing: 12) {
-                Menu {
-                    Picker("Kartenansicht", selection: $mapAppearance) {
-                        Text("Standard").tag("standard")
-                        Text("Satellit").tag("hybrid")
-                        Text("Haltestellen").tag("transit")
+            VStack(spacing: 10) {
+                RJMapControlStack {
+                    Menu {
+                        Picker("Kartenansicht", selection: $mapAppearance) {
+                            Label("Standard", systemImage: "map").tag("standard")
+                            Label("Satellit", systemImage: "globe.europe.africa").tag("hybrid")
+                            Label("Haltestellen", systemImage: "tram").tag("transit")
+                        }
+                        Toggle(isOn: $showZones) { Label("Orte und Geofences", systemImage: "mappin.and.ellipse") }
+                    } label: {
+                        Image(systemName: mapAppearance == "hybrid" ? "globe.europe.africa" : "map")
+                            .frame(width: RJDesign.controlSize, height: RJDesign.controlSize).contentShape(Rectangle())
                     }
-                    Toggle("Orte und Geofences", isOn: $showZones)
-                } label: { Image(systemName: "map").rjGlassControl() }
-                .accessibilityLabel("Kartenoptionen")
-                Button {
-                    selectedRef = nil
-                    path = []
-                    follow = false
-                    fitAll()
-                } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").rjGlassControl() }
-                .accessibilityLabel("Alle Objekte zeigen")
-                Button {
-                    selectedRef = nil
-                    path = []
-                    model.locationService.request()
-                } label: { Image(systemName: "location").rjGlassControl() }
-                .accessibilityLabel("Meine Position")
-                if current != nil {
-                    Button { follow.toggle(); if follow { focusCurrent() } } label: {
-                        Image(systemName: follow ? "scope" : "viewfinder").rjGlassControl()
+                    .accessibilityLabel("Kartenoptionen")
+                    RJMapControlDivider()
+                    RJMapControlButton(symbol: "location", label: "Meine Position") {
+                        selectedRef = nil
+                        path = []
+                        model.locationService.request()
                     }
-                    .accessibilityLabel(follow ? "Tracker nicht mehr folgen" : "Tracker folgen")
-                    .tint(follow ? .blue : .primary)
+                }
+                RJMapControlStack {
+                    RJMapControlButton(symbol: "rectangle.expand.vertical", label: "Alle Objekte zeigen") {
+                        selectedRef = nil
+                        path = []
+                        follow = false
+                        fitAll()
+                    }
+                    if current != nil {
+                        RJMapControlDivider()
+                        RJMapControlButton(symbol: follow ? "scope" : "viewfinder", active: follow, label: follow ? "Tracker nicht mehr folgen" : "Tracker folgen") {
+                            follow.toggle(); if follow { focusCurrent() }
+                        }
+                    }
                 }
             }
-            .font(.title3)
-            .buttonStyle(.plain)
-            .padding(.trailing, 16)
+            .foregroundStyle(.primary)
+            .padding(.trailing, 14)
             .padding(.top, 8)
-            }
         }
     }
 
@@ -259,7 +261,7 @@ struct TrackerLibraryView: View {
                         }
                 }
             } header: {
-                Text("Meine Objekte").font(.title3.weight(.semibold)).textCase(nil).padding(.vertical, 8)
+                Text("Meine Objekte").font(.title2.weight(.bold)).foregroundStyle(.primary).textCase(nil).padding(.vertical, 6)
                 if model.selectedScope != .all || model.providerFilter != "all" {
                     Text("\(model.selectedScope.title) · \(model.providerFilter == "all" ? "Alle Netze" : model.providerFilter.rjProviderName)")
                 }
@@ -361,9 +363,18 @@ struct TrackerListRow: View {
     let tracker: Tracker
     var body: some View {
         HStack(spacing: 14) {
-            Text(tracker.emoji ?? "📍").font(.system(size: 34))
-                .frame(width: 58, height: 58)
+            Text(tracker.emoji ?? "📍").font(.system(size: 30))
+                .frame(width: 54, height: 54)
                 .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                .overlay(alignment: .bottomTrailing) {
+                    Image(systemName: tracker.provider.rjProviderSymbol)
+                        .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                        .frame(width: 20, height: 20)
+                        .background(tracker.provider.rjProviderColor.gradient, in: Circle())
+                        .overlay(Circle().stroke(Color(uiColor: .systemGroupedBackground), lineWidth: 2))
+                        .offset(x: 2, y: 2)
+                        .accessibilityHidden(true)
+                }
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 5) {
                     Text(tracker.name).font(.system(.headline, design: .default).weight(.semibold)).foregroundStyle(.primary).lineLimit(2)

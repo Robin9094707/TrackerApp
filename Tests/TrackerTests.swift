@@ -156,6 +156,16 @@ final class TrackerTests: XCTestCase {
         XCTAssertEqual(HistoryAnalysis.nearestIndex(to: 1000, in: []), 0)
     }
 
+    func testHistoryDistanceIgnoresJitterAndActivityIsNormalized() {
+        let parked = (0..<10).map { HistoryPoint(latitude: 52 + Double($0 % 2) * 0.00005, longitude: 13, accuracyM: 30, timestamp: 1000 + $0 * 60, network: "apple") }
+        XCTAssertEqual(HistoryAnalysis.prepare(parked, networks: ["apple"], detailed: true).distanceM, 0)
+        let walk = (0..<10).map { HistoryPoint(latitude: 52 + Double($0) * 0.001, longitude: 13, accuracyM: 10, timestamp: 1000 + $0 * 60, network: "apple") }
+        let prepared = HistoryAnalysis.prepare(walk, networks: ["apple"], detailed: true)
+        XCTAssertEqual(prepared.distanceM, 1000, accuracy: 30)
+        XCTAssertEqual(prepared.activity.max(), 1)
+        XCTAssertTrue(prepared.activity.allSatisfy { (0...1).contains($0) })
+    }
+
     func testTimelineGroupsUseLocalCalendarAndKeepNetworkGaps() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 3600)!

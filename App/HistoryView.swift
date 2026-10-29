@@ -9,6 +9,7 @@ struct HistoryView: View {
     @Environment(\.rjExpandInspector) private var expandInspector
     @AppStorage("historyPeriodDays") private var days = 1
     @AppStorage("historyEveryReport") private var detailed = false
+    @AppStorage("historySatellite") private var satellite = false
     @State private var response: HistoryResponse?
     @State private var loadedDays: Int?
     @State private var calendarResponse: HistoryCalendarResponse?
@@ -20,6 +21,9 @@ struct HistoryView: View {
     @State private var selectionMode = "today"
     private var historyCalendar: Calendar { HistoryCalendar.calendar(timezone: calendarResponse?.timezone ?? TimeZone.current.identifier) }
     private var todayKey: String { HistoryCalendar.key(Date(), calendar: historyCalendar) }
+    private var yesterdayKey: String {
+        HistoryCalendar.key(historyCalendar.date(byAdding: .day, value: -1, to: Date()) ?? Date(), calendar: historyCalendar)
+    }
     private var requestDates: [String] {
         if selectionMode == "today" { return [todayKey] }
         return selectedDates.isEmpty ? [todayKey] : selectedDates.sorted()
@@ -44,7 +48,7 @@ struct HistoryView: View {
     @State private var export = false
     @State private var exportGPX = false
     @State private var document = HistoryExportDocument(text: "")
-        @State private var detailMode = 0
+    @State private var detailMode = 0
     @State private var timelineQuery = ""
     @State private var filteredTimeline: [HistoryDay] = []
     @State private var timelineMatches = 0
@@ -79,61 +83,58 @@ struct HistoryView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: 18) {
+                VStack(spacing: 16) {
                     periodPicker
-                    liveStatus
                     if loading || preparing {
                         HStack(spacing: 10) {
                             ProgressView().controlSize(.small)
-                            Text(response == nil ? "Verlauf wird geladen …" : "Verlauf wird aktualisiert …").font(.subheadline)
+                            Text(response == nil ? "Verlauf wird geladen …" : "Verlauf wird aktualisiert …").font(.subheadline).foregroundStyle(.secondary)
                             Spacer()
-                        }.padding(.horizontal, 6).accessibilityIdentifier("history-loading")
+                        }.padding(.horizontal, 4).accessibilityIdentifier("history-loading")
                     }
                     if let error {
                         VStack(alignment: .leading, spacing: 10) {
                             Label("Verlauf konnte nicht aktualisiert werden", systemImage: "wifi.exclamationmark").font(.headline)
                             Text(error).font(.footnote).foregroundStyle(.secondary)
-                            Button("Erneut versuchen") { Task { await load(force: true) } }.buttonStyle(.bordered)
+                            Button("Erneut versuchen") { Task { await load(force: true) } }.buttonStyle(.bordered).buttonBorderShape(.capsule)
                         }.rjCard()
                     }
                     if response != nil {
                         if loadedDays != nil, loadedScope != dateScope {
                             Label("Angezeigt: letzter erfolgreich geladener Zeitraum.", systemImage: "clock.badge.exclamationmark")
-                                .font(.footnote).foregroundStyle(.orange)
+                                .font(.footnote).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        sourceFilters
-                        Picker("Detailgrad", selection: $detailed) {
-                            Text("Übersichtlich").tag(false); Text("Jeder Report").tag(true)
-                        }.pickerStyle(.segmented)
-                        Text(detailed ? "Alle empfangenen Reports, auch am selben Ort und zur selben Sekunde. Dichte Kartenpunkte werden beim Zoomen aufgefächert." : "Nahe Meldungen werden für die Ansicht gebündelt. Alle Originalreports bleiben gespeichert und lassen sich einzeln anzeigen.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        // Exact day selection is loaded by the server, including non-adjacent days.
                         if points.isEmpty {
-                            ContentUnavailableView("Keine Standortpunkte", systemImage: "clock", description: Text("Für diesen Zeitraum und diese Netzwerkauswahl liegen keine Meldungen vor."))
+                            VStack(spacing: 14) {
+                                ContentUnavailableView("Keine Standorte", systemImage: "point.topleft.down.to.point.bottomright.curvepath",
+                                                       description: Text("Für diesen Zeitraum und diese Netzwerke liegen keine Meldungen vor. Wähle einen anderen Tag."))
+                                if networks.count > 1 { sourceFilters }
+                            }.rjCard()
                         } else {
-                            metrics
                             historyMap.id("history-map")
                             playback
+                            metrics
+                            if networks.count > 1 { sourceFilters }
                             if let total = response?.matchingTotal, total > (response?.points.count ?? 0) {
                                 Label("\(response?.points.count ?? 0) von \(total) Reports geladen. Weitere werden automatisch nachgeladen; der Export enthält die bisher geladenen Originalreports.", systemImage: "info.circle")
                                     .font(.caption).foregroundStyle(.orange)
                             }
                             Picker("Verlaufansicht", selection: $detailMode) {
-                                Text("Meldungen").tag(0); Text("Übersicht").tag(1); Text("Aufenthalte").tag(2)
+                                Text("Zeitleiste").tag(0); Text("Aufenthalte").tag(2); Text("Analyse").tag(1)
                             }.pickerStyle(.segmented)
                             if detailMode == 0 {
                                 searchField
                                 timeline(proxy: proxy)
                             } else if detailMode == 1 {
                                 overview
-                                summary
                             } else if !visibleStays.isEmpty { staysCard }
                             else {
-                                ContentUnavailableView("Keine Aufenthalte erkannt", systemImage: "mappin.and.ellipse", description: Text("Die Serverauswertung enthält für den geladenen Zeitraum keine Aufenthalte."))
+                                ContentUnavailableView("Keine Aufenthalte erkannt", systemImage: "mappin.and.ellipse", description: Text("Die Serverauswertung enthält für den geladenen Zeitraum keine Aufenthalte.")).rjCard()
                             }
                         }
                     }
-                }.padding(16).frame(maxWidth: 850).frame(maxWidth: .infinity)
+                    liveStatus
+                }.padding(16).padding(.bottom, 24).frame(maxWidth: 850).frame(maxWidth: .infinity)
             }
         }
         .rjScreenChrome()
@@ -148,17 +149,7 @@ struct HistoryView: View {
             await filterTimeline()
         }
         .sheet(isPresented: $showCalendar) { calendarSheet }
-        .sheet(isPresented: $fullscreen) {
-            NavigationStack {
-                VStack(spacing: 8) {
-                    HistoryRouteMap(prepared: prepared, selected: selectedPoint, position: $position, onSelect: select)
-                    ScrollView { playback.padding(12) }.frame(maxHeight: 310)
-                }
-                .navigationTitle("Verlaufkarte").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fertig") { fullscreen = false } } }
-                .rjScreenChrome()
-            }.presentationDetents([.large])
-        }
+        .fullScreenCover(isPresented: $fullscreen) { fullscreenMap }
         .refreshable {
             streamCursor = nil; caughtUp = false
             await load(force: true)
@@ -174,12 +165,21 @@ struct HistoryView: View {
             }
         }
         .onDisappear { playing = false }
+        .sensoryFeedback(.selection, trigger: selectedIndex) { _, _ in !playing }
         .toolbar {
             Menu {
+                Picker("Detailgrad", selection: $detailed) {
+                    Label("Übersichtlich", systemImage: "circle.grid.2x1").tag(false)
+                    Label("Jeder Report", systemImage: "circle.grid.3x3.fill").tag(true)
+                }
+                Toggle(isOn: $satellite) { Label("Satellit", systemImage: "globe.europe.africa") }
+                Divider()
                 Button("Auswahl als CSV exportieren", systemImage: "tablecells") { beginExport(gpx: false) }
+                    .disabled(points.isEmpty || loading || preparing)
                 Button("Auswahl als GPX exportieren", systemImage: "point.topleft.down.to.point.bottomright.curvepath") { beginExport(gpx: true) }
-            } label: { Image(systemName: "square.and.arrow.up") }
-                .disabled(points.isEmpty || loading || preparing).accessibilityLabel("Verlauf exportieren")
+                    .disabled(points.isEmpty || loading || preparing)
+            } label: { Image(systemName: "ellipsis") }
+                .accessibilityLabel("Verlaufsoptionen und Export")
         }
         .fileExporter(isPresented: $export, document: document, contentType: exportGPX ? .rjGPX : .commaSeparatedText,
                       defaultFilename: exportGPX ? "RJ-Tracker-Verlauf.gpx" : "RJ-Tracker-Verlauf.csv") { result in
@@ -187,40 +187,113 @@ struct HistoryView: View {
         }
     }
 
+    // MARK: Period
+
+    private var periodTitle: String {
+        if selectionMode == "today" { return "Heute" }
+        if requestDates == [yesterdayKey] { return "Gestern" }
+        if requestDates.count == 1, let key = requestDates.first { return dayTitle(key) }
+        return "\(requestDates.count) Tage"
+    }
+
+    private var periodSubtitle: String {
+        if selectionMode == "today" { return tracker.name + " · ab 00:00 Uhr" }
+        guard requestDates.count > 1, let first = requestDates.first, let last = requestDates.last else { return tracker.name + " · ganzer Tag" }
+        return tracker.name + " · " + dayShort(first) + " – " + dayShort(last)
+    }
+
+    /// Recent days as a calendar strip, with the number of stored reports per day.
+    private var stripKeys: [String] {
+        var keys = (0..<14).compactMap { offset in
+            historyCalendar.date(byAdding: .day, value: -offset, to: Date()).map { HistoryCalendar.key($0, calendar: historyCalendar) }
+        }
+        for key in requestDates where !keys.contains(key) { keys.append(key) }
+        return keys.sorted()
+    }
+    private var storedCounts: [String: Int] {
+        Dictionary((calendarResponse?.days ?? []).map { ($0.date, $0.count) }, uniquingKeysWith: { first, _ in first })
+    }
+
     private var periodPicker: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(tracker.name).font(.title2.bold())
-            HStack {
-                Label(selectionMode == "today" ? "Heute" : "\(requestDates.count) Kalendertage", systemImage: "calendar")
-                    .font(.headline)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(periodTitle).font(.largeTitle.bold()).contentTransition(.opacity)
+                    Text(periodSubtitle)
+                        .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                }
                 Spacer()
-                Button("Tage auswählen") { draftDates = Set(requestDates); showCalendar = true }
-                    .buttonStyle(.bordered).buttonBorderShape(.capsule)
+                Menu {
+                    Button("Letzte 7 Tage", systemImage: "7.circle") { chooseRange(7) }
+                    Button("Letzte 14 Tage", systemImage: "14.circle") { chooseRange(14) }
+                    Button("Letzte 30 Tage", systemImage: "30.circle") { chooseRange(30) }
+                    Button("Letzte 90 Tage", systemImage: "calendar.badge.clock") { chooseRange(90) }
+                    Divider()
+                    Button("Tage frei auswählen …", systemImage: "calendar") { draftDates = Set(requestDates); showCalendar = true }
+                } label: {
+                    Image(systemName: "calendar").font(.title3.weight(.medium)).rjGlassControl()
+                }.buttonStyle(.plain).accessibilityLabel("Zeitraum wählen")
             }
-            Text(selectionMode == "today" ? "Ab Mitternacht bis jetzt · \(calendarResponse?.timezone ?? historyCalendar.timeZone.identifier)" : requestDates.map(dayTitle).joined(separator: " · "))
-                .font(.caption).foregroundStyle(.secondary)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    Button("Heute") { selectionMode = "today"; selectedDates = [todayKey]; selectedDay = nil }
-                    Button("Gestern") {
-                        selectionMode = "custom"
-                        if let yesterday = historyCalendar.date(byAdding: .day, value: -1, to: Date()) {
-                            selectedDates = [HistoryCalendar.key(yesterday, calendar: historyCalendar)]
-                        }
-                        selectedDay = nil
-                    }
-                    ForEach([7, 14, 30, 90], id: \.self) { count in
-                        Button("\(count) Tage") {
-                            days = count; selectionMode = "custom"; selectedDay = nil
-                            selectedDates = HistoryCalendar.range(days: count, now: Date(), calendar: historyCalendar)
-                        }
-                    }
-                }.buttonStyle(.bordered).buttonBorderShape(.capsule).font(.caption)
+                    ForEach(stripKeys, id: \.self) { key in dayChip(key) }
+                }.padding(.vertical, 2)
             }
+            .defaultScrollAnchor(.trailing)
             if calendarResponse == nil {
-                Text("Kalender wird geladen. Für die Tagesauswahl Backend 20.2 verwenden.").font(.caption).foregroundStyle(.secondary)
+                Text("Kalender wird geladen. Für die Tagesauswahl Backend 20.2 oder neuer verwenden.").font(.caption).foregroundStyle(.secondary)
             }
-        }.rjCard()
+        }
+    }
+
+    private func dayChip(_ key: String) -> some View {
+        let selected = requestDates.contains(key)
+        let date = HistoryCalendar.date(key, calendar: historyCalendar)
+        let count = storedCounts[key] ?? 0
+        return Button { chooseSingleDay(key) } label: {
+            VStack(spacing: 4) {
+                Text(key == todayKey ? "Heute" : (date.map { weekday($0) } ?? ""))
+                    .font(.caption2.weight(.semibold)).textCase(.uppercase)
+                    .foregroundStyle(selected ? Color.white.opacity(0.85) : .secondary)
+                Text(date.map { String(historyCalendar.component(.day, from: $0)) } ?? key)
+                    .font(.title3.weight(.semibold)).monospacedDigit()
+                    .foregroundStyle(selected ? Color.white : .primary)
+                Circle().fill(count > 0 ? (selected ? Color.white : Color.accentColor) : Color.clear)
+                    .frame(width: 5, height: 5)
+            }
+            .frame(width: 54, height: 72)
+            .background {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(selected ? AnyShapeStyle(Color.accentColor.gradient) : AnyShapeStyle(Color(uiColor: .secondarySystemGroupedBackground)))
+            }
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.primary.opacity(selected ? 0 : 0.05), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(dayTitle(key) + (count > 0 ? ", \(count) Meldungen" : ", keine Meldungen"))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func chooseSingleDay(_ key: String) {
+        selectedDay = nil
+        if key == todayKey { selectionMode = "today"; selectedDates = [todayKey] }
+        else { selectionMode = "custom"; selectedDates = [key] }
+    }
+    private func chooseRange(_ count: Int) {
+        days = count; selectionMode = "custom"; selectedDay = nil
+        selectedDates = HistoryCalendar.range(days: count, now: Date(), calendar: historyCalendar)
+    }
+    private func weekday(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "de_DE"); formatter.timeZone = historyCalendar.timeZone
+        formatter.dateFormat = "EE"
+        return formatter.string(from: date).replacingOccurrences(of: ".", with: "")
+    }
+    private func dayShort(_ key: String) -> String {
+        guard let date = HistoryCalendar.date(key, calendar: historyCalendar) else { return key }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "de_DE"); formatter.timeZone = historyCalendar.timeZone
+        formatter.dateFormat = "d. MMM"
+        return formatter.string(from: date)
     }
 
     private func dayTitle(_ key: String) -> String {
@@ -270,6 +343,7 @@ struct HistoryView: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: draftDates.contains(key) ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
                     .foregroundStyle(draftDates.contains(key) ? Color.blue : Color.secondary)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(dayTitle(key)).foregroundStyle(.primary)
@@ -283,113 +357,230 @@ struct HistoryView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(networks, id: \.self) { network in
+                    let enabled = enabledNetworks.contains(network)
                     Button {
                         playing = false
-                        if enabledNetworks.contains(network) { enabledNetworks.remove(network) }
-                        else { enabledNetworks.insert(network) }
+                        if enabled { enabledNetworks.remove(network) } else { enabledNetworks.insert(network) }
                         Task { await prepare(preserveSelection: true) }
                     } label: {
-                        Label(network == "unknown" ? "Unbekannt" : network.rjProviderName,
-                              systemImage: enabledNetworks.contains(network) ? "checkmark.circle.fill" : "circle")
-                            .padding(.vertical, 3)
+                        HStack(spacing: 6) {
+                            Image(systemName: network == "unknown" ? "questionmark.circle.fill" : network.rjProviderSymbol)
+                            Text(network == "unknown" ? "Unbekannt" : network.rjProviderName)
+                            if let count = prepared.sourceCounts[network], enabled { Text("\(count)").monospacedDigit().opacity(0.7) }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14).padding(.vertical, 9)
+                        .foregroundStyle(enabled ? Color.white : Color.primary)
+                        .background(enabled ? AnyShapeStyle(network.rjProviderColor.gradient) : AnyShapeStyle(Color(uiColor: .tertiarySystemFill)), in: Capsule())
                     }
-                    .font(.caption.weight(.semibold)).buttonStyle(.bordered).buttonBorderShape(.capsule)
-                    .tint(enabledNetworks.contains(network) ? network.rjProviderColor : .secondary)
-                    .accessibilityValue(enabledNetworks.contains(network) ? "Ausgewählt" : "Ausgeblendet")
+                    .buttonStyle(.plain)
+                    .accessibilityValue(enabled ? "Ausgewählt" : "Ausgeblendet")
                     .disabled(loading)
                 }
             }
         }
     }
 
-    private var historyMap: some View {
-        HistoryRouteMap(prepared: prepared, selected: selectedPoint, position: $position, onSelect: select)
-        .frame(height: 340).clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(alignment: .topTrailing) {
-            HStack(spacing: 8) {
-                Button { playing = false; position = .automatic } label: { Image(systemName: "scope").rjGlassControl() }
-                    .accessibilityLabel("Gesamte Auswahl auf Karte zeigen")
-                Button { fullscreen = true } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").rjGlassControl() }
-                    .accessibilityLabel("Karte groß öffnen")
-            }.buttonStyle(.plain).padding(12)
+    // MARK: Map
+
+    private var rangeText: String {
+        guard let first = prepared.points.first, let last = prepared.points.last else { return "" }
+        let start = Date(timeIntervalSince1970: TimeInterval(first.timestamp)), end = Date(timeIntervalSince1970: TimeInterval(last.timestamp))
+        if historyCalendar.isDate(start, inSameDayAs: end) {
+            return start.formatted(date: .omitted, time: .shortened) + " – " + end.formatted(date: .omitted, time: .shortened)
         }
-        .overlay(alignment: .bottomLeading) {
-            Label(selectedDay?.formatted(.dateTime.day().month(.abbreviated)) ?? "Alle Tage", systemImage: "calendar")
-                .font(.caption.weight(.semibold)).padding(.horizontal, 12).padding(.vertical, 8)
+        return start.formatted(.dateTime.day().month(.abbreviated)) + " – " + end.formatted(.dateTime.day().month(.abbreviated))
+    }
+
+    private var historyMap: some View {
+        HistoryRouteMap(prepared: prepared, selected: selectedPoint, position: $position, satellite: satellite, onSelect: select)
+            .frame(height: 380)
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(Color.primary.opacity(0.06), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.08), radius: 16, y: 6)
+            .overlay(alignment: .topTrailing) {
+                RJGlassControls {
+                    VStack(spacing: 10) {
+                        Button { playing = false; position = .automatic } label: { Image(systemName: "point.topleft.down.to.point.bottomright.curvepath").rjGlassControl() }
+                            .accessibilityLabel("Gesamte Auswahl auf Karte zeigen")
+                        Button { fullscreen = true } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").rjGlassControl() }
+                            .accessibilityLabel("Karte groß öffnen")
+                    }
+                }.buttonStyle(.plain).font(.body.weight(.medium)).padding(12)
+            }
+            .overlay(alignment: .bottomLeading) {
+                HStack(spacing: 10) {
+                    legendDot(.systemTeal, "Früher")
+                    LinearGradient(colors: [Color(uiColor: .systemTeal), Color(uiColor: .systemBlue), Color(uiColor: .systemIndigo)], startPoint: .leading, endPoint: .trailing)
+                        .frame(width: 44, height: 4).clipShape(Capsule())
+                    legendDot(.systemIndigo, "Später")
+                }
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 12).padding(.vertical, 8)
                 .rjGlass(in: Capsule()).padding(12)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Farbverlauf von früheren zu späteren Meldungen")
+            }
+            .overlay(alignment: .topLeading) {
+                Label(rangeText, systemImage: "clock")
+                    .font(.caption.weight(.semibold)).monospacedDigit()
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .rjGlass(in: Capsule()).padding(12)
+            }
+    }
+    private func legendDot(_ color: UIColor, _ text: String) -> some View {
+        Text(text).foregroundStyle(.secondary)
+    }
+
+    private var fullscreenMap: some View {
+        ZStack(alignment: .bottom) {
+            HistoryRouteMap(prepared: prepared, selected: selectedPoint, position: $position, satellite: satellite, bottomInset: 300, onSelect: select)
+                .ignoresSafeArea()
+            playbackPanel(compact: true)
+                .padding(16)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+                .shadow(color: .black.opacity(0.15), radius: 20, y: 8)
+                .padding(.horizontal, 12).padding(.bottom, 8)
+        }
+        .overlay(alignment: .topTrailing) {
+            RJGlassControls {
+                VStack(spacing: 10) {
+                    Button { fullscreen = false } label: { Image(systemName: "xmark").rjGlassControl() }
+                        .accessibilityLabel("Verlaufkarte schließen")
+                    Button { satellite.toggle() } label: { Image(systemName: satellite ? "map" : "globe.europe.africa").rjGlassControl() }
+                        .accessibilityLabel(satellite ? "Standardkarte" : "Satellitenkarte")
+                    Button { playing = false; position = .automatic } label: { Image(systemName: "point.topleft.down.to.point.bottomright.curvepath").rjGlassControl() }
+                        .accessibilityLabel("Gesamte Auswahl auf Karte zeigen")
+                }
+            }.buttonStyle(.plain).font(.body.weight(.medium)).padding(.trailing, 16).padding(.top, 8)
         }
     }
 
+    // MARK: Playback
+
     private var playback: some View {
+        playbackPanel(compact: false).rjCard()
+    }
+
+    private func playbackPanel(compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             if let point = selectedPoint {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(Date(timeIntervalSince1970: TimeInterval(point.timestamp)), style: .date).font(.caption).foregroundStyle(.secondary)
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(Date(timeIntervalSince1970: TimeInterval(point.timestamp)), style: .time)
-                            .font(.title2.bold()).monospacedDigit().contentTransition(.numericText())
+                            .font(.system(.title, design: .rounded).weight(.bold)).monospacedDigit()
+                            .contentTransition(.numericText())
+                        Text(Date(timeIntervalSince1970: TimeInterval(point.timestamp)).formatted(.dateTime.weekday(.wide).day().month(.wide)))
+                            .font(.subheadline).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    ProviderBadge(provider: point.network ?? "unknown")
+                    VStack(alignment: .trailing, spacing: 6) {
+                        ProviderBadge(provider: point.network ?? "unknown")
+                        AccuracyPill(accuracy: point.accuracyM)
+                    }
+                }
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "mappin.circle.fill").foregroundStyle(.red).font(.title3)
+                    ResolvedAddressText(location: point.rjTrackerLocation, fallback: String(format: "%.5f, %.5f", point.latitude, point.longitude))
+                        .font(.subheadline.weight(.medium)).lineLimit(2)
                 }
                 if let first = points.first, let last = points.last, first.timestamp < last.timestamp {
-                    Slider(value: Binding(get: { Double(selectedPoint?.timestamp ?? first.timestamp) }, set: { value in
-                        followLatest = false
-                        selectedIndex = HistoryAnalysis.nearestIndex(to: value, in: points)
-                    }), in: Double(first.timestamp)...Double(last.timestamp)) { editing in
-                        if editing { playing = false } else { focusSelected() }
-                    }
+                    VStack(spacing: 6) {
+                        HistoryActivityStrip(activity: prepared.activity,
+                                             progress: Double((selectedPoint?.timestamp ?? first.timestamp) - first.timestamp) / Double(last.timestamp - first.timestamp))
+                            .frame(height: compact ? 22 : 30)
+                        Slider(value: Binding(get: { Double(selectedPoint?.timestamp ?? first.timestamp) }, set: { value in
+                            followLatest = false
+                            selectedIndex = HistoryAnalysis.nearestIndex(to: value, in: points)
+                        }), in: Double(first.timestamp)...Double(last.timestamp)) { editing in
+                            if editing { playing = false } else { focusSelected() }
+                        }
                         .accessibilityLabel("Zeitpunkt auf der Zeitleiste auswählen")
-                    HStack {
-                        Text(Date(timeIntervalSince1970: TimeInterval(first.timestamp)).formatted(date: .abbreviated, time: .shortened))
-                        Spacer()
-                        Text(Date(timeIntervalSince1970: TimeInterval(last.timestamp)).formatted(date: .abbreviated, time: .shortened))
-                    }.font(.caption2).foregroundStyle(.secondary)
+                        HStack {
+                            Text(Date(timeIntervalSince1970: TimeInterval(first.timestamp)).formatted(date: .omitted, time: .shortened))
+                            Spacer()
+                            Text("\(selectedIndex + 1) von \(points.count)").monospacedDigit()
+                            Spacer()
+                            Text(Date(timeIntervalSince1970: TimeInterval(last.timestamp)).formatted(date: .omitted, time: .shortened))
+                        }.font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
-                HStack {
-                    Button { step(-1) } label: { Image(systemName: "backward.end.fill").frame(width: 44, height: 44) }
-                        .disabled(selectedIndex == 0).accessibilityLabel("Vorherige Meldung")
+                HStack(spacing: 0) {
+                    Menu {
+                        Picker("Geschwindigkeit", selection: $speed) {
+                            Text("0,5×").tag(0.5); Text("1×").tag(1.0); Text("2×").tag(2.0); Text("4×").tag(4.0); Text("8×").tag(8.0)
+                        }
+                    } label: {
+                        Text(speed.formatted(.number.precision(.fractionLength(0...1))) + "×")
+                            .font(.subheadline.weight(.bold)).monospacedDigit()
+                            .frame(width: 52, height: 44)
+                            .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
+                    }
+                    .accessibilityLabel("Wiedergabegeschwindigkeit")
                     Spacer()
+                    Button { step(-1) } label: { Image(systemName: "backward.fill").font(.title2).frame(width: 52, height: 52) }
+                        .disabled(selectedIndex == 0).accessibilityLabel("Vorherige Meldung")
                     Button {
                         if selectedIndex >= points.count - 1 { selectedIndex = 0; focusSelected() }
                         playing.toggle()
-                    } label: { Image(systemName: playing ? "pause.fill" : "play.fill").rjGlassControl() }
-                        .disabled(points.count < 2).accessibilityLabel(playing ? "Wiedergabe pausieren" : "Verlauf abspielen")
-                    Spacer()
-                    Button { step(1) } label: { Image(systemName: "forward.end.fill").frame(width: 44, height: 44) }
+                    } label: {
+                        Image(systemName: playing ? "pause.fill" : "play.fill")
+                            .font(.title.weight(.semibold)).foregroundStyle(.white)
+                            .frame(width: 66, height: 66)
+                            .background(Color.accentColor.gradient, in: Circle())
+                            .shadow(color: Color.accentColor.opacity(0.35), radius: 10, y: 4)
+                            .contentTransition(.symbolEffect(.replace))
+                    }
+                    .disabled(points.count < 2).accessibilityLabel(playing ? "Wiedergabe pausieren" : "Verlauf abspielen")
+                    .padding(.horizontal, 10)
+                    Button { step(1) } label: { Image(systemName: "forward.fill").font(.title2).frame(width: 52, height: 52) }
                         .disabled(selectedIndex >= points.count - 1).accessibilityLabel("Nächste Meldung")
-                    Menu {
-                        Picker("Geschwindigkeit", selection: $speed) {
-                            Text("0,5×").tag(0.5); Text("1×").tag(1.0); Text("2×").tag(2.0); Text("4×").tag(4.0)
-                        }
-                    } label: { Text(speed.formatted(.number.precision(.fractionLength(0...1))) + "×").font(.caption.bold()).frame(minWidth: 44, minHeight: 44) }
-                        .accessibilityLabel("Wiedergabegeschwindigkeit")
-                }.buttonStyle(.plain)
-                HStack {
-                    Toggle("Karte folgt Auswahl", isOn: $followSelection).font(.caption)
-                    Button("Neueste") { step(points.count); followLatest = true }.font(.caption.weight(.semibold)).disabled(selectedIndex == points.count - 1 && followLatest)
-                }
-                Divider()
-                ResolvedAddressText(location: point.rjTrackerLocation, fallback: String(format: "%.5f, %.5f", point.latitude, point.longitude)).font(.subheadline)
-                HStack {
-                    AccuracyPill(accuracy: point.accuracyM)
                     Spacer()
-                    Text("\(selectedIndex + 1) / \(points.count) \(detailed ? "Reports" : "Stationen")").font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    Button { step(points.count); followLatest = true } label: {
+                        Image(systemName: "forward.end.fill").font(.subheadline.weight(.bold))
+                            .frame(width: 52, height: 44)
+                            .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
+                    }
+                    .disabled(selectedIndex == points.count - 1 && followLatest)
+                    .accessibilityLabel("Zur neuesten Meldung")
+                }
+                .buttonStyle(.plain)
+                if !compact {
+                    Toggle(isOn: $followSelection) {
+                        Label("Karte folgt der Auswahl", systemImage: "scope").font(.subheadline)
+                    }.tint(.accentColor)
                 }
             }
-        }.rjCard()
+        }
     }
 
-    private var summary: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            RJSectionTitle(title: "Dein Verlauf", subtitle: "\(prepared.points.count) Originalreports · \(points.count) angezeigte \(detailed ? "Reports" : "Stationen")", symbol: "chart.xyaxis.line")
-            if let total = response?.matchingTotal, total > (response?.points.count ?? 0) {
-                Label("Die neuesten \(response?.points.count ?? 0) von \(total) Meldungen sind geladen. Der Export enthält diesen Ausschnitt.", systemImage: "info.circle")
-                    .font(.footnote).foregroundStyle(.orange)
+    // MARK: Summary
+
+    private var metrics: some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+            metric("Strecke ca.", value: prepared.distanceM >= 1 ? prepared.distanceM.metersText : "–", symbol: "figure.walk.motion", color: .blue)
+            metric("Meldungen", value: "\(prepared.points.count)", symbol: "location.fill", color: .green)
+            metric("Zeitraum", value: timeSpan, symbol: "clock.fill", color: .orange)
+            metric("Genauigkeit", value: prepared.medianAccuracy.map { "±" + $0.metersText } ?? "–", symbol: "scope", color: .purple)
+        }
+    }
+    private var timeSpan: String {
+        guard let first = prepared.points.first, let last = prepared.points.last else { return "–" }
+        return duration(TimeInterval(last.timestamp - first.timestamp))
+    }
+    private func metric(_ title: String, value: String, symbol: String, color: Color) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol).font(.body.weight(.semibold)).foregroundStyle(.white)
+                .frame(width: 36, height: 36).background(color.gradient, in: Circle())
+            VStack(alignment: .leading, spacing: 1) {
+                Text(value).font(.headline).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+                Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-            Text("Farben zeigen das Ortungsnetz. Linien verbinden Meldungen derselben Quelle. Lücken und unplausible Sprünge bleiben unterbrochen.")
-                .font(.footnote).foregroundStyle(.secondary)
-        }.rjCard()
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 
     private var visibleStays: [JSONValue] {
@@ -405,10 +596,13 @@ struct HistoryView: View {
         }
     }
     private var staysCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            RJSectionTitle(title: "Aufenthaltsorte", subtitle: "\(visibleStays.count) aus Meldungen abgeleitete Aufenthalte", symbol: "mappin.and.ellipse")
-            Text("Ort antippen, um ihn auf der Karte zu sehen. Dauer und Genauigkeit beziehen sich auf empfangene Meldungen.").font(.caption).foregroundStyle(.secondary)
-            ForEach(Array(visibleStays.prefix(100).enumerated()), id: \.offset) { _, stay in
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("\(visibleStays.count) Aufenthalte").font(.headline)
+                Spacer()
+                Text("Aus Meldungen abgeleitet").font(.caption).foregroundStyle(.secondary)
+            }.padding(.bottom, 8)
+            ForEach(Array(visibleStays.prefix(100).enumerated()), id: \.offset) { index, stay in
                 Button {
                     playing = false; followLatest = false
                     if let timestamp = stay["start_ts"].numberValue { selectedIndex = HistoryAnalysis.nearestIndex(to: timestamp, in: points) }
@@ -417,40 +611,12 @@ struct HistoryView: View {
                         position = .region(.init(center: .init(latitude: latitude, longitude: longitude), latitudinalMeters: zoom, longitudinalMeters: zoom))
                     }
                     fullscreen = true
-                } label: { HistoryStayRow(stay: stay) }.buttonStyle(.plain)
+                } label: { HistoryStayRow(stay: stay, last: index == min(visibleStays.count, 100) - 1) }.buttonStyle(.plain)
             }
             if visibleStays.count > 100 { Text("Die 100 neuesten Aufenthalte werden angezeigt.").font(.caption).foregroundStyle(.secondary) }
         }.rjCard()
     }
 
-    private var dayPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(selectedDay?.formatted(date: .complete, time: .omitted) ?? "Gesamter Zeitraum").font(.subheadline.weight(.semibold))
-                Spacer()
-                if selectedDay != nil { Button("Alle Tage") { chooseDay(nil) }.font(.caption.bold()) }
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    dayButton("Alle", detail: "\(prepared.availableDays.count) Tage", date: nil)
-                    ForEach(prepared.availableDays) { day in
-                        dayButton(day.date.formatted(.dateTime.day().month(.abbreviated)), detail: "\(day.points.count) Meldungen", date: day.date)
-                    }
-                }
-            }
-        }
-    }
-    private func dayButton(_ title: String, detail: String, date: Date?) -> some View {
-        Button { chooseDay(date) } label: {
-            VStack(spacing: 5) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(detail).font(.caption2)
-            }.padding(.horizontal, 14).padding(.vertical, 12)
-                .foregroundStyle(selectedDay == date ? Color.white : Color.primary)
-                .background(selectedDay == date ? Color.blue : Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 16))
-        }.buttonStyle(.plain).disabled(preparing || loading)
-            .accessibilityValue(selectedDay == date ? "Ausgewählt" : "")
-    }
     private func chooseDay(_ date: Date?) {
         selectedDay = date; timelineLimit = 60; playing = false
         Task { await prepare(preserveSelection: true); position = .automatic }
@@ -464,48 +630,55 @@ struct HistoryView: View {
                 Button { timelineQuery = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                     .accessibilityLabel("Suche löschen")
             }
-        }.padding(14).background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
+        }.padding(.horizontal, 14).padding(.vertical, 11)
+            .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
     }
 
-    private var metrics: some View {
-        HStack(spacing: 10) {
-            metric("Originalreports", value: "\(prepared.points.count)", symbol: "location.fill", color: .blue)
-            metric("Quellen", value: "\(prepared.sourceCounts.count)", symbol: "antenna.radiowaves.left.and.right", color: .purple)
-            metric("Genauigkeit¹", value: prepared.medianAccuracy.map { "±" + $0.metersText } ?? "–", symbol: "scope", color: .teal)
-        }
-    }
-    private func metric(_ title: String, value: String, symbol: String, color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Image(systemName: symbol).font(.subheadline).foregroundStyle(color)
-            Text(value).font(.title3.bold()).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
-            Text(title).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
-            .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
-    }
     private var overview: some View {
         VStack(alignment: .leading, spacing: 16) {
-            RJSectionTitle(title: "Zeit & Datenqualität", subtitle: "Für die ausgewählten Tage und Quellen", symbol: "chart.bar.xaxis")
+            RJSectionTitle(title: "Zeit & Datenqualität", subtitle: "\(prepared.points.count) Originalreports · \(points.count) angezeigte \(detailed ? "Reports" : "Stationen")", symbol: "chart.bar.xaxis")
             if let first = points.first, let last = points.last {
-                overviewRow("Erste Meldung", value: Date(timeIntervalSince1970: TimeInterval(first.timestamp)).rjTimelineText, symbol: "flag")
-                overviewRow("Letzte Meldung", value: Date(timeIntervalSince1970: TimeInterval(last.timestamp)).rjTimelineText, symbol: "flag.checkered")
-                overviewRow("Größte Meldungslücke", value: duration(prepared.longestGap), symbol: "clock.badge.questionmark")
+                overviewRow("Erste Meldung", value: Date(timeIntervalSince1970: TimeInterval(first.timestamp)).rjTimelineText, symbol: "flag.fill", color: .green)
+                overviewRow("Letzte Meldung", value: Date(timeIntervalSince1970: TimeInterval(last.timestamp)).rjTimelineText, symbol: "flag.checkered", color: .indigo)
+                overviewRow("Größte Meldungslücke", value: duration(prepared.longestGap), symbol: "clock.badge.questionmark", color: .orange)
+            }
+            if !prepared.activity.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Meldungsdichte").font(.caption).foregroundStyle(.secondary)
+                    HistoryActivityStrip(activity: prepared.activity, progress: nil).frame(height: 44)
+                }
             }
             Divider()
+            let total = max(1, prepared.sourceCounts.values.reduce(0, +))
+            GeometryReader { geometry in
+                HStack(spacing: 2) {
+                    ForEach(prepared.sourceCounts.keys.sorted(), id: \.self) { network in
+                        Rectangle().fill(network.rjProviderColor.gradient)
+                            .frame(width: max(4, geometry.size.width * CGFloat(prepared.sourceCounts[network] ?? 0) / CGFloat(total)))
+                    }
+                }
+            }.frame(height: 10).clipShape(Capsule())
             ForEach(prepared.sourceCounts.keys.sorted(), id: \.self) { network in
                 HStack {
                     ProviderBadge(provider: network)
                     Spacer()
-                    Text("\(prepared.sourceCounts[network] ?? 0) Meldungen").font(.subheadline).monospacedDigit()
+                    Text("\(prepared.sourceCounts[network] ?? 0) Meldungen · \(Int((Double(prepared.sourceCounts[network] ?? 0) / Double(total) * 100).rounded())) %")
+                        .font(.subheadline).monospacedDigit().foregroundStyle(.secondary)
                 }
             }
-            Text("¹ Median der gemeldeten Genauigkeit. Eine Meldungslücke bedeutet, dass keine Standortdaten vorliegen. Linien sind Verbindungen zwischen Messpunkten und keine aufgezeichnete Reiseroute.")
+            if let total = response?.matchingTotal, total > (response?.points.count ?? 0) {
+                Label("Die neuesten \(response?.points.count ?? 0) von \(total) Meldungen sind geladen. Der Export enthält diesen Ausschnitt.", systemImage: "info.circle")
+                    .font(.footnote).foregroundStyle(.orange)
+            }
+            Text("Genauigkeit ist der Median der gemeldeten Werte. Die Strecke ist eine Schätzung aus Meldungen desselben Netzes; Bewegungen innerhalb der Messgenauigkeit, Lücken und unplausible Sprünge werden nicht gezählt. Linien verbinden Messpunkte und sind keine aufgezeichnete Route.")
                 .font(.caption).foregroundStyle(.secondary)
         }.rjCard()
     }
-    private func overviewRow(_ title: String, value: String, symbol: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: symbol).foregroundStyle(.blue).frame(width: 22)
-            VStack(alignment: .leading, spacing: 4) {
+    private func overviewRow(_ title: String, value: String, symbol: String, color: Color) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: symbol).font(.footnote.weight(.semibold)).foregroundStyle(.white)
+                .frame(width: 30, height: 30).background(color.gradient, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.caption).foregroundStyle(.secondary)
                 Text(value).font(.subheadline.weight(.medium)).monospacedDigit()
             }
@@ -524,27 +697,30 @@ struct HistoryView: View {
                 Text("\(timelineCount) \(detailed ? "Reports" : "Stationen")").font(.headline)
                 Spacer()
                 Text("Neueste zuerst").font(.caption).foregroundStyle(.secondary)
-            }
+            }.padding(.horizontal, 4)
             if filteredTimeline.isEmpty {
                 ContentUnavailableView.search(text: timelineQuery)
             }
             ForEach(visibleDays) { day in
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    HStack {
-                        Text(day.date.formatted(date: .complete, time: .omitted)).font(.subheadline.weight(.semibold))
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(day.date.formatted(.dateTime.weekday(.wide).day().month(.wide))).font(.title3.weight(.semibold))
                         Spacer()
-                    }.padding(.bottom, 14)
-                    ForEach(day.points) { point in
-                        HistoryTimelineRow(point: point, selected: point.id == selectedPoint?.id) {
-                            select(point)
-                            withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { proxy.scrollTo("history-map", anchor: .top) }
+                        Text("\(day.points.count)").font(.subheadline.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary)
+                    }.padding(.bottom, 12)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(day.points.enumerated()), id: \.element.id) { index, point in
+                            HistoryTimelineRow(point: point, selected: point.id == selectedPoint?.id, first: index == 0, last: index == day.points.count - 1) {
+                                select(point)
+                                withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { proxy.scrollTo("history-map", anchor: .top) }
+                            }
                         }
                     }
                 }.rjCard()
             }
             if timelineLimit < timelineCount {
                 Button("Weitere Meldungen (\(timelineCount - timelineLimit))") { timelineLimit += 100 }
-                    .buttonStyle(.bordered).frame(maxWidth: .infinity).padding(.vertical, 6)
+                    .buttonStyle(.bordered).buttonBorderShape(.capsule).frame(maxWidth: .infinity).padding(.vertical, 6)
                     .onAppear { timelineLimit = min(timelineCount, timelineLimit + 100) }
             }
         }
@@ -715,64 +891,108 @@ struct HistoryView: View {
 
 }
 
-private struct HistoryTimelineRow: View {
+
+/// Report density as fine bars; the played part is tinted like a progress track.
+struct HistoryActivityStrip: View {
+    let activity: [Double]
+    let progress: Double?
+    var body: some View {
+        GeometryReader { geometry in
+            let count = max(activity.count, 1)
+            let spacing: CGFloat = 2
+            let width = max(1, (geometry.size.width - spacing * CGFloat(count - 1)) / CGFloat(count))
+            HStack(alignment: .bottom, spacing: spacing) {
+                ForEach(Array(activity.enumerated()), id: \.offset) { index, value in
+                    let played = progress.map { Double(index) / Double(count) <= $0 } ?? true
+                    RoundedRectangle(cornerRadius: width / 2, style: .continuous)
+                        .fill(played ? AnyShapeStyle(Color.accentColor.gradient) : AnyShapeStyle(Color.secondary.opacity(0.22)))
+                        .frame(width: width, height: max(3, geometry.size.height * value))
+                }
+            }.frame(maxHeight: .infinity, alignment: .bottom)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+struct HistoryTimelineRow: View {
     let point: HistoryPoint
     let selected: Bool
+    var first = false
+    var last = false
     let action: () -> Void
+    private var color: Color { (point.network ?? "unknown").rjProviderColor }
     var body: some View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 12) {
-                VStack(spacing: 0) {
-                    Circle().fill((point.network ?? "unknown").rjProviderColor).frame(width: selected ? 12 : 9, height: selected ? 12 : 9)
-                        .overlay(Circle().stroke(.white, lineWidth: 1.5)).frame(width: 18, height: 24)
-                    Rectangle().fill(Color.secondary.opacity(0.18)).frame(width: 2).frame(maxHeight: .infinity)
+                Text(Date(timeIntervalSince1970: TimeInterval(point.timestamp)).formatted(date: .omitted, time: .shortened))
+                    .font(.subheadline.weight(.semibold)).monospacedDigit()
+                    .foregroundStyle(selected ? Color.accentColor : .primary)
+                    .frame(width: 50, alignment: .trailing).padding(.top, 2)
+                ZStack(alignment: .top) {
+                    VStack(spacing: 0) {
+                        Rectangle().fill(first ? Color.clear : Color.secondary.opacity(0.22)).frame(width: 2, height: 9)
+                        Rectangle().fill(last ? Color.clear : Color.secondary.opacity(0.22)).frame(width: 2).frame(maxHeight: .infinity)
+                    }
+                    Circle().fill(color.gradient)
+                        .frame(width: selected ? 16 : 12, height: selected ? 16 : 12)
+                        .overlay(Circle().stroke(Color(uiColor: .secondarySystemGroupedBackground), lineWidth: 2.5))
+                        .shadow(color: selected ? color.opacity(0.5) : .clear, radius: 5)
+                        .padding(.top, selected ? 3 : 5)
+                }.frame(width: 18)
+                VStack(alignment: .leading, spacing: 4) {
+                    if let address = point.address?.bestText, !address.isEmpty {
+                        Text(address).font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(2)
+                    } else {
+                        Text("Standort ohne Adresse").font(.subheadline.weight(.medium)).foregroundStyle(.primary)
+                        Text(String(format: "%.5f, %.5f", point.latitude, point.longitude)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 6) {
+                        Text((point.network ?? "unknown").rjProviderName).foregroundStyle(color)
+                        if let accuracy = point.accuracyM, accuracy > 0 { Text("· ±" + accuracy.metersText) }
+                        if let reportID = point.reportID { Text("· " + String(reportID.prefix(6))).font(.caption2.monospaced()).foregroundStyle(.tertiary) }
+                    }.font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 }
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack {
-                        Text(Date(timeIntervalSince1970: TimeInterval(point.timestamp)).formatted(date: .omitted, time: .standard))
-                            .font(.subheadline.weight(.semibold)).monospacedDigit()
-                        Spacer()
-                        if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(.blue) }
-                    }
-                    Text(point.address?.bestText ?? String(format: "%.5f, %.5f", point.latitude, point.longitude))
-                        .font(.subheadline.weight(.medium)).foregroundStyle(.primary).lineLimit(2)
-                    Text("\((point.network ?? "unknown").rjProviderName) · \(point.accuracyM.flatMap { $0 > 0 ? "±" + $0.metersText : nil } ?? "Genauigkeit unbekannt")")
-                        .font(.caption).foregroundStyle(.secondary)
-                    if let reportID = point.reportID {
-                        Text("Report " + String(reportID.prefix(10))).font(.system(.caption2, design: .monospaced)).foregroundStyle(.tertiary)
-                    }
-                }.padding(.bottom, 18)
-            }.foregroundStyle(.primary).padding(.horizontal, 8).padding(.top, 6)
-                .background(selected ? Color.blue.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 14))
-                .contentShape(Rectangle())
+                .padding(.bottom, last ? 4 : 18)
+                Spacer(minLength: 0)
+                if selected { Image(systemName: "location.circle.fill").foregroundStyle(Color.accentColor).font(.title3).padding(.top, 1) }
+            }
+            .padding(.horizontal, 6).padding(.top, 4)
+            .background(selected ? Color.accentColor.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
 private struct HistoryStayRow: View {
     let stay: JSONValue
+    var last = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            let address = stay["address"]["label"].stringValue ?? stay["address"]["formatted"].stringValue
-            let latitude = stay["latitude"].numberValue ?? 0
-            let longitude = stay["longitude"].numberValue ?? 0
-            HStack(alignment: .top) {
-                Label(address ?? String(format: "%.5f, %.5f", latitude, longitude), systemImage: "mappin.circle.fill").font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
-                Spacer()
-                Text(stay["duration_text"].stringValue ?? "").font(.subheadline.bold()).foregroundStyle(.blue)
-            }
-            if let start = stay["start_ts"].numberValue, let end = stay["end_ts"].numberValue {
-                Text("\(Date(timeIntervalSince1970: start).rjTimelineText) – \(Date(timeIntervalSince1970: end).formatted(date: .omitted, time: .shortened))")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            HStack {
-                Text("\(stay["report_count"].integer) Reports").font(.caption).foregroundStyle(.secondary)
-                if let accuracy = stay["median_accuracy_m"].numberValue, accuracy > 0 { AccuracyPill(accuracy: accuracy) }
-                Spacer()
-                Image(systemName: "map").foregroundStyle(.blue)
-            }
-            Divider()
-        }
+        let address = stay["address"]["label"].stringValue ?? stay["address"]["formatted"].stringValue
+        let latitude = stay["latitude"].numberValue ?? 0
+        let longitude = stay["longitude"].numberValue ?? 0
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "mappin").font(.body.weight(.bold)).foregroundStyle(.white)
+                    .frame(width: 38, height: 38).background(Color.red.gradient, in: Circle())
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(address ?? String(format: "%.5f, %.5f", latitude, longitude))
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(2)
+                    if let start = stay["start_ts"].numberValue, let end = stay["end_ts"].numberValue {
+                        Text("\(Date(timeIntervalSince1970: start).rjTimelineText) – \(Date(timeIntervalSince1970: end).formatted(date: .omitted, time: .shortened))")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 8) {
+                        Text("\(stay["report_count"].integer) Reports").font(.caption).foregroundStyle(.secondary)
+                        if let accuracy = stay["median_accuracy_m"].numberValue, accuracy > 0 { AccuracyPill(accuracy: accuracy) }
+                    }
+                }
+                Spacer(minLength: 0)
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text(stay["duration_text"].stringValue ?? "").font(.subheadline.weight(.bold)).foregroundStyle(Color.accentColor)
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                }
+            }.padding(.vertical, 10)
+            if !last { Divider().padding(.leading, 50) }
+        }.contentShape(Rectangle())
     }
 }
-

@@ -1,3 +1,13 @@
+# RJ Tracker 6.0.0 · Backend 20.5.0
+
+Neues Design im Stil der aktuellen „Wo ist?“-App, komplett neuer Standortverlauf, häufigere Google-Abrufe und eine abschaltbare Google-Erfassung auf dem Server. Backend-Update: nur die eine Backend-Datei ersetzen; alle Daten und Anmeldungen bleiben erhalten.
+
+[Installation und Neuerungen 6.0.0](docs/UPGRADE-6.0.0.md) · [Changelog](IOS-CHANGELOG.md)
+
+Die Action **Build RJ Tracker IPA** erzeugt `RJ-Tracker-v6.0.0-unsigned.ipa`, `SHA256SUMS.txt` und `Tracker_Backend_AMP.py` (20.5.0).
+
+---
+
 # RJ Tracker 5.2.0
 
 Google direkt auf dem iPhone bleibt bei Ausfall des optionalen Tracker-Servers erreichbar. Google-Bedienelemente erscheinen nur bei Alle Netze/Google. Pro Tracker pausierbare automatische Verlaufsabfrage, optionale iOS-Hintergrundversuche und ein experimentelles UWB-Prüflabor.

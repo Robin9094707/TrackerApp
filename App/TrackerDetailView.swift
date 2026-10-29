@@ -29,41 +29,48 @@ struct TrackerDetailView: View {
     }
     private var serverBody: some View {
         ScrollView {
-            VStack(spacing: 14) {
+            VStack(spacing: 18) {
                 header
                 actions
                 if model.isLocating(current) {
                     ProgressView("Standort wird abgefragt …").font(.footnote)
                 }
+                RJGroupedSection(title: "Verlauf & Mitteilungen") {
+                    NavigationLink { HistoryView(tracker: current) } label: {
+                        detailRow("Standortverlauf", subtitle: current.historyActive == true ? "Aufzeichnung aktiv" : "Gespeicherte Meldungen ansehen", icon: "clock.arrow.circlepath", color: .blue)
+                    }.accessibilityIdentifier("tracker-history-link")
+                    Divider().padding(.leading, 44)
+                    Button { showAutomation = true } label: {
+                        detailRow("Mitteilungen", subtitle: alarmSubtitle, icon: "bell.badge.fill", color: .red)
+                    }
+                }
+                .buttonStyle(.plain)
                 if current.provider == "google" {
                     GoogleLauncherCard(deviceID: current.apiID).padding(12).rjCompactCard()
                 }
                 if current.provider == "fusion" { FusionSourcesCard(tracker: current) }
-                VStack(spacing: 0) {
-                    NavigationLink { HistoryView(tracker: current) } label: {
-                        detailRow("Standortverlauf", subtitle: current.historyActive == true ? "Aufzeichnung aktiv" : "Gespeicherte Meldungen ansehen", icon: "clock.arrow.circlepath", color: .blue)
-                    }.accessibilityIdentifier("tracker-history-link")
-                    Divider().padding(.leading, 48)
-                    Button { showAutomation = true } label: {
-                        detailRow("Mitteilungen & Verlauf", subtitle: alarmSubtitle, icon: "bell.badge", color: .purple)
-                    }
-                    Divider().padding(.leading, 48)
+                RJGroupedSection(title: "Orte") {
                     Button { showSavePlace = true } label: {
-                        detailRow("Diesen Ort speichern", subtitle: "Standort als Ort merken", icon: "star", color: .orange)
+                        detailRow("Diesen Ort speichern", subtitle: "Standort als Ort merken", icon: "star.fill", color: .orange)
                     }.disabled(current.validLocation == nil)
-                    Divider().padding(.leading, 48)
+                    Divider().padding(.leading, 44)
                     Button { showGeofence = true } label: {
-                        detailRow("Bereich überwachen", subtitle: "Geofence an diesem Standort", icon: "mappin.and.ellipse", color: .green)
+                        detailRow("Bereich überwachen", subtitle: "Mitteilung beim Betreten oder Verlassen", icon: "mappin.and.ellipse", color: .green)
                     }.disabled(current.validLocation == nil)
                 }
-                .buttonStyle(.plain).rjCompactCard()
+                .buttonStyle(.plain)
                 information
                 if let deletionError { Text(deletionError).foregroundStyle(.red).font(.caption) }
                 if ["apple", "fusion"].contains(current.provider) {
-                    Button { showRecoveryConfirm = true } label: {
-                        Label("Als vermisst suchen", systemImage: "lifepreserver")
-                            .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 8)
-                    }.buttonStyle(.bordered).tint(.orange).disabled(busy)
+                    RJGroupedSection(footer: "Der Server legt einen Recovery-Fall an und fragt häufiger ab. Dies aktiviert keinen offiziellen Apple-Verloren-Modus.") {
+                        Button { showRecoveryConfirm = true } label: {
+                            HStack {
+                                Text("Als vermisst suchen").font(.body.weight(.medium)).foregroundStyle(.red)
+                                Spacer()
+                                Image(systemName: "lifepreserver.fill").foregroundStyle(.red)
+                            }.padding(.vertical, 14).contentShape(Rectangle())
+                        }.buttonStyle(.plain).disabled(busy)
+                    }
                 }
             }
             .padding(16)
@@ -141,8 +148,8 @@ struct TrackerDetailView: View {
 
     private var actions: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) { locateButton; routeButton }
-            VStack(spacing: 12) { locateButton; routeButton }
+            HStack(spacing: 10) { locateButton; routeButton }
+            VStack(spacing: 10) { locateButton; routeButton }
         }
     }
 
@@ -159,20 +166,48 @@ struct TrackerDetailView: View {
             Button("Mit dem Auto", systemImage: "car") { openMaps(mode: MKLaunchOptionsDirectionsModeDriving) }
             Button("Mit Bus & Bahn", systemImage: "tram") { openMaps(mode: MKLaunchOptionsDirectionsModeTransit) }
         } label: {
-            TrackerActionTile(title: "Route", subtitle: "In Karten öffnen", symbol: "arrow.triangle.turn.up.right.diamond.fill")
+            TrackerActionTile(title: "Route", subtitle: routeSubtitle, symbol: "car.fill", color: .blue)
         }.buttonStyle(.plain).disabled(current.validLocation == nil)
     }
 
+    private var routeSubtitle: String {
+        guard let origin = model.locationService.location, let distance = current.distance(from: origin) else { return "In Karten öffnen" }
+        return distance.metersText + " entfernt"
+    }
+
     private var information: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Über dieses Objekt").font(.headline)
-            LabeledContent("Batterie", value: current.battery.map(TrackerTimeText.battery) ?? "Unbekannt")
-            LabeledContent("Netzwerk", value: current.provider.rjProviderName)
-            if let date = current.reportDate { LabeledContent("Zuletzt gesehen", value: date.formatted(date: .abbreviated, time: .standard)) }
-            if let accuracy = current.location?.accuracyM, accuracy > 0 { LabeledContent("Genauigkeit", value: "±\(accuracy.metersText)") }
-            if let origin = model.locationService.location, let distance = current.distance(from: origin) { LabeledContent("Entfernung zu mir", value: distance.metersText) }
-            if let note = current.details?.note, !note.isEmpty { Divider(); Text(note).font(.subheadline).textSelection(.enabled) }
-        }.font(.subheadline).rjCard()
+        RJGroupedSection(title: "Über dieses Objekt") {
+            infoRow("Batterie", value: current.battery.map(TrackerTimeText.battery) ?? "Unbekannt", symbol: "battery.75percent", color: .green)
+            Divider().padding(.leading, 44)
+            infoRow("Netzwerk", value: current.provider.rjProviderName, symbol: current.provider.rjProviderSymbol, color: current.provider.rjProviderColor)
+            if let date = current.reportDate {
+                Divider().padding(.leading, 44)
+                infoRow("Zuletzt gesehen", value: date.formatted(date: .abbreviated, time: .shortened), symbol: "clock.fill", color: .gray)
+            }
+            if let accuracy = current.location?.accuracyM, accuracy > 0 {
+                Divider().padding(.leading, 44)
+                infoRow("Genauigkeit", value: "±\(accuracy.metersText)", symbol: "scope", color: .teal)
+            }
+            if let origin = model.locationService.location, let distance = current.distance(from: origin) {
+                Divider().padding(.leading, 44)
+                infoRow("Entfernung zu mir", value: distance.metersText, symbol: "location.fill", color: .blue)
+            }
+            if let note = current.details?.note, !note.isEmpty {
+                Divider().padding(.leading, 44)
+                infoRow("Notiz", value: "", symbol: "note.text", color: .yellow)
+                Text(note).font(.subheadline).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 12).padding(.leading, 44)
+            }
+        }
+    }
+
+    private func infoRow(_ title: String, value: String, symbol: String, color: Color) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: 30, height: 30).background(color.gradient, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            Text(title)
+            Spacer()
+            Text(value).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+        }.font(.body).padding(.vertical, 9)
     }
 
     private var alarmSubtitle: String {
@@ -181,15 +216,7 @@ struct TrackerDetailView: View {
     }
 
     private func detailRow(_ title: String, subtitle: String, icon: String, color: Color) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon).font(.title3).foregroundStyle(color).frame(width: 32)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.body.weight(.medium)).foregroundStyle(.primary)
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-        }.padding(.vertical, 12).contentShape(Rectangle())
+        RJSettingsRow(title: title, subtitle: subtitle, symbol: icon, color: color)
     }
 
     private func openMaps(mode: String) {

@@ -287,32 +287,99 @@ enum RJMapCamera {
 
 // MARK: - Apple-like map marker
 
+/// Find My style item pin: a white disc with the item symbol and a short tail.
 struct TrackerMapBubble: View {
     let tracker: Tracker
     var selected: Bool = false
     var locating: Bool = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var size: CGFloat { selected ? 64 : 48 }
+    private var disc: Color { colorScheme == .dark ? Color(uiColor: .systemGray5) : .white }
 
     var body: some View {
-        VStack(spacing: 3) {
-            ZStack(alignment: .bottomTrailing) {
+        VStack(spacing: -3) {
+            ZStack(alignment: .topTrailing) {
                 Text(tracker.emoji ?? "📍")
-                    .font(.system(size: selected ? 40 : 30))
-                    .frame(width: selected ? 78 : 60, height: selected ? 78 : 60)
-                    .background(.regularMaterial, in: Circle())
-                    .overlay(Circle().stroke(selected ? Color.accentColor : Color(uiColor: .separator), lineWidth: selected ? 3 : 0.5))
-                    .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+                    .font(.system(size: selected ? 34 : 25))
+                    .frame(width: size - 8, height: size - 8)
+                    .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                    .padding(4)
+                    .background(disc, in: Circle())
+                    .overlay(Circle().stroke(selected ? Color.accentColor : Color.black.opacity(0.06), lineWidth: selected ? 3 : 0.5))
                 if locating {
                     ProgressView().controlSize(.mini).padding(4)
                         .background(.regularMaterial, in: Circle())
+                        .offset(x: 4, y: -4)
+                } else if tracker.favorite == true {
+                    Image(systemName: "star.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                        .frame(width: 18, height: 18).background(Color.orange, in: Circle())
+                        .overlay(Circle().stroke(disc, lineWidth: 2))
+                        .offset(x: 3, y: -3)
                 }
             }
-            Circle().fill(selected ? Color.accentColor : tracker.provider.rjProviderColor)
-                .frame(width: 8, height: 8)
-                .overlay(Circle().stroke(.white, lineWidth: 1.5))
+            RJPinTail().fill(selected ? Color.accentColor : disc)
+                .frame(width: 14, height: 9)
         }
+        .compositingGroup()
+        .shadow(color: .black.opacity(selected ? 0.28 : 0.2), radius: selected ? 10 : 5, y: selected ? 5 : 3)
+        .scaleEffect(selected ? 1 : 0.98, anchor: .bottom)
+        .animation(.spring(duration: 0.35, bounce: 0.3), value: selected)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(tracker.name)
     }
+}
+
+struct RJPinTail: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addQuadCurve(to: CGPoint(x: rect.midX, y: rect.maxY), control: CGPoint(x: rect.midX - rect.width * 0.12, y: rect.minY + rect.height * 0.35))
+        path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY), control: CGPoint(x: rect.midX + rect.width * 0.12, y: rect.minY + rect.height * 0.35))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// Apple Maps style control column: several buttons share one glass capsule.
+struct RJMapControlStack<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    var body: some View {
+        let stack = VStack(spacing: 0) { content() }
+            .font(.system(size: 19, weight: .medium))
+            .buttonStyle(.plain)
+        if reduceTransparency {
+            stack.background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
+        } else if #available(iOS 26.0, *) {
+            stack.glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            stack.background(.regularMaterial, in: Capsule())
+                .overlay(Capsule().stroke(Color.primary.opacity(0.06), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+        }
+    }
+}
+
+struct RJMapControlButton: View {
+    let symbol: String
+    var active = false
+    let label: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .foregroundStyle(active ? Color.accentColor : .primary)
+                .frame(width: RJDesign.controlSize, height: RJDesign.controlSize)
+                .contentShape(Rectangle())
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .accessibilityLabel(label)
+    }
+}
+
+struct RJMapControlDivider: View {
+    var body: some View { Divider().frame(width: 26) }
 }
 
 // MARK: - Address fallback
@@ -535,24 +602,74 @@ extension Double {
     }
 }
 
-/// Large, left-aligned action surface matching the map inspector's visual language.
+/// Large, left-aligned action surface in the Find My item-sheet style.
 struct TrackerActionTile: View {
     let title: String
     let subtitle: String
     let symbol: String
     var color: Color = .blue
+    @Environment(\.isEnabled) private var isEnabled
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Image(systemName: symbol).font(.title2.weight(.semibold)).foregroundStyle(color)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.headline).foregroundStyle(.primary)
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: symbol).font(.system(size: 19, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(color.gradient, in: Circle())
+                .symbolEffect(.bounce, value: title)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.headline).foregroundStyle(.primary).lineLimit(1).minimumScaleFactor(0.8)
                 Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
         .padding(14)
-        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 20))
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.primary.opacity(0.05), lineWidth: 0.5))
+        .opacity(isEnabled ? 1 : 0.5)
+        .contentShape(RoundedRectangle(cornerRadius: 22))
+    }
+}
+
+/// Settings-style row with a colored rounded-square icon, as in Find My's item sheet.
+struct RJSettingsRow: View {
+    let title: String
+    var subtitle: String? = nil
+    let symbol: String
+    var color: Color = .blue
+    var chevron = true
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(color.gradient, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.body).foregroundStyle(.primary)
+                if let subtitle { Text(subtitle).font(.footnote).foregroundStyle(.secondary).lineLimit(2) }
+            }
+            Spacer(minLength: 8)
+            if chevron { Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary) }
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+}
+
+/// Inset grouped container used by the redesigned detail sheets.
+struct RJGroupedSection<Content: View>: View {
+    var title: String? = nil
+    var footer: String? = nil
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let title {
+                Text(title).font(.title3.weight(.semibold)).padding(.horizontal, 4)
+            }
+            VStack(spacing: 0) { content() }
+                .padding(.horizontal, 14)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            if let footer {
+                Text(footer).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 6)
+            }
+        }
     }
 }
 
@@ -566,13 +683,14 @@ struct TrackerLocationSummary: View {
     var nearby = false
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Text(symbol).font(.system(size: 28))
-                .frame(width: 48, height: 48)
-                .background(provider.rjProviderColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 16))
+            Text(symbol).font(.system(size: 30))
+                .frame(width: 56, height: 56)
+                .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                .overlay(Circle().stroke(provider.rjProviderColor.opacity(0.35), lineWidth: 1.5))
             VStack(alignment: .leading, spacing: 5) {
                 if nearby { Text("Bei dir").font(.subheadline.weight(.semibold)).foregroundStyle(.green) }
                 ResolvedAddressText(location: location, fallback: "Noch kein Standort gemeldet")
-                    .font(.subheadline.weight(.medium)).lineLimit(2)
+                    .font(.title3.weight(.semibold)).lineLimit(2)
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 8) { FreshnessLabel(timestamp: timestamp); SourceBadge(source: provider) }
                     VStack(alignment: .leading, spacing: 4) { FreshnessLabel(timestamp: timestamp); SourceBadge(source: provider) }

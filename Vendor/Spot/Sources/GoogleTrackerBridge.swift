@@ -75,11 +75,12 @@ public struct GoogleReportSnapshot: Identifiable, Equatable {
     private var lastReportRequest = Date.distantPast
     private var lastCatalog = Date.distantPast
     private var lastMaintenance = Date.distantPast
-    nonisolated public static func validInterval(_ value: Int) -> Int { [0, 60, 120, 300, 900].contains(value) ? value : 60 }
+    nonisolated public static func validInterval(_ value: Int) -> Int { [0, 30, 60, 120, 300, 900].contains(value) ? value : 30 }
 
     private init() {
         backgroundHistoryEnabled = preferences.bool(forKey: "native.backgroundHistoryEnabled")
-        refreshInterval = Self.validInterval(preferences.object(forKey: "native.refreshInterval") as? Int ?? 60)
+        // A stored choice is kept; new installations refresh every 30 seconds in the foreground.
+        refreshInterval = Self.validInterval(preferences.object(forKey: "native.refreshInterval") as? Int ?? 30)
         contributorMode = preferences.string(forKey: "native.contributorMode") ?? "AtAllAreas"
         Settings.sharedInstance.contributorType = ContributorType(rawValue: contributorMode) ?? .AtAllAreas
     }

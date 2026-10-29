@@ -356,8 +356,10 @@ APPLE_DEFAULT_INTERVAL_MAX = max(APPLE_DEFAULT_INTERVAL_MIN, int(os.environ.get(
 # Kept as a compatibility field for older clients. The real Apple cadence is
 # now per tracker and comes from settings.polling.apple.
 HISTORY_POLL_INTERVAL_SECONDS = max(15, int(os.environ.get("ULTRA_TRACKER_HISTORY_POLL_SECONDS", "25")))
-GOOGLE_DEFAULT_INTERVAL_MIN = max(30, int(os.environ.get("ULTRA_TRACKER_GOOGLE_INTERVAL_MIN", "60")))
-GOOGLE_DEFAULT_INTERVAL_MAX = max(GOOGLE_DEFAULT_INTERVAL_MIN, int(os.environ.get("ULTRA_TRACKER_GOOGLE_INTERVAL_MAX", "70")))
+GOOGLE_DEFAULT_INTERVAL_MIN = max(30, int(os.environ.get("ULTRA_TRACKER_GOOGLE_INTERVAL_MIN", "45")))
+GOOGLE_DEFAULT_INTERVAL_MAX = max(GOOGLE_DEFAULT_INTERVAL_MIN, int(os.environ.get("ULTRA_TRACKER_GOOGLE_INTERVAL_MAX", "50")))
+# Pre-20.5 default window. Untouched installations move to the faster default.
+GOOGLE_LEGACY_DEFAULT_WINDOW = (60, 70)
 GOOGLE_FETCH_TIMEOUT_SECONDS = max(45, int(os.environ.get("ULTRA_TRACKER_GOOGLE_FETCH_TIMEOUT", "95")))
 GOOGLE_GUARDIAN_INTERVAL_SECONDS = max(300, int(os.environ.get("ULTRA_TRACKER_GOOGLE_GUARDIAN_INTERVAL", "900")))
 GOOGLE_GUARDIAN_REPAIR_COOLDOWN_SECONDS = max(300, int(os.environ.get("ULTRA_TRACKER_GOOGLE_REPAIR_COOLDOWN", "1800")))
@@ -541,6 +543,10 @@ def normalize_polling_settings(raw):
         # The old default window becomes a fixed twenty-second cadence.
         if provider == "apple" and (minimum, maximum) == (20, 30):
             maximum = 20
+        # 20.5: an unchanged legacy Google window adopts the faster default.
+        # Explicitly saved windows (updated_ts > 0) are kept as configured.
+        if provider == "google" and (minimum, maximum) == GOOGLE_LEGACY_DEFAULT_WINDOW and not result["updated_ts"]:
+            minimum, maximum = fallback["interval_min"], fallback["interval_max"]
         result[provider] = {"interval_min": minimum, "interval_max": maximum}
     return result
 
@@ -5172,8 +5178,63 @@ def share_capture_required(name):
     return False
 
 
+def google_server_collection_paused(device_id=None):
+    """Owner switch: the server neither polls Google nor stores Google history.
+
+    The app's on-device Google client is unaffected. Existing stored history is
+    kept; manual locate requests still update the current position.
+    """
+    settings = state.get("google_settings", {}) if "state" in globals() else {}
+    if not isinstance(settings, dict):
+        return False
+    if settings_bool(settings.get("server_collection_paused"), False):
+        return True
+    if device_id is None:
+        return False
+    device_settings = settings.get("devices", {}).get(device_id, {}) if isinstance(settings.get("devices"), dict) else {}
+    return isinstance(device_settings, dict) and settings_bool(device_settings.get("server_collection_paused"), False)
+
+
+def google_server_collection_public():
+    settings = state.get("google_settings", {}) if isinstance(state.get("google_settings"), dict) else {}
+    devices = settings.get("devices", {}) if isinstance(settings.get("devices"), dict) else {}
+    return {
+        "paused": settings_bool(settings.get("server_collection_paused"), False),
+        "paused_devices": sorted(
+            str(device_id) for device_id, row in devices.items()
+            if isinstance(row, dict) and settings_bool(row.get("server_collection_paused"), False)
+        ),
+        "updated_ts": int(settings.get("server_collection_updated_ts", 0) or 0),
+    }
+
+
+def set_google_server_collection(paused=None, devices=None):
+    settings = state.setdefault("google_settings", {})
+    if paused is not None:
+        settings["server_collection_paused"] = bool(paused)
+    if isinstance(devices, dict):
+        rows = settings.setdefault("devices", {})
+        for device_id, value in devices.items():
+            device_id = str(device_id)
+            if device_id not in state.get("google_devices", {}):
+                continue
+            row = rows.get(device_id) if isinstance(rows.get(device_id), dict) else {}
+            row["server_collection_paused"] = settings_bool(value, False)
+            rows[device_id] = row
+    settings["server_collection_updated_ts"] = int(time.time())
+    for device_id in list(state.get("google_devices", {})):
+        if google_server_collection_paused(device_id):
+            state.get("google_next_fetch", {}).pop(device_id, None)
+            state.get("google_pending_fetch", {}).pop(device_id, None)
+    save_json(GOOGLE_SETTINGS_FILE, "google_settings")
+    audit_event("google_server_collection", "settings", json.dumps(google_server_collection_public(), sort_keys=True))
+    return google_server_collection_public()
+
+
 def google_active_reasons(device_id):
     reasons = []
+    if google_server_collection_paused(device_id):
+        return reasons
     device_settings = state.get("google_settings", {}).get("devices", {}).get(device_id, {})
     if state.get("google_settings", {}).get("background_tracking", GOOGLE_BACKGROUND_TRACKING_DEFAULT) and not device_settings.get("background_disabled", False):
         reasons.append("background")
@@ -5269,6 +5330,8 @@ def google_public_location(point):
 
 
 def google_store_history(device_id, points):
+    if google_server_collection_paused(device_id):
+        return 0
     store = state["google_history"].setdefault(device_id, {"points": [], "enabled": False})
     link = google_link_for_device(device_id)
     linked_history = bool(
@@ -5293,6 +5356,8 @@ def google_store_history(device_id, points):
 
 
 def google_store_recording(device_id, points, now_ts):
+    if google_server_collection_paused(device_id):
+        return 0
     recording = state.get("google_recordings", {}).get(device_id)
     if not isinstance(recording, dict):
         return 0
@@ -11653,6 +11718,7 @@ def polling_public_state():
         "updated_ts": int(config.get("updated_ts", 0) or 0),
         "generated_at": int(now_ts),
         "runtime": runtime_snapshot,
+        "google_server_collection": google_server_collection_public(),
         "guarantee": "Abrufintervall; ein Provider kann denselben letzten Report zurückgeben oder bei Fehlern einen Backoff aktivieren.",
     }
 
@@ -11784,7 +11850,7 @@ def tracker_lab_active_job():
     return None
 
 APP_NAME = "Universal Tag Studio"
-APP_VERSION = "20.4.2 API EDITION"
+APP_VERSION = "20.5.0 API EDITION"
 
 
 OPTIMIZED_ROUTE_DEFAULT_POINTS = int(os.environ.get("ULTRA_TRACKER_ROUTE_MAX_DISPLAY_POINTS", "4200"))
@@ -22495,6 +22561,16 @@ def polling_settings_api():
     if "apple_batch_reports_default" in data:
         candidate["apple_batch_reports_default"] = bool_from_any(data["apple_batch_reports_default"])
     candidate["updated_ts"] = int(time.time())
+    collection = data.get("google_server_collection")
+    if collection is not None:
+        if not isinstance(collection, dict):
+            return jsonify({"status": "error", "message": "google_server_collection muss ein Objekt sein."}), 400
+        set_google_server_collection(
+            bool_from_any(collection["paused"]) if "paused" in collection else None,
+            collection.get("devices") if isinstance(collection.get("devices"), dict) else None,
+        )
+        if not any(key in data for key in ("apple", "google", "samsung", "apple_batch_reports_default")):
+            return jsonify({"status": "ok", "polling": polling_public_state()})
     for provider in ("apple", "google", "samsung"):
         incoming = data.get(provider)
         if incoming is None:
@@ -24736,6 +24812,8 @@ def update_google_defaults():
         state["google_settings"]["adaptive_polling"] = bool(data.get("adaptive_polling"))
     if "auto_repair" in data:
         state["google_settings"]["auto_repair"] = bool(data.get("auto_repair"))
+    if "server_collection_paused" in data:
+        set_google_server_collection(bool_from_any(data.get("server_collection_paused")))
     save_json(GOOGLE_SETTINGS_FILE, "google_settings")
     save_json(SETTINGS_FILE, "settings")
     if state["google_settings"].get("background_tracking"):
@@ -24749,6 +24827,7 @@ def update_google_defaults():
         "background_tracking": bool(state["google_settings"].get("background_tracking")),
         "adaptive_polling": bool(state["google_settings"].get("adaptive_polling")),
         "auto_repair": bool(state["google_settings"].get("auto_repair")),
+        "server_collection": google_server_collection_public(),
     })
 
 
@@ -27729,8 +27808,8 @@ def api_remove_native_tracker(provider,tracker_id):
     return jsonify(status='ok',message='Quelle archiviert und aus Fusionen entfernt; Historie bleibt erhalten.')
 
 # A small security page is allowed for server-domain-bound passkeys. It exposes no tracker data.
-_SECURITY_STYLE = '<meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font:16px system-ui;background:#0b1220;color:#edf4ff;max-width:740px;margin:4vh auto;padding:22px}section{background:linear-gradient(145deg,#26344dbb,#182337dd);backdrop-filter:blur(24px);box-shadow:0 18px 60px #0003;padding:24px;border-radius:22px;margin:18px 0}input,button,select{box-sizing:border-box;font:inherit;padding:12px;border-radius:12px;border:1px solid #415471;background:#0f192a;color:inherit;margin:5px;width:100%}button{background:#276edb;cursor:pointer}input[type=checkbox]{width:auto;margin-right:10px}label{display:block;padding:10px 0}small{color:#a5b7d4}pre{white-space:pre-wrap}a{color:#a8ccff}</style>'
-_PASSKEY_HTML = '''<!doctype html><html lang="de"><head><title>RJ Tracker · Sichere Anmeldung</title>STYLE</head><body><h1>RJ Tracker · Passkey</h1><small>Nur Anmeldung und Passkey-Einrichtung. Keine Tracker oder Standortdaten.</small><section><input id="username" placeholder="Benutzername (optional)"><input id="password" type="password" placeholder="Passwort zur Einrichtung"><input id="code" placeholder="2FA-Code, falls aktiviert"><button id="go">Passkey verwenden</button><pre id="result"></pre></section><script>
+_SECURITY_STYLE = '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark"><meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)"><meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)"><style>:root{--bg:#f5f5f7;--card:#ffffffd9;--text:#1d1d1f;--muted:#6e6e73;--line:#d2d2d7;--field:#f5f5f7;--accent:#0071e3;--accent-press:#0062c4;--danger:#ff3b30;--ok:#34c759;--shadow:0 1px 1px #0000000a,0 12px 40px #0000000f;color-scheme:light dark}@media(prefers-color-scheme:dark){:root{--bg:#000;--card:#1c1c1ed9;--text:#f5f5f7;--muted:#98989d;--line:#38383a;--field:#2c2c2e;--accent:#0a84ff;--accent-press:#409cff;--danger:#ff453a;--ok:#30d158;--shadow:0 1px 1px #0006,0 18px 50px #0008}}*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}body{margin:0 auto;max-width:760px;min-height:100vh;padding:max(28px,env(safe-area-inset-top)) 18px 48px;background:var(--bg);color:var(--text);font:17px/1.47 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;letter-spacing:-.022em;-webkit-font-smoothing:antialiased}body::before{content:"";position:fixed;inset:0 0 auto;height:420px;z-index:-1;background:radial-gradient(60% 70% at 18% 0,#0071e322,transparent 70%),radial-gradient(50% 60% at 90% 10%,#bf5af21a,transparent 70%);pointer-events:none}h1{margin:22px 0 2px;font:700 40px/1.08 -apple-system,BlinkMacSystemFont,"SF Pro Display",system-ui,sans-serif;letter-spacing:-.028em}h1::before{content:"⌖";display:grid;place-items:center;width:64px;height:64px;margin-bottom:18px;border-radius:16px;background:linear-gradient(160deg,#34c759,#0a84ff 55%,#5e5ce6);box-shadow:0 10px 30px #0a84ff44;color:#fff;font-size:36px;font-weight:400}[hidden]{display:none!important}h2{margin:30px 0 10px;font-size:22px;font-weight:600;letter-spacing:-.02em}h2:first-child{margin-top:0}body>small{display:block;color:var(--muted);font-size:17px;margin-bottom:8px}section{background:var(--card);-webkit-backdrop-filter:saturate(180%) blur(30px);backdrop-filter:saturate(180%) blur(30px);border:.5px solid var(--line);border-radius:22px;box-shadow:var(--shadow);padding:26px;margin:22px 0}input,select{display:block;width:100%;min-height:48px;margin:8px 0;padding:12px 16px;border:1px solid transparent;border-radius:12px;background:var(--field);color:var(--text);font:inherit;outline:none;transition:border-color .2s,box-shadow .2s}input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 22%,transparent)}input[type=checkbox]{display:inline-block;width:22px;min-height:22px;height:22px;margin:0 12px 0 0;vertical-align:middle;accent-color:var(--accent)}button{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:48px;margin:8px 0;padding:12px 22px;border:0;border-radius:980px;background:var(--accent);color:#fff;font:inherit;font-weight:500;cursor:pointer;transition:background .2s,transform .1s,opacity .2s}button:hover{background:var(--accent-press)}button:active{transform:scale(.98)}button:disabled{opacity:.4;cursor:default;transform:none}#logout,#mcpreconnect{background:transparent;color:var(--danger);border:1px solid var(--line)}#mcpcheck,#findmycheck{background:var(--field);color:var(--accent)}label{display:flex;align-items:center;padding:12px 0;border-bottom:.5px solid var(--line)}pre{white-space:pre-wrap;margin:10px 0;padding:16px;border-radius:14px;background:var(--field);font:14px/1.55 ui-monospace,"SF Mono",Menlo,monospace;color:var(--text)}pre:empty{display:none}#message{position:sticky;bottom:18px;background:var(--card);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);border:.5px solid var(--line);box-shadow:var(--shadow);text-align:center;font-family:inherit}#clients>div,#mcpconnections>div{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:.5px solid var(--line);font-size:15px}#clients>div button,#mcpconnections>div button{width:auto;min-height:34px;margin:0;padding:6px 16px;font-size:14px;background:var(--field);color:var(--danger)}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}small{color:var(--muted)}</style>'
+_PASSKEY_HTML = '''<!doctype html><html lang="de"><head><meta charset="utf-8"><title>RJ Tracker · Sichere Anmeldung</title>STYLE</head><body><h1>RJ Tracker · Passkey</h1><small>Nur Anmeldung und Passkey-Einrichtung. Keine Tracker oder Standortdaten.</small><section><input id="username" placeholder="Benutzername (optional)"><input id="password" type="password" placeholder="Passwort zur Einrichtung"><input id="code" placeholder="2FA-Code, falls aktiviert"><button id="go">Passkey verwenden</button><pre id="result"></pre></section><script>
 const q=new URLSearchParams(location.search),out=document.getElementById('result');let csrf='';
 const dec=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')+'='.repeat((4-s.length%4)%4)),c=>c.charCodeAt(0));
 const enc=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');
@@ -27801,7 +27880,7 @@ def passkey_bridge_exchange():
         if not user or not user.get('active',True) or row['generation']!=app_password_generation():return jsonify(status='error',message='Konto geändert.'),403
     return jsonify(finish_user_login(user))
 
-_ADMIN_HTML = '''<!doctype html><html lang="de"><head><title>RJ Tracker · Administration</title>STYLE</head><body><h1>RJ Tracker</h1><small>API Edition · Administration ohne Standortansicht</small><section id="login"><h2>Hauptadmin anmelden</h2><input id="pw" type="password" placeholder="Hauptpasswort"><input id="otp" placeholder="2FA- oder Wiederherstellungscode"><button id="signin">Anmelden</button></section><section id="tools" hidden><h2>Serverstatus</h2><pre id="stats"></pre><h2>Angemeldete Geräte</h2><div id="clients"></div><h2>ChatGPT / MCP</h2><input id="mcpbase" placeholder="Öffentliche HTTPS-Basisadresse"><label><input id="mcpenabled" type="checkbox">MCP aktiv</label><label><input id="mcpactions" type="checkbox">Besitzeraktionen erlauben</label><label><input id="mcpguests" type="checkbox">Freigabelinks erlauben</label><button id="mcpsave">MCP speichern</button><button id="mcpcheck">Verbindung prüfen</button><button id="mcpreconnect">Alle MCP-Verbindungen widerrufen / neu verbinden</button><pre id="mcpinfo"></pre><div id="mcpconnections"></div><h2>FindMy.py verwalten</h2><pre id="findmyinfo"></pre><input id="findmypw" type="password" placeholder="Master-Passwort für Paketupdate"><input id="findmycode" placeholder="2FA-Code, falls aktiv"><button id="findmycheck">Nach offizieller Version suchen</button><button id="findmyinstall">Geprüftes Update installieren</button><h2>Passwort eines Benutzers zurücksetzen</h2><select id="users"></select><input id="newpw" type="password" placeholder="Neues Passwort (mindestens 10 Zeichen)"><button id="reset">Passwort zurücksetzen</button><h2>Hauptpasswort ändern</h2><input id="current" type="password" placeholder="Aktuelles Passwort"><input id="master" type="password" placeholder="Neues Hauptpasswort"><button id="change">Hauptpasswort ändern</button><button id="logout">Abmelden</button></section><pre id="message"></pre><script>
+_ADMIN_HTML = '''<!doctype html><html lang="de"><head><meta charset="utf-8"><title>RJ Tracker · Administration</title>STYLE</head><body><h1>RJ Tracker</h1><small>Server-Administration · ohne Standortansicht</small><section id="login"><h2>Hauptadmin anmelden</h2><input id="pw" type="password" placeholder="Hauptpasswort" autocomplete="current-password"><input id="otp" placeholder="2FA- oder Wiederherstellungscode" autocomplete="one-time-code" inputmode="numeric"><button id="signin">Anmelden</button></section><div id="tools" hidden><section><h2>Übersicht</h2><pre id="stats"></pre></section><section><h2>Angemeldete Geräte</h2><div id="clients"></div></section><section><h2>ChatGPT &amp; MCP</h2><input id="mcpbase" placeholder="Öffentliche HTTPS-Basisadresse"><label><input id="mcpenabled" type="checkbox">MCP aktiv</label><label><input id="mcpactions" type="checkbox">Besitzeraktionen erlauben</label><label><input id="mcpguests" type="checkbox">Freigabelinks erlauben</label><button id="mcpsave">MCP speichern</button><button id="mcpcheck">Verbindung prüfen</button><pre id="mcpinfo"></pre><div id="mcpconnections"></div><button id="mcpreconnect">Alle MCP-Verbindungen widerrufen</button></section><section><h2>FindMy.py</h2><pre id="findmyinfo"></pre><input id="findmypw" type="password" placeholder="Master-Passwort für Paketupdate"><input id="findmycode" placeholder="2FA-Code, falls aktiv"><button id="findmycheck">Nach offizieller Version suchen</button><button id="findmyinstall">Geprüftes Update installieren</button></section><section><h2>Benutzerpasswort zurücksetzen</h2><select id="users"></select><input id="newpw" type="password" placeholder="Neues Passwort (mindestens 10 Zeichen)" autocomplete="new-password"><button id="reset">Passwort zurücksetzen</button></section><section><h2>Hauptpasswort ändern</h2><input id="current" type="password" placeholder="Aktuelles Passwort" autocomplete="current-password"><input id="master" type="password" placeholder="Neues Hauptpasswort" autocomplete="new-password"><button id="change">Hauptpasswort ändern</button><button id="logout">Abmelden</button></section></div><pre id="message"></pre><script>
 let csrf='',pending=false;const message=document.getElementById('message');
 async function api(path,method='GET',body){const r=await fetch(path,{method,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:body?JSON.stringify(body):undefined});const j=await r.json();if(!r.ok||j.status==='error')throw Error(j.message||'Zugriff verweigert');if(j.csrf_token)csrf=j.csrf_token;return j}
 async function load(){const j=await api('admin/api/status');csrf=j.csrf_token;document.getElementById('login').hidden=true;tools.hidden=false;stats.textContent='Version: '+j.version+'\\nBenutzer: '+j.user_count+'\\nAngemeldete Geräte: '+j.clients.length+'\\nAktive API-Schlüssel: '+j.key_count;clients.replaceChildren();for(const c of j.clients){const div=document.createElement('div'),b=document.createElement('button');div.textContent=c.label+' · '+c.user_id+' · '+(c.revoked?'Abgemeldet':'Aktiv');b.textContent='Gerät abmelden';b.disabled=c.revoked;b.onclick=()=>run(async()=>{await api('admin/api/clients/'+encodeURIComponent(c.id),'DELETE',{});await load()});div.append(b);clients.append(div)}users.replaceChildren();for(const u of j.users){if(u.id==='main')continue;const o=document.createElement('option');o.value=u.id;o.textContent=u.username;users.append(o)}await loadMCP();await loadFindMy()}

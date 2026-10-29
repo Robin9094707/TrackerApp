@@ -174,36 +174,150 @@ struct NativeGoogleTrackerView: View {
 struct NativeGoogleHistoryView: View {
     let deviceID: String
     @ObservedObject private var google = GoogleTrackerStore.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var reports: [GoogleReportSnapshot] = []
+    @State private var prepared = PreparedHistory()
+    @State private var selectedDay: Date?
+    @State private var selectedIndex = 0
+    @State private var position: MapCameraPosition = .automatic
+    @State private var limit = 80
+    private var points: [HistoryPoint] { prepared.displayPoints }
+    private var selected: HistoryPoint? { points.isEmpty ? nil : points[min(max(selectedIndex, 0), points.count - 1)] }
+    private var lockedCount: Int { reports.filter { $0.latitude == nil }.count }
+    private var labels: [String: String] {
+        Dictionary(reports.compactMap { report in report.label.map { ("google:" + report.id, $0) } }, uniquingKeysWith: { first, _ in first })
+    }
+
     var body: some View {
-        List {
-            Section {
-                Text("\(reports.count) unterschiedliche Meldungen").font(.headline)
-                Text("Alle gelieferten Reports werden berücksichtigt. Wiederholungen werden zusammengeführt; Zeit, Quelle und Genauigkeit bleiben erhalten.").font(.caption).foregroundStyle(.secondary)
-            }
-            ForEach(reports) { report in
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack { Text(report.date, format: .dateTime.day().month().year().hour().minute().second()).font(.subheadline.weight(.medium)); Spacer() }
-                    Text(report.label ?? (report.latitude == nil ? "Noch verschlüsselt" : "Standortmeldung")).font(.subheadline)
-                    HStack {
-                        Text(report.own ? "Eigene Sichtung" : "Google-Netzwerk")
-                        if let accuracy = report.accuracy, accuracy > 0 { Text("± \(Int(accuracy)) m") }
-                        Text(googleReportKind(report.kind))
-                    }.font(.caption).foregroundStyle(.secondary)
-                    if let lat = report.latitude, let lon = report.longitude {
-                        NavigationLink("Auf Karte ansehen") {
-                            Map(initialPosition: .region(.init(center: .init(latitude: lat, longitude: lon), latitudinalMeters: 800, longitudinalMeters: 800))) {
-                                Marker("Meldung", coordinate: .init(latitude: lat, longitude: lon)).tint(.green)
-                            }.navigationTitle(report.date.formatted(date: .abbreviated, time: .shortened))
-                        }.font(.caption)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(selectedDay.map { $0.formatted(.dateTime.weekday(.wide).day().month(.wide)) } ?? "Alle Meldungen").font(.largeTitle.bold())
+                    Text("\(reports.count) unterschiedliche Meldungen" + (lockedCount > 0 ? " · \(lockedCount) noch verschlüsselt" : ""))
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                if !prepared.availableDays.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            chip("Alle", detail: "\(prepared.availableDays.count) Tage", day: nil)
+                            ForEach(prepared.availableDays) { day in
+                                chip(day.date.formatted(.dateTime.weekday(.abbreviated).day()), detail: "\(day.points.count)", day: day.date)
+                            }
+                        }
                     }
-                }.padding(.vertical, 5)
+                }
+                if points.isEmpty {
+                    ContentUnavailableView("Keine entschlüsselten Standorte", systemImage: "lock.circle",
+                                           description: Text("Sobald Google-Meldungen entschlüsselt sind, erscheinen sie hier mit Karte und Zeitleiste.")).rjCard()
+                } else {
+                    HistoryRouteMap(prepared: prepared, selected: selected, position: $position, onSelect: select)
+                        .frame(height: 340)
+                        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                        .shadow(color: .black.opacity(0.08), radius: 16, y: 6)
+                        .overlay(alignment: .topTrailing) {
+                            Button { position = .automatic } label: { Image(systemName: "point.topleft.down.to.point.bottomright.curvepath").rjGlassControl() }
+                                .buttonStyle(.plain).padding(12).accessibilityLabel("Gesamte Auswahl auf Karte zeigen")
+                        }
+                    if let point = selected, let first = points.first, let last = points.last {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(Date(timeIntervalSince1970: TimeInterval(point.timestamp)), style: .time)
+                                    .font(.system(.title, design: .rounded).weight(.bold)).monospacedDigit()
+                                Spacer()
+                                AccuracyPill(accuracy: point.accuracyM)
+                            }
+                            ResolvedAddressText(location: point.rjTrackerLocation, fallback: labels[point.id] ?? String(format: "%.5f, %.5f", point.latitude, point.longitude))
+                                .font(.subheadline.weight(.medium))
+                            if first.timestamp < last.timestamp {
+                                HistoryActivityStrip(activity: prepared.activity, progress: Double(point.timestamp - first.timestamp) / Double(last.timestamp - first.timestamp)).frame(height: 26)
+                                Slider(value: Binding(get: { Double(point.timestamp) }, set: { selectedIndex = HistoryAnalysis.nearestIndex(to: $0, in: points) }),
+                                       in: Double(first.timestamp)...Double(last.timestamp)) { editing in if !editing { focus() } }
+                                    .accessibilityLabel("Zeitpunkt auswählen")
+                            }
+                            HStack {
+                                Label(prepared.distanceM >= 1 ? "ca. " + prepared.distanceM.metersText : "Keine Bewegung", systemImage: "figure.walk.motion")
+                                Spacer()
+                                Text("\(selectedIndex + 1) von \(points.count)").monospacedDigit()
+                            }.font(.caption).foregroundStyle(.secondary)
+                        }.rjCard()
+                    }
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(visibleDays) { day in
+                            VStack(alignment: .leading, spacing: 0) {
+                                HStack {
+                                    Text(day.date.formatted(.dateTime.weekday(.wide).day().month(.wide))).font(.title3.weight(.semibold))
+                                    Spacer()
+                                    Text("\(day.points.count)").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                                }.padding(.bottom, 12)
+                                ForEach(Array(day.points.enumerated()), id: \.element.id) { index, point in
+                                    HistoryTimelineRow(point: point, selected: point.id == selected?.id, first: index == 0, last: index == day.points.count - 1) { select(point) }
+                                }
+                            }.rjCard()
+                        }
+                        if limit < points.count {
+                            Button("Weitere Meldungen") { limit += 120 }.buttonStyle(.bordered).buttonBorderShape(.capsule).frame(maxWidth: .infinity)
+                                .onAppear { limit += 120 }
+                        }
+                    }
+                }
+                Text("Alle gelieferten Reports werden berücksichtigt. Wiederholungen werden zusammengeführt; Zeit, Quelle und Genauigkeit bleiben erhalten. Die Anzeige bündelt nahe Meldungen, ohne gespeicherte Daten zu verändern.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.padding(16)
+        }
+        .rjScreenChrome().navigationTitle("Google-Verlauf").navigationBarTitleDisplayMode(.inline)
+        .task(id: google.trackers.first(where: { $0.id == deviceID })) {
+            let result = await google.reports(for: deviceID)
+            if !Task.isCancelled { reports = result; await prepare(resetSelection: prepared.points.isEmpty) }
+        }
+        .onChange(of: selectedDay) { _, _ in Task { await prepare(resetSelection: true) } }
+    }
+
+    private var visibleDays: [HistoryDay] {
+        var remaining = limit
+        return prepared.days.compactMap { day in
+            guard remaining > 0 else { return nil }
+            let visible = Array(day.points.prefix(remaining)); remaining -= visible.count
+            return HistoryDay(date: day.date, points: visible)
+        }
+    }
+
+    private func chip(_ title: String, detail: String, day: Date?) -> some View {
+        let active = selectedDay == day
+        return Button { selectedDay = day } label: {
+            VStack(spacing: 2) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(detail).font(.caption2).opacity(0.75)
             }
-        }.rjListChrome().navigationTitle("Google-Verlauf").navigationBarTitleDisplayMode(.inline)
-            .task(id: google.trackers.first(where: { $0.id == deviceID })) {
-                let result = await google.reports(for: deviceID)
-                if !Task.isCancelled { reports = result }
-            }
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .foregroundStyle(active ? Color.white : .primary)
+            .background(active ? AnyShapeStyle(Color.accentColor.gradient) : AnyShapeStyle(Color(uiColor: .secondarySystemGroupedBackground)), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }.buttonStyle(.plain).accessibilityAddTraits(active ? .isSelected : [])
+    }
+
+    private func select(_ point: HistoryPoint) {
+        if let index = prepared.indexByID[point.id] { selectedIndex = index; focus(); Haptics.impact() }
+    }
+    private func focus() {
+        guard let point = selected else { return }
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
+            position = .region(RJMapCamera.focusedRegion(for: point.rjTrackerLocation, zoomMeters: max(1200, (point.accuracyM ?? 100) * 6)))
+        }
+    }
+    @MainActor private func prepare(resetSelection: Bool) async {
+        let input = reports.compactMap { report -> HistoryPoint? in
+            guard let lat = report.latitude, let lon = report.longitude else { return nil }
+            return HistoryPoint(latitude: lat, longitude: lon, accuracyM: report.accuracy, timestamp: Int(report.date.timeIntervalSince1970),
+                                network: "google", reportID: report.id)
+        }
+        let day = selectedDay
+        let result = await Task.detached(priority: .userInitiated) {
+            HistoryAnalysis.prepare(input, networks: ["google"], day: day)
+        }.value
+        guard !Task.isCancelled else { return }
+        let previous = selected?.id
+        prepared = result
+        if resetSelection { selectedIndex = max(0, result.displayPoints.count - 1); limit = 80; position = .automatic }
+        else if let previous { selectedIndex = result.indexByID[previous] ?? max(0, result.displayPoints.count - 1) }
     }
 }
 

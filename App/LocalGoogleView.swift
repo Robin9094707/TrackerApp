@@ -84,7 +84,7 @@ struct GoogleAccountView: View {
             if google.hasCredentials {
                 Section("Aktualisierung") {
                     Picker("Im Vordergrund abrufen", selection: $google.refreshInterval) {
-                        Text("Manuell").tag(0); Text("Jede Minute").tag(60); Text("Alle 2 Minuten").tag(120)
+                        Text("Manuell").tag(0); Text("Alle 30 Sekunden").tag(30); Text("Jede Minute").tag(60); Text("Alle 2 Minuten").tag(120)
                         Text("Alle 5 Minuten").tag(300); Text("Alle 15 Minuten").tag(900)
                     }
                     Picker("Google-Meldungen", selection: $google.contributorMode) {
