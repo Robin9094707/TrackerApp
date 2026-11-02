@@ -1,4 +1,4 @@
-# Universal Tag Studio 20.4.2 · TRACKER REFRESH QUALITY OF LIFE
+# Universal Tag Studio 20.6.0 · SELF-HEALING AMP START AND GOOGLE RUNTIME
 # Backward-compatible single-file upgrade. Existing data/ directory layout,
 # tracker IDs, histories, shares and provider sessions are intentionally
 # preserved. Google integration: leonboe1/GoogleFindMyTools (GPL-3.0).
@@ -892,39 +892,77 @@ def _path_lock(path):
         return lock
 
 
-def safe_load_json(path, default, accepted_types=None):
+def safe_load_json(path, default, accepted_types=None, *, recover_missing=False):
     path = Path(path)
     expected = accepted_types or (type(default),)
-    if not path.exists():
-        return default
-    try:
-        with _path_lock(path), open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, expected):
-            return data
-        raise ValueError(f"Unerwarteter JSON-Wurzeltyp: {type(data).__name__}")
-    except Exception as exc:
-        # Never silently overwrite a damaged production file. Keep an evidence
-        # copy and prefer the last atomically-created .bak generation.
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        corrupt_copy = path.with_name(f"{path.name}.corrupt.{stamp}")
+    with _path_lock(path):
+        # Absence normally means intentional removal (for example logout or
+        # clearing a saved PIN). Only history recovery opts into resurrection.
+        if not path.exists() and not recover_missing:
+            return default
         try:
-            if path.exists() and not corrupt_copy.exists():
-                shutil.copy2(path, corrupt_copy)
-        except OSError:
-            pass
-        backup = path.with_name(f"{path.name}.bak")
-        try:
-            if backup.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, expected):
+                return data
+            raise ValueError(f"Unerwarteter JSON-Wurzeltyp: {type(data).__name__}")
+        except Exception as exc:
+            # Keep evidence before repairing the primary generation. Histories
+            # can opt into missing-primary recovery after an interruption.
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            corrupt_copy = path.with_name(f"{path.name}.corrupt.{stamp}")
+            try:
+                if path.exists() and not corrupt_copy.exists():
+                    shutil.copy2(path, corrupt_copy)
+            except OSError:
+                pass
+            backup = path.with_name(f"{path.name}.bak")
+            try:
                 with open(backup, "r", encoding="utf-8") as f:
                     restored = json.load(f)
                 if isinstance(restored, expected):
-                    logger.warning("JSON %s beschädigt; gültige .bak-Generation wird verwendet (%s).", path.name, type(exc).__name__)
+                    try:
+                        # Do not rotate the damaged primary into the valid
+                        # backup on the first normal save after startup.
+                        atomic_write_json(path, restored, create_backup=False, private=True)
+                    except OSError as repair_exc:
+                        logger.warning("JSON %s aus .bak geladen; Reparatur fehlgeschlagen (%s).", path.name, type(repair_exc).__name__)
+                    logger.warning("JSON %s aus gültiger .bak-Generation wiederhergestellt (%s).", path.name, type(exc).__name__)
                     return restored
-        except Exception:
-            pass
-        logger.error("JSON %s konnte nicht sicher geladen werden (%s). Original bleibt erhalten.", path.name, type(exc).__name__)
-        return default
+            except (OSError, ValueError, TypeError):
+                pass
+            if path.exists():
+                logger.error("JSON %s konnte nicht sicher geladen werden (%s). Original bleibt erhalten.", path.name, type(exc).__name__)
+            return default
+
+
+def backup_json_generation(path, *, private=False):
+    """Rotate only valid JSON, atomically, keeping a good backup on failure.
+
+    Caller holds the path lock. A corrupt primary must never replace the last
+    good backup, including if repairing it during startup was not possible.
+    """
+    if not path.exists():
+        return
+    backup = path.with_name(f"{path.name}.bak")
+    tmp_name = None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            json.load(f)
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{backup.name}.", suffix=".tmp", dir=str(path.parent))
+        os.close(fd)
+        shutil.copy2(path, tmp_name)
+        if private:
+            os.chmod(tmp_name, 0o600)
+        os.replace(tmp_name, backup)
+    except (OSError, ValueError, TypeError) as exc:
+        logger.debug("Backup für %s bleibt unverändert: %s", path.name, type(exc).__name__)
+    finally:
+        if tmp_name is not None:
+            try:
+                os.remove(tmp_name)
+            except FileNotFoundError:
+                pass
 
 
 def atomic_write_json(path, data, *, create_backup=True, private=False):
@@ -943,14 +981,8 @@ def atomic_write_json(path, data, *, create_backup=True, private=False):
                 json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
                 f.flush()
                 os.fsync(f.fileno())
-            if create_backup and path.exists():
-                backup = path.with_name(f"{path.name}.bak")
-                try:
-                    shutil.copy2(path, backup)
-                    if private:
-                        os.chmod(backup, 0o600)
-                except OSError as exc:
-                    logger.debug("Backup für %s konnte nicht geschrieben werden: %s", path.name, exc)
+            if create_backup:
+                backup_json_generation(path, private=private)
             os.replace(tmp_name, path)
             if private:
                 try:
@@ -1005,14 +1037,8 @@ def atomic_external_json_write(path, writer, *, create_backup=True, private=Fals
                     os.chmod(tmp_path, 0o600)
                 except OSError:
                     pass
-            if create_backup and path.exists():
-                backup = path.with_name(f"{path.name}.bak")
-                try:
-                    shutil.copy2(path, backup)
-                    if private:
-                        os.chmod(backup, 0o600)
-                except OSError as exc:
-                    logger.debug("Backup für %s konnte nicht geschrieben werden: %s", path.name, exc)
+            if create_backup:
+                backup_json_generation(path, private=private)
             os.replace(tmp_path, path)
             if private:
                 try:
@@ -4519,16 +4545,98 @@ def google_tools_path():
     return None
 
 
+# Python variables of the panel/launcher must not reach the isolated Google
+# interpreter. A foreign PYTHONHOME makes every bridge run fail with
+# "Failed to import encodings module".
+GOOGLE_FOREIGN_PYTHON_VARIABLES = (
+    "PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONEXECUTABLE",
+    "PYTHONPLATLIBDIR", "PYTHONUSERBASE", "__PYVENV_LAUNCHER__", "VIRTUAL_ENV",
+)
+GOOGLE_VENV_PROBE_SECONDS = 600
+GOOGLE_VENV_REPAIR_RETRY_SECONDS = max(300, int(os.environ.get("ULTRA_TRACKER_GOOGLE_VENV_REPAIR_RETRY", "1800")))
+google_venv_probe_cache = {}
+google_venv_repair_state = {"running": False, "last_attempt_ts": 0, "reason": ""}
+google_venv_repair_lock = threading.Lock()
+
+
+def google_child_environment(python_path_entry=None):
+    environment = os.environ.copy()
+    for name in GOOGLE_FOREIGN_PYTHON_VARIABLES:
+        environment.pop(name, None)
+    environment["PYTHONUNBUFFERED"] = "1"
+    if python_path_entry:
+        environment["PYTHONPATH"] = str(python_path_entry)
+    return environment
+
+
+def google_managed_python_candidate():
+    """Return the isolated venv interpreter path if one was ever created."""
+    for candidate in (GOOGLE_VENV_DIR / "Scripts" / "python.exe", GOOGLE_VENV_DIR / "bin" / "python"):
+        if candidate.is_file() or candidate.is_symlink():
+            return candidate
+    return None
+
+
+def google_python_runs(python_path, force=False):
+    """Cheap, cached check that an interpreter can start its standard library.
+
+    After a server Python upgrade an old venv keeps a python file that exits
+    immediately with "No module named 'encodings'" (or a dangling symlink).
+    """
+    path = Path(python_path)
+    try:
+        key = (str(path.resolve()), path.stat().st_mtime_ns)
+    except OSError:
+        google_venv_probe_cache[str(path)] = (None, False, time.time())
+        return False
+    cached = google_venv_probe_cache.get(str(path))
+    if not force and cached and cached[0] == key and time.time() - cached[2] < GOOGLE_VENV_PROBE_SECONDS:
+        return cached[1]
+    try:
+        completed = subprocess.run(
+            [str(path), "-I", "-c", "import encodings, json, ssl"],
+            capture_output=True, text=True, timeout=20, env=google_child_environment(), check=False,
+        )
+        healthy = completed.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        healthy = False
+    google_venv_probe_cache[str(path)] = (key, healthy, time.time())
+    return healthy
+
+
+def google_schedule_venv_repair(reason="broken_python"):
+    """Rebuild a broken isolated Google venv in the background (rate limited)."""
+    if os.environ.get("ULTRA_TRACKER_GOOGLE_PYTHON") or not google_tools_path():
+        return False
+    with google_venv_repair_lock:
+        now_ts = int(time.time())
+        if google_venv_repair_state["running"] or now_ts - int(google_venv_repair_state["last_attempt_ts"]) < GOOGLE_VENV_REPAIR_RETRY_SECONDS:
+            return False
+        google_venv_repair_state.update(running=True, last_attempt_ts=now_ts, reason=str(reason)[:80])
+    logger.warning("Google-Python-Umgebung startet nicht mehr (%s). Sie wird automatisch neu aufgebaut; Google-Daten bleiben erhalten.", reason)
+
+    def worker():
+        try:
+            google_dependency_install_worker(repair=True)
+        finally:
+            with google_venv_repair_lock:
+                google_venv_repair_state["running"] = False
+
+    threading.Thread(target=worker, name="google-venv-repair", daemon=True).start()
+    return True
+
+
 def google_python_path():
     configured = os.environ.get("ULTRA_TRACKER_GOOGLE_PYTHON")
     if configured and Path(configured).expanduser().is_file():
         return str(Path(configured).expanduser())
-    windows = GOOGLE_VENV_DIR / "Scripts" / "python.exe"
-    posix = GOOGLE_VENV_DIR / "bin" / "python"
-    if windows.is_file():
-        return str(windows)
-    if posix.is_file():
-        return str(posix)
+    managed = google_managed_python_candidate()
+    if managed is not None:
+        if google_python_runs(managed):
+            return str(managed)
+        # Never hand a dead interpreter to the bridge: that made every Google
+        # request fail. Repair in the background and use the server Python.
+        google_schedule_venv_repair("broken_python")
     return sys.executable
 
 
@@ -4658,7 +4766,7 @@ def google_ensure_auth_dependency(force=False):
     try:
         probe = subprocess.run(
             [python_path, "-c", "from importlib.metadata import version; print(version('gpsoauth'))"],
-            capture_output=True, text=True, timeout=20, check=False,
+            capture_output=True, text=True, timeout=20, check=False, env=google_child_environment(),
         )
         installed = (probe.stdout or "").strip().splitlines()[-1].strip() if probe.returncode == 0 and (probe.stdout or "").strip() else ""
         auth["gpsoauth_version"] = installed
@@ -4681,7 +4789,7 @@ def google_ensure_auth_dependency(force=False):
                 python_path, "-m", "pip", "install", "--disable-pip-version-check", "--no-input",
                 "--upgrade", f"gpsoauth>={GOOGLE_AUTH_MIN_GPSOAUTH_VERSION},<3",
             ],
-            capture_output=True, text=True, timeout=300, check=False,
+            capture_output=True, text=True, timeout=300, check=False, env=google_child_environment(),
         )
         if completed.returncode != 0:
             auth["last_gpsoauth_error"] = ((completed.stderr or completed.stdout or "pip upgrade failed")[-500:])
@@ -4691,7 +4799,7 @@ def google_ensure_auth_dependency(force=False):
             return False
         verify = subprocess.run(
             [python_path, "-c", "from importlib.metadata import version; print(version('gpsoauth'))"],
-            capture_output=True, text=True, timeout=20, check=False,
+            capture_output=True, text=True, timeout=20, check=False, env=google_child_environment(),
         )
         installed = (verify.stdout or "").strip().splitlines()[-1].strip() if verify.returncode == 0 and (verify.stdout or "").strip() else installed
         auth["gpsoauth_version"] = installed
@@ -4737,6 +4845,7 @@ def google_dependency_status(force=False):
                 text=True,
                 timeout=25,
                 check=False,
+                env=google_child_environment(),
             )
             if completed.returncode == 0:
                 status["ready"] = True
@@ -4789,9 +4898,7 @@ def run_google_bridge(payload, timeout=None):
     google_import_external_secrets()
     google_sync_secrets_to_tools(tools_path)
     python_path = google_python_path()
-    env = os.environ.copy()
-    env["PYTHONUNBUFFERED"] = "1"
-    env["PYTHONPATH"] = str(tools_path) + os.pathsep + env.get("PYTHONPATH", "")
+    env = google_child_environment(tools_path)
     completed = None
     process = None
     try:
@@ -5364,14 +5471,7 @@ def google_store_recording(device_id, points, now_ts):
     session_id = int(recording.get("id") or recording.get("start") or now_ts)
     session_file = GOOGLE_SESSIONS_DIR / f"{google_device_safe_id(device_id)}_{session_id}.json"
     session_data = {"id": session_id, "device_id": device_id, "start": session_id, "end": now_ts, "points": []}
-    if session_file.exists():
-        try:
-            with open(session_file, "r", encoding="utf-8") as file:
-                loaded = json.load(file)
-            if isinstance(loaded, dict):
-                session_data = loaded
-        except Exception:
-            pass
+    session_data = safe_load_json(session_file, session_data, recover_missing=True)
     session_data["points"], added = merge_unique_report_points(session_data.get("points", []), points, 365 * 24 * 60 * 60, GOOGLE_SESSION_HISTORY_LIMIT)
     session_data["end"] = now_ts
     atomic_write_json(session_file, session_data)
@@ -5555,14 +5655,21 @@ def sync_google_devices():
     if not raw_devices and state.get("google_devices"):
         # A temporary empty response must not erase devices, links or histories.
         raise GoogleBridgeError("empty_response", "empty_device_list: Vorhandene Google Tags wurden zum Schutz beibehalten.")
-    devices = {}
+    # Find Hub can return a partial catalog. Absence in one listing is not a
+    # deletion signal: retain saved IDs, local metadata, links and histories.
+    devices = dict(state.get("google_devices", {}))
+    discovered = 0
     now_ts = int(time.time())
     for raw in raw_devices:
+        if not isinstance(raw, dict):
+            continue
         device_id = str(raw.get("id") or "").strip()
         if not device_id:
             continue
-        previous = state.get("google_devices", {}).get(device_id, {})
+        discovered += 1
+        previous = devices.get(device_id, {})
         devices[device_id] = {
+            **previous,
             "id": device_id,
             "name": str(previous.get("name_override") or raw.get("name") or previous.get("name") or "Google Tag")[:120],
             "name_override": str(previous.get("name_override") or "")[:120],
@@ -5578,13 +5685,11 @@ def sync_google_devices():
             "battery_info": google_battery_from_probe(raw.get("battery_probe")) or previous.get("battery_info"),
             "fetched_ts": now_ts,
         }
+    if raw_devices and not discovered:
+        raise GoogleBridgeError("invalid_response", "Die Google-Geräteliste enthält keine gültigen Geräte-IDs. Vorhandene Daten bleiben erhalten.")
     state["google_devices"] = devices
     valid_ids = set(devices)
-    for apple_name, link in list(state.get("google_links", {}).items()):
-        if link.get("google_id") not in valid_ids or apple_name not in state.get("accessories", {}):
-            state["google_links"].pop(apple_name, None)
     save_json(GOOGLE_DEVICES_FILE, "google_devices")
-    save_json(GOOGLE_LINKS_FILE, "google_links")
     # Stagger the first automatic cycle instead of hammering all tags at once.
     for index, device_id in enumerate(sorted(valid_ids)):
         if device_id not in state["google_next_fetch"]:
@@ -5613,12 +5718,13 @@ def normalize_google_report(raw, batch_id):
         lat = float(raw.get("lat"))
         lon = float(raw.get("lon"))
         ts = float(raw.get("ts"))
-        if not -90 <= lat <= 90 or not -180 <= lon <= 180 or ts <= 0:
+        acc = float(raw.get("acc", 0) or 0)
+        if not all(math.isfinite(value) for value in (lat, lon, ts, acc)) or not -90 <= lat <= 90 or not -180 <= lon <= 180 or ts <= 0:
             return None
         point = {
             "lat": lat,
             "lon": lon,
-            "acc": max(0, float(raw.get("acc", 0) or 0)),
+            "acc": max(0, acc),
             "ts": ts,
             "source": "google",
             "provider": "Google Find Hub",
@@ -5626,7 +5732,9 @@ def normalize_google_report(raw, batch_id):
             "batch_id": batch_id,
         }
         if raw.get("alt") is not None:
-            point["alt"] = float(raw.get("alt") or 0)
+            altitude = float(raw.get("alt") or 0)
+            if math.isfinite(altitude):
+                point["alt"] = altitude
         if raw.get("status") is not None:
             try:
                 point["status"] = int(raw.get("status"))
@@ -5922,17 +6030,34 @@ def google_download_tools():
             temp_path.unlink()
 
 
-def google_dependency_install_worker():
+def google_rebuild_managed_venv():
+    """Create the isolated Google venv from scratch with the current server Python."""
+    if GOOGLE_VENV_DIR.exists() or GOOGLE_VENV_DIR.is_symlink():
+        shutil.rmtree(GOOGLE_VENV_DIR, ignore_errors=True)
+    completed = subprocess.run(
+        [sys.executable, "-m", "venv", "--clear", str(GOOGLE_VENV_DIR)],
+        capture_output=True, text=True, timeout=300, check=False, env=google_child_environment(),
+    )
+    google_venv_probe_cache.clear()
+    candidate = google_managed_python_candidate()
+    if completed.returncode != 0 or candidate is None or not google_python_runs(candidate, force=True):
+        detail = (completed.stderr or completed.stdout or "").strip()[-300:]
+        raise RuntimeError("Die isolierte Google-Python-Umgebung konnte nicht erstellt werden. " + (detail or "python3-venv am Server installieren."))
+    return candidate
+
+
+def google_dependency_install_worker(repair=False):
     with google_setup_lock:
-        state["google_setup"] = {"status": "running", "message": "Python-Umgebung wird vorbereitet.", "started_ts": int(time.time()), "finished_ts": 0}
+        message = "Google-Python-Umgebung wird nach einem Python-Update neu aufgebaut." if repair else "Python-Umgebung wird vorbereitet."
+        state["google_setup"] = {"status": "running", "message": message, "started_ts": int(time.time()), "finished_ts": 0}
         try:
             tools_path = google_tools_path()
             if not tools_path:
                 raise RuntimeError("GoogleFindMyTools ist noch nicht installiert.")
-            if not (GOOGLE_VENV_DIR / "bin" / "python").exists() and not (GOOGLE_VENV_DIR / "Scripts" / "python.exe").exists():
-                completed = subprocess.run([sys.executable, "-m", "venv", str(GOOGLE_VENV_DIR)], capture_output=True, text=True, timeout=300, check=False)
-                if completed.returncode != 0:
-                    raise RuntimeError("Die isolierte Python-Umgebung konnte nicht erstellt werden.")
+            if not os.environ.get("ULTRA_TRACKER_GOOGLE_PYTHON"):
+                managed = google_managed_python_candidate()
+                if managed is None or not google_python_runs(managed, force=True):
+                    google_rebuild_managed_venv()
             python_path = google_python_path()
             requirements = tools_path / "requirements.txt"
             completed = subprocess.run(
@@ -5942,6 +6067,7 @@ def google_dependency_install_worker():
                 text=True,
                 timeout=1800,
                 check=False,
+                env=google_child_environment(),
             )
             if completed.returncode != 0:
                 raise RuntimeError("Nicht alle GoogleFindMyTools-Abhängigkeiten konnten installiert werden.")
@@ -5950,8 +6076,15 @@ def google_dependency_install_worker():
             if not health.get("ready"):
                 raise RuntimeError("Die Google-Python-Umgebung ist noch nicht vollständig einsatzbereit.")
             state["google_setup"] = {"status": "success", "message": "GoogleFindMyTools ist einsatzbereit.", "started_ts": state["google_setup"]["started_ts"], "finished_ts": int(time.time())}
+            if repair:
+                logger.info("Google-Python-Umgebung wurde neu aufgebaut und ist einsatzbereit.")
+                google_auth = state.setdefault("google_auth", {})
+                google_auth["transport_circuit_open_until"] = 0
+                google_auth_save()
         except Exception as exc:
             state["google_setup"] = {"status": "error", "message": str(exc)[:240], "started_ts": state["google_setup"].get("started_ts", int(time.time())), "finished_ts": int(time.time())}
+            if repair:
+                logger.error("Automatischer Neuaufbau der Google-Python-Umgebung fehlgeschlagen: %s", str(exc)[:240])
 
 
 def samsung_private_save(path, data):
@@ -11850,7 +11983,7 @@ def tracker_lab_active_job():
     return None
 
 APP_NAME = "Universal Tag Studio"
-APP_VERSION = "20.5.0 API EDITION"
+APP_VERSION = "20.6.0 API EDITION"
 
 
 OPTIMIZED_ROUTE_DEFAULT_POINTS = int(os.environ.get("ULTRA_TRACKER_ROUTE_MAX_DISPLAY_POINTS", "4200"))
@@ -12212,6 +12345,7 @@ def google_runtime_status():
         "tools_meta": google_tools_metadata(),
         "tools_current": google_managed_tools_current(tools_path),
         "python_isolated": str(google_python_path()).startswith(str(GOOGLE_VENV_DIR)),
+        "python_repair": {key: google_venv_repair_state.get(key) for key in ("running", "last_attempt_ts", "reason")},
         "setup": dict(state.get("google_setup", {})),
         "guardian": {
             **dict(state.get("google_auth", {})),
@@ -13573,15 +13707,34 @@ def run_diagnostics_worker(deep=False):
     atomic_write_json(DIAGNOSTICS_FILE, state["diagnostics"])
     try:
         # System and storage
-        python_ok = sys.version_info >= (3, 10)
+        python_ok = sys.version_info >= (3, 11)
+        launcher = os.environ.get("RJ_TRACKER_AMP_ORIGINAL_PYTHON", "")
         checks.append(diagnostic_item(
             "system-python",
             "system",
             "Python-Laufzeit",
             "ok" if python_ok else "warning",
             f"Python {platform.python_version()} auf {platform.system()} {platform.machine()}.",
-            action="" if python_ok else "Für aktuelle Bibliotheken Python 3.10 oder neuer verwenden.",
+            detail=(f"Private Umgebung {sys.prefix} · gestartet über {launcher}" if launcher else sys.executable),
+            action="" if python_ok else "Für aktuelle Bibliotheken Python 3.11 oder neuer verwenden.",
         ))
+        if google_tools_path() and not os.environ.get("ULTRA_TRACKER_GOOGLE_PYTHON"):
+            managed_google_python = google_managed_python_candidate()
+            google_python_healthy = managed_google_python is not None and google_python_runs(managed_google_python, force=True)
+            repairing = bool(google_venv_repair_state.get("running"))
+            checks.append(diagnostic_item(
+                "system-google-python",
+                "google",
+                "Google-Python-Umgebung",
+                "ok" if google_python_healthy else ("info" if repairing else "warning"),
+                "Die isolierte Google-Umgebung startet." if google_python_healthy else (
+                    "Wird nach einem Python-Update automatisch neu aufgebaut." if repairing else
+                    "Die isolierte Google-Umgebung startet nicht und wird automatisch neu aufgebaut."),
+                detail=str(GOOGLE_VENV_DIR),
+                action="" if google_python_healthy or repairing else "Server einige Minuten laufen lassen; ohne Erfolg in der Admin-Oberfläche die Google-Abhängigkeiten neu installieren.",
+            ))
+            if not google_python_healthy:
+                google_schedule_venv_repair("diagnostics")
         try:
             usage = shutil.disk_usage(DATA_DIR)
             free_gb = usage.free / (1024 ** 3)

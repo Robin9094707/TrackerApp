@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""RJ Tracker 20.5.0: single-file AMP edition.
+"""RJ Tracker 20.6.0: single-file AMP edition.
 Replace the previous backend file in the same directory, keeping its name.
 On first start this script prepares its own Python environment and downloads
 Apple's verified ADI runtime. Existing data/, ports and environment settings
 remain in use. Requirements: Python 3.11+, git, 7z/7zz, python3-venv.
+A private environment that no longer starts (for example after a server
+Python upgrade) is detected and rebuilt automatically. Options:
+  --amp-check   verify this file and report the environment state only
+  --amp-repair  rebuild the private Python environment, then start
 """
 import base64 as _amp_base64
 import hashlib as _amp_hashlib
@@ -51,54 +55,231 @@ def _amp_prepare_files():
     return root, support
 
 
+# Healthy environments from 20.4.x/20.5.x keep their ID and are reused as-is.
+_AMP_ENV_NAME = '.tracker-apple-python-20.4.1'
+_AMP_FORMAT = 2
+# Variables from a panel, shell profile or other Python install must never
+# leak into the private interpreter. A foreign PYTHONHOME alone is enough to
+# produce "Fatal Python error: Failed to import encodings module".
+_AMP_FOREIGN_PYTHON_VARIABLES = (
+    'PYTHONHOME', 'PYTHONPATH', 'PYTHONSTARTUP', 'PYTHONEXECUTABLE',
+    'PYTHONPLATLIBDIR', 'PYTHONUSERBASE', '__PYVENV_LAUNCHER__', 'VIRTUAL_ENV',
+)
+_AMP_INTERPRETER_PROBE = (
+    'import encodings, json, ssl, sys; '
+    'print(json.dumps({"version": list(sys.version_info[:3]), "base": sys.base_prefix}))'
+)
+_AMP_PACKAGE_PROBE = 'import flask, cryptography, httpx, findmy, anisette'
+
+
+def _amp_log(message):
+    print('[AMP-Einrichtung] ' + message, flush=True)
+
+
+def _amp_clean_environment():
+    environment = dict(_amp_os.environ)
+    for name in _AMP_FOREIGN_PYTHON_VARIABLES:
+        environment.pop(name, None)
+    return environment
+
+
+def _amp_run_probe(python, code, timeout=90):
+    """Run a short probe; never raises. Returns (ok, output)."""
+    if not _AmpPath(python).is_file():
+        return False, 'Python-Programm fehlt: ' + str(python)
+    try:
+        completed = _amp_subprocess.run(
+            [str(python), '-I', '-c', code], capture_output=True, text=True,
+            timeout=timeout, env=_amp_clean_environment(), check=False,
+        )
+    except (OSError, _amp_subprocess.SubprocessError) as error:
+        return False, str(error)
+    output = ((completed.stdout or '') + (completed.stderr or '')).strip()
+    return completed.returncode == 0, output[-1500:]
+
+
+def _amp_read_marker(marker):
+    try:
+        text = marker.read_text().strip()
+    except OSError:
+        return {}
+    if not text:
+        return {}
+    if text.startswith('{'):
+        import json as _amp_json
+        try:
+            data = _amp_json.loads(text)
+        except ValueError:
+            return {}
+        return data if isinstance(data, dict) else {}
+    # 20.4.x/20.5.x stored only the payload checksum.
+    return {'payload': text}
+
+
+def _amp_write_marker(marker, python):
+    import json as _amp_json
+    ok, output = _amp_run_probe(python, _AMP_INTERPRETER_PROBE)
+    details = {}
+    if ok:
+        try:
+            details = _amp_json.loads(output.splitlines()[-1])
+        except (ValueError, IndexError):
+            details = {}
+    marker.write_text(_amp_json.dumps({
+        'format': _AMP_FORMAT,
+        'payload': _AMP_PAYLOAD_SHA,
+        'python': details.get('version'),
+        'base_prefix': details.get('base'),
+        'launcher': _amp_sys.executable,
+    }))
+
+
+def _amp_environment_state(environment, python, marker):
+    """Classify the private environment without changing anything."""
+    if not environment.exists():
+        return 'missing', 'Noch nicht eingerichtet.'
+    ok, output = _amp_run_probe(python, _AMP_INTERPRETER_PROBE)
+    if not ok:
+        return 'broken', output or 'Python startet nicht.'
+    if _amp_read_marker(marker).get('payload') != _AMP_PAYLOAD_SHA:
+        return 'outdated', 'Abhängigkeiten passen nicht zur Backend-Version.'
+    ok, output = _amp_run_probe(python, _AMP_PACKAGE_PROBE)
+    if not ok:
+        return 'packages', output or 'Python-Pakete fehlen.'
+    return 'ready', 'Einsatzbereit.'
+
+
+def _amp_remove_environment(environment):
+    if not environment.exists() and not environment.is_symlink():
+        return
+    stale = environment.with_name(environment.name + '.defekt-' + str(int(_amp_os.path.getmtime(environment) if environment.exists() else 0)))
+    try:
+        _amp_os.replace(environment, stale)
+    except OSError:
+        stale = environment
+    _amp_shutil.rmtree(stale, ignore_errors=True)
+    if environment.exists():
+        raise RuntimeError('Die defekte Python-Umgebung ' + str(environment) + ' konnte nicht entfernt werden. Bitte Schreibrechte im Backend-Ordner prüfen oder den Ordner manuell löschen.')
+
+
+def _amp_require_tools(binary):
+    missing = []
+    if not _amp_shutil.which('git'):
+        missing.append('git')
+    binary_ready = binary.is_file() and _amp_hashlib.sha256(binary.read_bytes()).hexdigest() == _AMP_BINARY_SHA
+    if not binary_ready and not (_amp_shutil.which('7z') or _amp_shutil.which('7zz')):
+        missing.append('7zip')
+    if missing:
+        raise RuntimeError('Es fehlen Programme (' + ', '.join(missing) + '). Einmalig am VPS ausführen: apt update && apt install -y git 7zip python3-venv. Danach in AMP erneut starten.')
+
+
+def _amp_create_environment(environment):
+    import venv as _amp_venv
+    version = '%d.%d' % _amp_sys.version_info[:2]
+    try:
+        # Symlinks follow security updates of the server Python. A later major
+        # upgrade is detected by the startup probe and rebuilt automatically.
+        _amp_venv.EnvBuilder(with_pip=True, clear=True, symlinks=_amp_os.name != 'nt').create(environment)
+    except Exception as error:
+        raise RuntimeError(
+            'Python-venv konnte mit ' + _amp_sys.executable + ' (Python ' + version + ') nicht erstellt werden. '
+            'Am VPS ausführen: apt install -y python3-venv python' + version + '-venv. '
+            'Außerdem Schreibrechte im Backend-Ordner prüfen. Ursache: ' + str(error)
+        ) from error
+
+
+def _amp_install_packages(python, support):
+    environment = _amp_clean_environment()
+    environment.setdefault('PIP_DISABLE_PIP_VERSION_CHECK', '1')
+    command = [str(python), '-m', 'pip', 'install', '--no-input', '--upgrade', '-r', str(support / 'requirements.txt')]
+    for attempt in (1, 2, 3):
+        completed = _amp_subprocess.run(command, env=environment, check=False)
+        if completed.returncode == 0:
+            break
+        if attempt == 3:
+            raise RuntimeError('Python-Pakete konnten nicht installiert werden (Netzwerk, git oder Speicherplatz prüfen). Danach in AMP erneut starten.')
+        _amp_log('Paketinstallation fehlgeschlagen, neuer Versuch %d/3 …' % (attempt + 1))
+        import time as _amp_time
+        _amp_time.sleep(5 * attempt)
+    _amp_subprocess.run([str(python), '-m', 'pip', 'check'], env=environment, check=True)
+
+
+def _amp_prepare_environment(root, support, environment, python, marker, force_repair=False):
+    binary = _AmpPath(_amp_os.environ['MACOS_ADI_BINARY']).expanduser()
+    state, detail = _amp_environment_state(environment, python, marker)
+    if force_repair and state != 'missing':
+        state, detail = 'broken', 'Reparatur wurde angefordert.'
+    if state == 'ready':
+        return
+    _amp_require_tools(binary)
+    if state in ('missing', 'broken'):
+        if state == 'broken':
+            _amp_log('Die vorhandene Python-Umgebung startet nicht mehr (meist nach einem Python-Update am Server). '
+                     'Sie wird jetzt automatisch neu aufgebaut. Daten, Anmeldungen und Tracker bleiben unverändert.')
+            _amp_log('Diagnose: ' + detail.replace('\n', ' | ')[:600])
+            _amp_remove_environment(environment)
+        else:
+            _amp_log('Erster Start: eigene Python-Umgebung wird vorbereitet. Bitte bis zur Startmeldung warten.')
+        _amp_create_environment(environment)
+        ok, output = _amp_run_probe(python, _AMP_INTERPRETER_PROBE)
+        if not ok:
+            raise RuntimeError('Die neue Python-Umgebung startet nicht: ' + output.replace('\n', ' | ')[:600] +
+                               ' · Prüfen, ob AMP ein vollständiges Server-Python verwendet (python3 --version).')
+    else:
+        _amp_log('Python-Pakete werden aktualisiert (' + detail.splitlines()[-1][:200] + ').')
+    _amp_install_packages(python, support)
+    ok, output = _amp_run_probe(python, _AMP_PACKAGE_PROBE)
+    if not ok:
+        raise RuntimeError('Python-Pakete sind nach der Installation nicht ladbar: ' + output.replace('\n', ' | ')[:600])
+    if not (binary.is_file() and _amp_hashlib.sha256(binary.read_bytes()).hexdigest() == _AMP_BINARY_SHA):
+        _amp_log('Apple-Bibliothek wird direkt von Apple geladen und geprüft (einmalig ca. 278 MiB).')
+    _amp_subprocess.run([str(python), str(support / 'setup_apple_adi.py')], env=_amp_clean_environment(), check=True)
+    _amp_write_marker(marker, python)
+    _amp_log('Python-Umgebung ist einsatzbereit.')
+
+
 def _amp_bootstrap():
     if _amp_sys.version_info < (3, 11) or _amp_sys.version_info >= (3, 15):
-        raise RuntimeError('Bitte in AMP Python 3.11 bis 3.14 verwenden.')
+        raise RuntimeError('Bitte in AMP Python 3.11 bis 3.14 verwenden (aktuell ' + _amp_sys.version.split()[0] + ', ' + _amp_sys.executable + ').')
     root, support = _amp_prepare_files()
-    if '--amp-check' in _amp_sys.argv:
-        # This check only verifies/unpacks bundled source. No install, server or data migration.
-        for source in support.rglob('*.py'):
-            compile(source.read_text(), str(source), 'exec')
-        print('AMP-Datei und Hilfsmodule geprüft. Keine Serverdaten verändert.', flush=True)
-        raise SystemExit(0)
-    environment = root / '.tracker-apple-python-20.4.1'
+    environment = root / _AMP_ENV_NAME
     python = environment / ('Scripts/python.exe' if _amp_os.name == 'nt' else 'bin/python')
     marker = environment / '.tracker-ready'
-    if _AmpPath(_amp_sys.prefix).resolve() != environment.resolve():
-        # First-start setup is serialized when AMP starts more than one process.
+    if '--amp-check' in _amp_sys.argv:
+        # Verifies/unpacks bundled source and reports the environment state.
+        # No install, repair, server start or data migration.
+        for source in support.rglob('*.py'):
+            compile(source.read_text(), str(source), 'exec')
+        state, detail = _amp_environment_state(environment, python, marker)
+        print('AMP-Datei und Hilfsmodule geprüft. Keine Serverdaten verändert.', flush=True)
+        print('Start-Python: ' + _amp_sys.executable + ' (' + _amp_sys.version.split()[0] + ')', flush=True)
+        print('Python-Umgebung ' + _AMP_ENV_NAME + ': ' + state + ' · ' + detail.splitlines()[-1][:300] if detail else state, flush=True)
+        raise SystemExit(0)
+    force_repair = '--amp-repair' in _amp_sys.argv or _amp_os.environ.get('RJ_TRACKER_AMP_REPAIR', '').strip().lower() in {'1', 'true', 'yes', 'ja'}
+    arguments = [argument for argument in _amp_sys.argv[1:] if argument != '--amp-repair']
+    inside = False
+    try:
+        inside = _AmpPath(_amp_sys.prefix).resolve() == environment.resolve()
+    except OSError:
+        inside = False
+    if not inside:
+        # First-start setup and repairs are serialized when AMP starts more than one process.
         with (support / 'install.lock').open('a') as lock:
             if _amp_os.name == 'posix':
                 import fcntl as _amp_fcntl
                 _amp_fcntl.flock(lock, _amp_fcntl.LOCK_EX)
-            ready = marker.is_file() and marker.read_text() == _AMP_PAYLOAD_SHA and python.is_file()
-            if not ready:
-                missing = []
-                if not _amp_shutil.which('git'):
-                    missing.append('git')
-                binary = _AmpPath(_amp_os.environ['MACOS_ADI_BINARY']).expanduser()
-                binary_ready = binary.is_file() and _amp_hashlib.sha256(binary.read_bytes()).hexdigest() == _AMP_BINARY_SHA
-                if not binary_ready and not (_amp_shutil.which('7z') or _amp_shutil.which('7zz')):
-                    missing.append('7zip')
-                if missing:
-                    raise RuntimeError('Einmalig am Debian-VPS installieren: apt update && apt install -y git 7zip python3-venv. Danach in AMP erneut starten.')
-                print('[AMP-Einrichtung] Erster Start: eigene Python-Umgebung wird vorbereitet. Bitte bis zur Startmeldung warten.', flush=True)
-                import venv as _amp_venv
-                try:
-                    _amp_venv.EnvBuilder(with_pip=True).create(environment)
-                except Exception as error:
-                    raise RuntimeError('Python-venv konnte nicht erstellt werden. Am VPS python3-venv installieren; außerdem Schreibrechte im Backend-Ordner prüfen.') from error
-                _amp_subprocess.run([str(python), '-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', '-r', str(support / 'requirements.txt')], check=True)
-                _amp_subprocess.run([str(python), '-m', 'pip', 'check'], check=True)
-                print('[AMP-Einrichtung] Apple-Bibliothek wird direkt von Apple geladen und geprüft (einmalig ca. 278 MiB).', flush=True)
-                _amp_subprocess.run([str(python), str(support / 'setup_apple_adi.py')], check=True)
-                marker.write_text(_AMP_PAYLOAD_SHA)
-        # Keep the same file name, command arguments, working directory and environment.
-        _amp_os.environ.setdefault("RJ_TRACKER_AMP_ORIGINAL_PYTHON", _amp_sys.executable)
-        _amp_os.execv(str(python), [str(python), str(_AmpPath(__file__).resolve()), *_amp_sys.argv[1:]])
+            _amp_prepare_environment(root, support, environment, python, marker, force_repair=force_repair)
+        # Same file, arguments and working directory; foreign Python variables removed.
+        child_environment = _amp_clean_environment()
+        child_environment.setdefault('RJ_TRACKER_AMP_ORIGINAL_PYTHON', _amp_sys.executable)
+        _amp_sys.stdout.flush()
+        _amp_sys.stderr.flush()
+        _amp_os.execve(str(python), [str(python), str(_AmpPath(__file__).resolve()), *arguments], child_environment)
     # An already prepared environment can recover a missing runtime independently.
     binary = _AmpPath(_amp_os.environ['MACOS_ADI_BINARY']).expanduser()
     if not binary.is_file() or _amp_hashlib.sha256(binary.read_bytes()).hexdigest() != _AMP_BINARY_SHA:
         _amp_subprocess.run([_amp_sys.executable, str(support / 'setup_apple_adi.py')], check=True)
+    _amp_sys.argv[1:] = arguments
 
 
 if __name__ == '__main__':
@@ -106,6 +287,8 @@ if __name__ == '__main__':
         _amp_bootstrap()
     except Exception as _amp_error:
         print('[AMP-Einrichtung] ' + str(_amp_error), file=_amp_sys.stderr, flush=True)
+        print('[AMP-Einrichtung] Manuelle Reparatur: Server in AMP stoppen, den Ordner ' + _AMP_ENV_NAME +
+              ' im Backend-Verzeichnis löschen und neu starten (Daten bleiben erhalten).', file=_amp_sys.stderr, flush=True)
         raise SystemExit(1)
 else:
     _amp_prepare_files()

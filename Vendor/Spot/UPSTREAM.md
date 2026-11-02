@@ -15,3 +15,12 @@ The dependency versions are pinned to the upstream Package.resolved, including D
 ## 5.1 engine extraction
 
 Removed the whole Spot/LUI presentation layer. The host owns every view and authentication WebKit presentation. Kept the same Keychain service, preferences suite and history paths for migration. Replaced blocking registration/push transport, retained multi-message report windows and added a protected raw-report archive. The original protocol attribution and GPL notices remain.
+
+## Google reliability review (2026-10-29)
+
+Compared the vendored engine with:
+
+- [Spot NovaApiManager at 55f87f6](https://github.com/leonboe1/Spot/blob/55f87f62302fae24150188124e8e07d5285568d8/Spot/DataProcessing/NovaApi/NovaApiManager.swift): restored the Adaptive all-areas fallback that the integration had dropped, while retaining all packets in each response window and bounding fallback to one request.
+- [GoogleFindMyTools](https://github.com/leonboe1/GoogleFindMyTools), the related Find Hub protocol implementation, including its Firebase/MCS transport layout.
+
+Local integration fixes retain pending Nova actions across MCS reconnects, prevent expired actions from being sent on a later login, schedule initial requests directly from the loaded catalog, and preserve validated per-device keys when partial or older archived metadata arrives. No credential service, preference suite, archive path, or Core Data schema changed. Malformed truncated AES-GCM packets now fail without an out-of-bounds crash.

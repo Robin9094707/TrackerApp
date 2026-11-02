@@ -1,3 +1,15 @@
+# RJ Tracker 6.1.0 · Backend 20.6.0
+
+**AMP startet wieder:** Die Backend-Datei erkennt eine nach einem Server-Python-Update defekte Python-Umgebung (`Failed to import encodings module`) und baut sie automatisch neu auf. Dasselbe gilt für die Google-Umgebung des Servers. Daten, Anmeldungen und Tracker bleiben unverändert.
+
+Enthält außerdem das neue „Wo ist?“-Design mit neuem Standortverlauf (6.0.0) und die Google-Zuverlässigkeitskorrekturen (5.6.0) in einem gemeinsamen Stand.
+
+[Update und AMP-Reparatur 6.1.0](docs/UPGRADE-6.1.0.md) · [Changelog](IOS-CHANGELOG.md)
+
+Die Action **Build RJ Tracker IPA** erzeugt `RJ-Tracker-v6.1.0-unsigned.ipa`, `SHA256SUMS.txt` und `Tracker_Backend_AMP.py` (20.6.0).
+
+---
+
 # RJ Tracker 6.0.0 · Backend 20.5.0
 
 Neues Design im Stil der aktuellen „Wo ist?“-App, komplett neuer Standortverlauf, häufigere Google-Abrufe und eine abschaltbare Google-Erfassung auf dem Server. Backend-Update: nur die eine Backend-Datei ersetzen; alle Daten und Anmeldungen bleiben erhalten.
@@ -5,6 +17,16 @@ Neues Design im Stil der aktuellen „Wo ist?“-App, komplett neuer Standortver
 [Installation und Neuerungen 6.0.0](docs/UPGRADE-6.0.0.md) · [Changelog](IOS-CHANGELOG.md)
 
 Die Action **Build RJ Tracker IPA** erzeugt `RJ-Tracker-v6.0.0-unsigned.ipa`, `SHA256SUMS.txt` und `Tracker_Backend_AMP.py` (20.5.0).
+
+# RJ Tracker 5.6.0 · Google-Ortung und Zuverlässigkeit
+
+Reparierte Google-Anfragen nach Verbindungsabbrüchen und beim ersten Laden, klarere Standort-/Aktualisierungsanzeige und ein datenkompatibles Serverupdate 20.4.3.
+
+[Update und Datenerhalt](docs/UPGRADE-5.6.0.md) · [Änderungen](IOS-CHANGELOG.md) · [Google-Quellen und Lizenzen](Vendor/Spot/UPSTREAM.md)
+
+Die GitHub Action **Build RJ Tracker IPA** erstellt nach erfolgreichen Pflichtprüfungen `RJ-Tracker-v5.6.0-unsigned.ipa` mit SHA-256-Prüfsumme und `Tracker_Backend_AMP.py`. Auch Pull Requests gegen `main` bauen diese Artefakte, ohne den Hauptbranch zu ändern. Die IPA benötigt zum Installieren die eigene Signierung; bestehende App mit derselben Bundle-ID und Signierungsidentität aktualisieren, ohne Deinstallation. Serverdatei im selben Verzeichnis ersetzen und vorhandene Datenpfade/Startparameter beibehalten.
+
+Echte Google-Anmeldung und neue Netzwerk-Standorte benötigen das eigene Konto, erreichbare Google-Dienste und Meldungen des Find-Hub-Netzes. Automatische Tests prüfen die Fehlerfälle und Datenkompatibilität mit Testdaten.
 
 ---
 
@@ -108,7 +130,7 @@ Neue Passkeys und Passkey-Anmeldung starten direkt aus der App einen Sicherheits
 
 ## IPA-Build
 
-GitHub Actions baut bei Push nach `main` die Release-App und erzeugt `RJ-Tracker-v5.2.0-unsigned.ipa` mit SHA-256-Prüfsumme. Backend-, Protokoll-, Migrations- sowie Debug- und Release-Startprüfungen sind Pflicht. Die Release-Startprüfung nutzt ein eigenes Scheme ohne Debug-Unit-Test-Abhängigkeiten.
+GitHub Actions baut bei Pull Requests gegen `main`, Push nach `main` oder manuellem Start die Release-App und erzeugt `RJ-Tracker-v5.6.0-unsigned.ipa` mit SHA-256-Prüfsumme. Backend-, Protokoll-, Migrations- sowie Debug- und Release-Startprüfungen sind Pflicht. Die Release-Startprüfung nutzt ein eigenes Scheme ohne Debug-Unit-Test-Abhängigkeiten.
 
 Die IPA ist **unsigniert** und muss für das iPhone mit einem geeigneten Profil signiert werden. APNs benötigt zusätzlich die bestehenden Servervariablen für Team-ID, Key-ID und `.p8` sowie passende App-Entitlements beim Signieren.
 

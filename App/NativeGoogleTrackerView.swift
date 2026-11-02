@@ -73,10 +73,11 @@ struct NativeGoogleTrackerView: View {
                 Section("Über dieses Objekt") {
                     LabeledContent("Netzwerk", value: "Google")
                     LabeledContent("Batterie", value: tracker.battery.map(TrackerTimeText.battery) ?? "Unbekannt")
-                    if let date = tracker.reportedAt {
+                    if let timestamp = displayLocation(tracker)?.timestamp, timestamp > 0 {
+                        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
                         LabeledContent("Zuletzt gesehen", value: date.formatted(.dateTime.locale(TrackerTimeText.locale).day().month().year().hour().minute()))
                     }
-                    if let accuracy = tracker.accuracy, accuracy > 0 { LabeledContent("Genauigkeit", value: "±" + accuracy.metersText) }
+                    if let accuracy = displayLocation(tracker)?.accuracyM, accuracy > 0 { LabeledContent("Genauigkeit", value: "±" + accuracy.metersText) }
                 }
                 Section("Verwalten") {
                     Button("Namen ändern", systemImage: "pencil") { name = tracker.name; editing = true }
@@ -115,13 +116,18 @@ struct NativeGoogleTrackerView: View {
         }
     }
     private func displayLocation(_ tracker: GoogleTrackerSnapshot) -> TrackerLocation? {
+        let localLocation: TrackerLocation? = {
+            guard let lat = tracker.latitude, let lon = tracker.longitude,
+                  CLLocationCoordinate2DIsValid(.init(latitude: lat, longitude: lon)) else { return nil }
+            return TrackerLocation(latitude: lat, longitude: lon, accuracyM: tracker.accuracy,
+                timestamp: tracker.reportedAt.map { Int($0.timeIntervalSince1970) }, network: "google", provider: "google")
+        }()
         if let merged = model.trackers.first(where: { $0.provider == "google" && $0.apiID == deviceID }),
-           merged.reportTimestamp >= Int(tracker.reportedAt?.timeIntervalSince1970 ?? 0), let location = merged.validLocation {
+           let location = merged.validLocation,
+           localLocation == nil || merged.reportTimestamp >= Int(tracker.reportedAt?.timeIntervalSince1970 ?? 0) {
             return location
         }
-        guard let lat = tracker.latitude, let lon = tracker.longitude else { return nil }
-        return TrackerLocation(latitude: lat, longitude: lon, accuracyM: tracker.accuracy,
-            timestamp: tracker.reportedAt.map { Int($0.timeIntervalSince1970) }, network: "google", provider: "google")
+        return localLocation
     }
     private func toggleFavorite() {
         if let tracker = model.trackers.first(where: { $0.provider == "google" && $0.apiID == deviceID }) {
@@ -146,7 +152,8 @@ struct NativeGoogleTrackerView: View {
             Button("Mit Bus & Bahn", systemImage: "tram") { openMaps(tracker, mode: MKLaunchOptionsDirectionsModeTransit) }
         } label: {
             TrackerActionTile(title: "Route", subtitle: "In Karten öffnen", symbol: "arrow.triangle.turn.up.right.diamond.fill")
-        }.buttonStyle(.plain).disabled(tracker.latitude == nil || tracker.longitude == nil)
+        }.buttonStyle(.plain).disabled(displayLocation(tracker) == nil)
+            .accessibilityIdentifier("google-route-tile")
     }
     private func openMaps(_ tracker: GoogleTrackerSnapshot, mode: String) {
         guard let location = displayLocation(tracker) else { return }

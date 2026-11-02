@@ -37,6 +37,7 @@ final class NovaApiManager: SharedInstance {
         let requestDate = Date()
 
         deviceFetchQueue.async {
+            guard device.belongsToCurrentAccount else { callback(false); return }
             let canonicDeviceId = device.canonicDeviceId
 
             let requestUuid = getRandomUUID()
@@ -47,13 +48,19 @@ final class NovaApiManager: SharedInstance {
 
             let isAllAreas = (tryingAgain ? ContributorType.AtAllAreas : Settings.sharedInstance.contributorType) == .AtAllAreas
 
+            var responsePolicy = GoogleLocationResponsePolicy()
+            let adaptive = !tryingAgain && Settings.sharedInstance.contributorType == .Adaptive
+
             let onPushReceiverReady: () -> Void = { [self] in
                 Task {
+                    guard device.belongsToCurrentAccount else { callback(false); return }
                     do {
                         let payload = LocationRequest(canonicDeviceId: canonicDeviceId, fcmRegistrationId: fcmToken, requestUUID: requestUuid, atAllAreas: isAllAreas).payload
                         _ = try await novaRequest(apiScope: NOVA_ACTION_API_SCOPE, payload: payload)
                     } catch {
-                        callback(false)
+                        self.deviceFetchQueue.async {
+                            if !responsePolicy.fallbackStarted { callback(false) }
+                        }
                     }
                 }
             }
@@ -62,18 +69,29 @@ final class NovaApiManager: SharedInstance {
                 // Check if the push is for the current request
 
                 guard let push else {
-                    callback(false)
+                    self.deviceFetchQueue.async {
+                        if !responsePolicy.fallbackStarted { callback(false) }
+                    }
                     return false
                 }
 
                 guard device.belongsToCurrentAccount else { return true }
                 if let deviceUpdate = self.decodeFcmPayload(payload: push.data), deviceUpdate.fcmMetadata.requestUuid == requestUuid {
                     self.deviceFetchQueue.async {
+                        guard device.belongsToCurrentAccount else { return }
                         let contributor: ContributorType = isAllAreas ? .AtAllAreas : .HighTrafficOnly
 
-                        _ = mergeDeviceUpdate(requestDate: requestDate, contributorType: contributor, deviceUpdateProtobuf: deviceUpdate, localDevice: device) { callback(true) }
-
+                        // Archive every packet before processing. Adaptive fallback was
+                        // lost during extraction of the multi-message receive window.
                         GoogleReportArchive.store(deviceUpdate)
+                        let didReceiveUpdate = mergeDeviceUpdate(requestDate: requestDate, contributorType: contributor, deviceUpdateProtobuf: deviceUpdate, localDevice: device) { receivedUpdate in
+                            // The original aggregated response must not finish a pending
+                            // all-areas attempt before its reports have arrived.
+                            if receivedUpdate || !adaptive { callback(true) }
+                        }
+                        if responsePolicy.needsAllAreasFallback(adaptive: adaptive, tryingAgain: tryingAgain, receivedUpdate: didReceiveUpdate) {
+                            self.requestLocationDataForDevice(device: device, tryingAgain: true, callback: callback)
+                        }
                     }
 
                     return false // Keep listening for all later packets in this request window.

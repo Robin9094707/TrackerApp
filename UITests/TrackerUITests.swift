@@ -209,6 +209,39 @@ final class TrackerUITests: XCTestCase {
     }
 
     @MainActor
+    func testGoogleRouteUsesSavedServerLocationAndOfflineStatusOffersRetry() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-local-google", "--ui-testing-google-server-fallback",
+            "-tracker.provider", "google", "-tracker.scope", "all", "-serverURL", "https://offline.example.invalid"]
+        app.launch()
+        expandInspector(app)
+        let retry = app.buttons["sync-server-retry"]
+        let library = app.collectionViews.firstMatch
+        // List creates rows lazily; the status footer can sit below the first
+        // viewport even after expanding the inspector (especially at large text).
+        for _ in 0..<6 {
+            if retry.exists && retry.isHittable { break }
+            if library.exists { library.swipeUp() } else { app.swipeUp() }
+        }
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        XCTAssertTrue(retry.isEnabled)
+        XCTAssertTrue(app.staticTexts["Server nicht verbunden"].exists)
+        let tag = app.buttons["tracker-row-google:demo-local-tag"]
+        for _ in 0..<6 {
+            if tag.exists && tag.isHittable { break }
+            if library.exists { library.swipeDown() } else { app.swipeDown() }
+        }
+        XCTAssertTrue(tag.waitForExistence(timeout: 10))
+        tag.tap()
+        expandInspector(app)
+        let route = app.buttons["google-route-tile"]
+        XCTAssertTrue(route.waitForExistence(timeout: 10))
+        XCTAssertTrue(route.isEnabled, "A saved server location must remain routable when Google has no local location yet.")
+        XCTAssertTrue(app.buttons["google-locate-tile"].exists)
+        capture("Google-Saved-Location-Route")
+    }
+
+    @MainActor
     private func sheetGrabber(in app: XCUIApplication) -> XCUIElement {
         // UIKit localizes this system control when the app declares German.
         app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Sheet Grabber", "Aufzeichnungsblatt")).firstMatch

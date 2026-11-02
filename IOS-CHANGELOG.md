@@ -1,6 +1,21 @@
+# 6.1.0 · AMP-Start repariert, Google stabil, alles in einem Stand
+
+- Backend 20.6.0: Die private Python-Umgebung wird vor jedem Start geprüft und nach einem Server-Python-Update automatisch neu aufgebaut (`Failed to import encodings module`). Fremde `PYTHONHOME`/`PYTHONPATH` werden nicht mehr übernommen. Neue Optionen `--amp-check` (Zustand anzeigen) und `--amp-repair`.
+- Die Google-Umgebung des Servers wird ebenso geprüft und im Hintergrund neu aufgebaut; ein defektes Python wird nie für Google-Abrufe verwendet. „System prüfen“ zeigt beide Umgebungen.
+- Vereint 6.0.0 (neues Design, Standortverlauf, pausierbare Google-Erfassung) und 5.6.0 (Google-Ortung und Zuverlässigkeit). Version 6.1.0 / Build 26, Daten- und Signierungskompatibilität unverändert. [Update-Anleitung](docs/UPGRADE-6.1.0.md).
+
 # 6.0.0 · Neues Design & Standortverlauf
 
 Komplett überarbeitetes Erscheinungsbild nach dem Vorbild der aktuellen „Wo ist?“-App, neu gestalteter Standortverlauf (Farbverlaufsroute, Kalenderleiste, Wiedergabe mit Meldungsdichte, Kennzahlen, Zeitleiste) auch für lokale Google-Verläufe, 30-Sekunden-Google-Abruf und pausierbare Google-Erfassung auf dem Server (Backend 20.5.0). Daten, Anmeldungen und Bundle-ID bleiben erhalten. Details: `docs/UPGRADE-6.0.0.md`.
+
+# 5.6.0 · Google-Ortung und Zuverlässigkeit
+
+- Google-Push-Verbindungen behalten wartende Anfragen beim Wiederverbinden. Zeitlimits entfernen nur die zugehörige Anmeldung; parallele Standort-/Klingelabfragen verlieren ihre Zuordnung nicht.
+- Der erste Google-Sammelabruf verwendet den geladenen Gerätekatalog direkt, statt auf eine spätere Aktualisierung der Oberfläche angewiesen zu sein.
+- Native Google-Details zeigen den tatsächlich verfügbaren Standort samt passender Zeit und Route; ungültige Koordinaten verdrängen keinen gültigen Serverstandort.
+- API-Antworten aus einer abgelösten Sitzung können die aktuelle Sitzung nicht mehr überschreiben. Serveradressen werden ohne versehentliche Query-/Fragmentparameter verwendet.
+- Backend 20.4.3 erhält gespeicherte Google-Geräte bei unvollständigen Listen und schützt die Wiederherstellung vorhandener JSON-Sicherungen. Keine neuen Datenpfade oder Datenformate.
+- Version 5.6.0 / Build 25, unveränderte Bundle-ID, Google-Keychain und AMP-Python-Umgebung. [Update-Anleitung](docs/UPGRADE-5.6.0.md).
 
 # 5.5.1 · Aktualisierung & Haptik
 

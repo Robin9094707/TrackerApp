@@ -74,4 +74,41 @@ import Foundation
         XCTAssertFalse(model.showsMainInterface(localGoogleCredentials: false))
     }
 
+    func testMalformedLocalReportPreservesValidServerLocationAndMetadata() throws {
+        let model = AppModel(preferences: defaults())
+        let location = TrackerLocation(latitude: 52.5, longitude: 13.3, accuracyM: 25, timestamp: 100)
+        let server = Tracker(ref: "google:shared-tag", name: "Mein Koffer", provider: "google",
+                             location: location, favorite: true, groups: ["travel"])
+        var bootstrap = PreviewFixtures.bootstrap
+        bootstrap.trackers = [server]
+        model.bootstrap = bootstrap
+        model.localGoogleTrackers = [Tracker(ref: server.ref, name: "Lokal", provider: "google",
+            location: TrackerLocation(latitude: 999, longitude: 13.3, timestamp: 200))]
+        let merged = try XCTUnwrap(model.trackers.first)
+        XCTAssertEqual(merged.location, location)
+        XCTAssertEqual(merged.name, server.name)
+        XCTAssertEqual(merged.favorite, true)
+        XCTAssertEqual(merged.groups, ["travel"])
+        XCTAssertEqual(model.trackers.count, 1)
+    }
+
+    func testValidLocalReportRecoversInvalidServerLocationAndKeepsNewestUsableReport() throws {
+        let model = AppModel(preferences: defaults())
+        let localLocation = TrackerLocation(latitude: 52.5, longitude: 13.3, accuracyM: 10, timestamp: 100)
+        var server = Tracker(ref: "google:shared-tag", name: "Mein Koffer", provider: "google",
+            location: TrackerLocation(latitude: 999, longitude: 13.3, timestamp: 200))
+        var bootstrap = PreviewFixtures.bootstrap
+        bootstrap.trackers = [server]
+        model.bootstrap = bootstrap
+        model.localGoogleTrackers = [Tracker(ref: server.ref, name: "Lokal", provider: "google",
+                                             location: localLocation, status: "In der Nähe")]
+        XCTAssertEqual(model.trackers.first?.validLocation, localLocation)
+        XCTAssertEqual(model.trackers.first?.status, "In der Nähe")
+        server.location = TrackerLocation(latitude: 53, longitude: 14, timestamp: 300)
+        bootstrap.trackers = [server]
+        model.bootstrap = bootstrap
+        XCTAssertEqual(model.trackers.first?.validLocation, server.location)
+        XCTAssertEqual(model.trackers.first?.reportTimestamp, 300)
+    }
+
 }
