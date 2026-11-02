@@ -1,3 +1,11 @@
+# RJ Tracker Android 1.0 · Schultaschenmodus · Backend 20.7.0
+
+Neue native Android-App (Material 3, Karte direkt in der App) für Familienmitglieder ohne Konto: Gastfreigaben aller Art (Fusion, einzelne Apple-, Google- oder Samsung-Tracker) und ein dauerhafter **Schultaschenmodus** mit Geofences für Zuhause und Schule, robuster Ankunfts- und Verlassen-Erkennung, Verspätungs- und Anwesenheitsprotokoll, Standortverlauf und Benachrichtigungen. Schultaschen und Links werden in der Admin-Seite unter `/` verwaltet.
+
+[Einrichtung und Funktionen](docs/ANDROID-SCHOOL-MODE.md) · Quellcode: `Android/` · Action **Build RJ Tracker Android** erzeugt `RJ-Tracker-Android-v1.0.0.apk`
+
+---
+
 # RJ Tracker 6.1.0 · Backend 20.6.0
 
 **AMP startet wieder:** Die Backend-Datei erkennt eine nach einem Server-Python-Update defekte Python-Umgebung (`Failed to import encodings module`) und baut sie automatisch neu auf. Dasselbe gilt für die Google-Umgebung des Servers. Daten, Anmeldungen und Tracker bleiben unverändert.

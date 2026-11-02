@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RJ Tracker</string>
+    <string name="channel_school">Schultasche</string>
+    <string name="channel_school_desc">Ankunft, Verlassen, Verspätung und Abwesenheit</string>
+    <string name="channel_watch">Hintergrund-Wächter</string>
+    <string name="channel_watch_desc">Hält die Sofort-Benachrichtigungen aktiv</string>
+</resources>

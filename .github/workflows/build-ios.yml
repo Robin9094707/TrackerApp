@@ -10,6 +10,9 @@ on:
       - 'README.md'
       - '.gitignore'
       - '.github/workflows/backend-apple.yml'
+      - 'Android/**'
+      - 'Scripts/android_e2e_fixture.py'
+      - '.github/workflows/build-android.yml'
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -45,18 +48,19 @@ jobs:
       - run: python Tests/test_backend_google.py -v
       - run: python Tests/test_backend_apple.py -v
       - run: python Tests/test_backend_amp_bootstrap.py -v
+      - run: python Tests/test_backend_school.py -v
       - name: Validate single-file AMP package
         run: |
           python Scripts/package_amp_backend.py Tracker_Backend_AMP.py
           python Tracker_Backend_AMP.py --amp-check
       - uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-Backend-20.6.0-AMP
+          name: RJ-Tracker-Backend-20.7.0-AMP
           path: Tracker_Backend_AMP.py
           if-no-files-found: error
           retention-days: 30
       - name: Publish backend download link
-        run: echo "Backend 20.6.0 AMP is available in this run’s Artifacts. Keep the existing data directory and start configuration." >> "$GITHUB_STEP_SUMMARY"
+        run: echo "Backend 20.7.0 AMP is available in this run’s Artifacts. Keep the existing data directory and start configuration." >> "$GITHUB_STEP_SUMMARY"
   build:
     needs: backend
     name: Build unsigned iOS IPA

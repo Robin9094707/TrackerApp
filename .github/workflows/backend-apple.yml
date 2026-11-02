@@ -35,13 +35,14 @@ jobs:
           python Tests/test_backend_refresh.py -v
           python Tests/test_backend_google.py -v
           python Tests/test_backend_amp_bootstrap.py -v
+          python Tests/test_backend_school.py -v
       - name: Package backend without private data or Apple binaries
         run: |
           python - <<'PY'
           from pathlib import Path
           from zipfile import ZipFile, ZIP_DEFLATED
           root = Path('Backend')
-          with ZipFile('RJ-Tracker-Backend-20.6.0.zip', 'w', ZIP_DEFLATED) as archive:
+          with ZipFile('RJ-Tracker-Backend-20.7.0.zip', 'w', ZIP_DEFLATED) as archive:
               for path in sorted(root.rglob('*')):
                   relative = path.relative_to(root)
                   if path.is_file() and not any(part in {'runtime','data','__pycache__'} for part in relative.parts):
@@ -49,7 +50,7 @@ jobs:
           PY
       - uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-Backend-20.6.0
-          path: RJ-Tracker-Backend-20.6.0.zip
+          name: RJ-Tracker-Backend-20.7.0
+          path: RJ-Tracker-Backend-20.7.0.zip
           if-no-files-found: error
           retention-days: 30

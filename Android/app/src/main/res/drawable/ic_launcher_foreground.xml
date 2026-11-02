@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- straps -->
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFF" android:strokeWidth="4"
+        android:pathData="M44,38 C44,30 64,30 64,38" />
+    <!-- bag body -->
+    <path android:fillColor="#FFFFFF" android:pathData="M36,42 Q36,36 42,36 L66,36 Q72,36 72,42 L72,74 Q72,80 66,80 L42,80 Q36,80 36,74 Z" />
+    <!-- front pocket -->
+    <path android:fillColor="#D6E0FF" android:pathData="M42,58 Q42,54 46,54 L62,54 Q66,54 66,58 L66,70 Q66,74 62,74 L46,74 Q42,74 42,70 Z" />
+    <!-- pin -->
+    <path android:fillColor="#FF6B4A" android:pathData="M54,40 C49,40 46,43.5 46,47.5 C46,53 54,60 54,60 C54,60 62,53 62,47.5 C62,43.5 59,40 54,40 Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M54,44.5 A3,3 0 1,1 53.99,44.5 Z" />
+</vector>
