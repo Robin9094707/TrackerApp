@@ -122,9 +122,10 @@ fun ActionTile(
     onClick: () -> Unit,
 ) {
     Surface(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(26.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = modifier.height(112.dp)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Box(Modifier.size(42.dp).background(if (enabled) color else color.copy(alpha = 0.35f), CircleShape), contentAlignment = Alignment.Center) { icon() }
+        color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = modifier) {
+        Column(Modifier.padding(16.dp)) {
+            Box(Modifier.size(40.dp).background(if (enabled) color else color.copy(alpha = 0.35f), CircleShape), contentAlignment = Alignment.Center) { icon() }
+            Spacer(Modifier.height(14.dp))
             Column {
                 Text(title, style = MaterialTheme.typography.titleMedium, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
                 Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)

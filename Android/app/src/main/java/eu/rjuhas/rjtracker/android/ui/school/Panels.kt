@@ -103,8 +103,8 @@ fun TodayPanel(vm: SchoolViewModel, onFocus: (Pair<Double, Double>) -> Unit) {
                 TimelineRow(Icons.Rounded.Home, StatusColors.home, "Zuhause verlassen", clock(today.homeDepartureTs), today.homeDepartureTs != null)
                 TimelineRow(Icons.Rounded.DirectionsWalk, StatusColors.neutral, "Unterwegs", today.travelMinutes?.let { durationText(it) } ?: "–", today.travelMinutes != null)
                 TimelineRow(Icons.Rounded.School, StatusColors.school, "In der Schule", if (today.alreadyThere) "schon dort" else clock(today.arrivalTs), today.arrivalTs != null)
-                TimelineRow(Icons.Rounded.Timer, StatusColors.school, "Schule verlassen",
-                    if (today.leaveTs != null) "${clock(today.leaveTs)} · ${durationText(today.presentMinutes)}" else if (today.arrivalTs != null) "noch dort · ${durationText(today.presentMinutes)}" else "–",
+                TimelineRow(Icons.Rounded.Timer, StatusColors.school, if (today.leaveTs == null && today.arrivalTs != null) "Noch in der Schule" else "Schule verlassen",
+                    if (today.leaveTs != null) "${clock(today.leaveTs)} · ${durationText(today.presentMinutes)}" else if (today.arrivalTs != null) durationText(today.presentMinutes) else "–",
                     today.leaveTs != null, last = true)
             }
         }
@@ -143,7 +143,8 @@ private fun TimelineRow(icon: ImageVector, color: Color, title: String, value: S
         Spacer(Modifier.width(14.dp))
         Row(Modifier.weight(1f).padding(top = 6.dp)) {
             Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-            Text(value, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(12.dp))
+            Text(value, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
     }
 }
