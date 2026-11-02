@@ -14,7 +14,7 @@ val localProperties = Properties().apply {
 // Without a key the app uses its built-in OpenStreetMap map instead.
 val mapsApiKey: String = (System.getenv("ANDROID_MAPS_API_KEY") ?: localProperties.getProperty("MAPS_API_KEY") ?: "").trim()
 val defaultServer: String = (System.getenv("RJ_DEFAULT_SERVER") ?: "https://find.rjuhas.eu").trim()
-val appVersionCode = (System.getenv("RJ_ANDROID_VERSION_CODE") ?: "11").toInt()
+val appVersionCode = (System.getenv("RJ_ANDROID_VERSION_CODE") ?: "12").toInt()
 
 android {
     namespace = "eu.rjuhas.rjtracker.android"
@@ -25,7 +25,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = appVersionCode
-        versionName = "1.1.0"
+        versionName = "1.1.1"
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
         buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
         buildConfigField("String", "DEFAULT_SERVER", "\"$defaultServer\"")

@@ -2,7 +2,7 @@
 
 Neue native Android-App (Material 3, Karte direkt in der App) für Familienmitglieder ohne Konto: Gastfreigaben aller Art (Fusion, einzelne Apple-, Google- oder Samsung-Tracker) und ein dauerhafter **Schultaschenmodus** mit Geofences für Zuhause und Schule, robuster Ankunfts- und Verlassen-Erkennung, Verspätungs- und Anwesenheitsprotokoll, Standortverlauf und Benachrichtigungen. Schultaschen und Links werden in der Admin-Seite unter `/` verwaltet.
 
-[Einrichtung und Funktionen](docs/ANDROID-SCHOOL-MODE.md) · Quellcode: `Android/` · Action **Build RJ Tracker Android** erzeugt `RJ-Tracker-Android-v1.1.0.apk`
+[Einrichtung und Funktionen](docs/ANDROID-SCHOOL-MODE.md) · Quellcode: `Android/` · Action **Build RJ Tracker Android** erzeugt `RJ-Tracker-Android-v1.1.1.apk`
 
 ---
 

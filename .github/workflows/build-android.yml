@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  APK_NAME: RJ-Tracker-Android-v1.1.0.apk
+  APK_NAME: RJ-Tracker-Android-v1.1.1.apk
 
 jobs:
   build:

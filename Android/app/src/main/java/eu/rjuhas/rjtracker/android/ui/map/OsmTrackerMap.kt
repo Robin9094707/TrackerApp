@@ -201,12 +201,16 @@ private fun markerBitmap(marker: MapMarker, density: Float): Bitmap {
     }
 }
 
-private val CARTO_VOYAGER = XYTileSource("CartoVoyager", 1, 20, 512, "@2x.png",
-    arrayOf("https://a.basemaps.cartocdn.com/rastertiles/voyager/", "https://b.basemaps.cartocdn.com/rastertiles/voyager/", "https://c.basemaps.cartocdn.com/rastertiles/voyager/"),
-    "© OpenStreetMap-Mitwirkende © CARTO")
-private val CARTO_DARK = XYTileSource("CartoDark", 1, 20, 512, "@2x.png",
-    arrayOf("https://a.basemaps.cartocdn.com/dark_all/", "https://b.basemaps.cartocdn.com/dark_all/", "https://c.basemaps.cartocdn.com/dark_all/"),
-    "© OpenStreetMap-Mitwirkende © CARTO")
+// Keyless sources only (CARTO now requires an API key). OSM tiles are used
+// within the OSMF tile policy: own User-Agent, on-device cache, family use.
+private val CARTO_VOYAGER = XYTileSource("OSMStandard", 1, 19, 256, ".png",
+    arrayOf("https://tile.openstreetmap.org/"), "© OpenStreetMap-Mitwirkende")
+
+private val CARTO_DARK = object : OnlineTileSourceBase("EsriDarkGray", 1, 16, 256, "",
+    arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/"), "Karte © Esri, OpenStreetMap") {
+    override fun getTileURLString(index: Long): String =
+        baseUrl + MapTileIndex.getZoom(index) + "/" + MapTileIndex.getY(index) + "/" + MapTileIndex.getX(index)
+}
 
 /** Esri imagery uses z/y/x ordering. */
 private val ESRI_IMAGERY = object : OnlineTileSourceBase("EsriImagery", 1, 19, 256, "",
