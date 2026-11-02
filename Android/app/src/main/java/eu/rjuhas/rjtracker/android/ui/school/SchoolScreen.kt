@@ -78,11 +78,14 @@ import eu.rjuhas.rjtracker.android.ui.map.MapLine
 import eu.rjuhas.rjtracker.android.ui.map.MapMarker
 import eu.rjuhas.rjtracker.android.ui.map.MarkerKind
 import eu.rjuhas.rjtracker.android.ui.map.TrackerMap
+import eu.rjuhas.rjtracker.android.ui.map.MapSettingsSheet
+import eu.rjuhas.rjtracker.android.ui.map.rememberMapPrefs
+import eu.rjuhas.rjtracker.android.ui.common.rememberAddress
 import kotlinx.coroutines.delay
 
 enum class SchoolTab(val label: String) { TODAY("Heute"), HISTORY("Verlauf"), LOG("Protokoll"), PLACES("Orte") }
 
-private val SheetPeek = 372.dp
+private val SheetPeek = 404.dp
 
 /** "Schultasche von Mila" when a child name exists, otherwise the bag label. */
 fun bagTitle(bag: Bag?): String = when {
@@ -112,7 +115,8 @@ fun SchoolScreen(linkId: String, showBack: Boolean, onBack: () -> Unit, onAllLin
     val snackbar = remember { SnackbarHostState() }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var tab by rememberSaveable { mutableStateOf(SchoolTab.TODAY) }
-    var satellite by rememberSaveable { mutableStateOf(false) }
+    var showMapSettings by remember { mutableStateOf(false) }
+    val mapPrefs = rememberMapPrefs()
     var showSettings by remember { mutableStateOf(false) }
     var editPlace by remember { mutableStateOf<PlaceDraft?>(null) }
     var cameraKey by remember { mutableIntStateOf(0) }
@@ -131,6 +135,7 @@ fun SchoolScreen(linkId: String, showBack: Boolean, onBack: () -> Unit, onAllLin
     val overview = vm.overview
     val bag = vm.bag
     val location = bag?.location
+    val address = rememberAddress(location?.lat, location?.lon, location?.address)
     LaunchedEffect(bag?.ref) { if (bag != null) { vm.loadHistory(); vm.loadAttendance() } }
     LaunchedEffect(tab, vm.history, location?.ts, bag?.ref) {
         focus = when (tab) {
@@ -143,7 +148,7 @@ fun SchoolScreen(linkId: String, showBack: Boolean, onBack: () -> Unit, onAllLin
 
     val clusters: List<PointCluster> = remember(vm.history) { clusterRoute(vm.history?.points.orEmpty()) }
     val markers = buildList {
-        overview?.places?.forEach { place ->
+        if (mapPrefs.showPlaces) overview?.places?.filter { tab != SchoolTab.TODAY || it.id != bag?.currentPlace?.id }?.forEach { place ->
             add(MapMarker("place-${place.id}", place.lat, place.lon, MarkerKind.PLACE, place.name, place.name, placeColor(place.kind)))
         }
         if (tab == SchoolTab.HISTORY) {
@@ -159,8 +164,8 @@ fun SchoolScreen(linkId: String, showBack: Boolean, onBack: () -> Unit, onAllLin
         }
     }
     val circles = buildList {
-        overview?.places?.forEach { add(MapCircle(it.id, it.lat, it.lon, it.radiusM.toDouble(), placeColor(it.kind))) }
-        if (tab != SchoolTab.HISTORY) location?.takeIf { it.acc > 0 }?.let { add(MapCircle("accuracy", it.lat, it.lon, it.acc, Color(0xFF2F7BF5))) }
+        if (mapPrefs.showPlaces) overview?.places?.forEach { add(MapCircle(it.id, it.lat, it.lon, it.radiusM.toDouble(), placeColor(it.kind))) }
+        if (tab != SchoolTab.HISTORY && mapPrefs.showAccuracy) location?.takeIf { it.acc > 0 }?.let { add(MapCircle("accuracy", it.lat, it.lon, it.acc, Color(0xFF2F7BF5), accuracy = true)) }
     }
     val lines = if (tab == SchoolTab.HISTORY && clusters.size >= 2) listOf(MapLine(clusters.map { it.lat to it.lon }, Color(0xFF6A3DF5), 5f)) else emptyList()
 
@@ -176,7 +181,8 @@ fun SchoolScreen(linkId: String, showBack: Boolean, onBack: () -> Unit, onAllLin
             Column(Modifier.fillMaxWidth().fillMaxSize(0.94f)) {
                 LocationHeader(
                     title = if (overview == null && vm.error == null) "Wird geladen …" else bagTitle(bag),
-                    address = vm.error ?: location?.address,
+                    address = vm.error ?: address.text,
+                    addressLoading = vm.error == null && address.loading,
                     ts = location?.ts,
                     battery = bag?.battery,
                     placeLabel = placeLine(bag),
@@ -227,7 +233,6 @@ fun SchoolScreen(linkId: String, showBack: Boolean, onBack: () -> Unit, onAllLin
                 markers = markers, circles = circles, lines = lines,
                 camera = focus?.let { CameraTarget(cameraKey, it, 16.5f) },
                 bottomPadding = SheetPeek,
-                satellite = satellite,
             )
             if (showBack) {
                 Box(Modifier.statusBarsPadding().padding(14.dp)) {
@@ -240,9 +245,8 @@ fun SchoolScreen(linkId: String, showBack: Boolean, onBack: () -> Unit, onAllLin
                 Surface(shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
                     shadowElevation = 6.dp, modifier = Modifier.width(52.dp)) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        ControlButton(onClick = { satellite = !satellite }) {
-                            Icon(Icons.Rounded.Layers, if (satellite) "Kartenansicht" else "Satellitenansicht",
-                                tint = if (satellite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                        ControlButton(onClick = { showMapSettings = true }) {
+                            Icon(Icons.Rounded.Layers, "Karte einstellen")
                         }
                         HorizontalDivider(Modifier.width(30.dp))
                         ControlButton(onClick = {
@@ -255,6 +259,7 @@ fun SchoolScreen(linkId: String, showBack: Boolean, onBack: () -> Unit, onAllLin
             }
         }
     }
+    if (showMapSettings) MapSettingsSheet(onDismiss = { showMapSettings = false })
     if (showSettings && link != null) SchoolSettingsSheet(vm, link!!, onDismiss = { showSettings = false }, onRemoved = onBack,
         onAllLinks = { showSettings = false; onAllLinks() })
     editPlace?.let { draft -> PlaceEditorDialog(draft, onDismiss = { editPlace = null }, onSave = { vm.savePlace(it) { editPlace = null } },

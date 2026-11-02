@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import eu.rjuhas.rjtracker.android.data.DayRecord
 import eu.rjuhas.rjtracker.android.data.Place
 import eu.rjuhas.rjtracker.android.ui.common.InfoRow
+import eu.rjuhas.rjtracker.android.ui.common.rememberAddress
 import eu.rjuhas.rjtracker.android.ui.common.PointCluster
 import eu.rjuhas.rjtracker.android.ui.common.SectionCard
 import eu.rjuhas.rjtracker.android.ui.common.StatusPill
@@ -109,6 +110,8 @@ fun TodayPanel(vm: SchoolViewModel, onFocus: (Pair<Double, Double>) -> Unit) {
         }
         if (location != null) item {
             SectionCard(title = "Standortdetails") {
+                val address = rememberAddress(location.lat, location.lon, location.address)
+                InfoRow(Icons.Rounded.Home, "Adresse", address.text ?: "wird geladen …")
                 InfoRow(Icons.Rounded.Schedule, "Zuletzt geortet", "${dateTime(location.ts)} Uhr")
                 InfoRow(Icons.Rounded.GpsFixed, "Genauigkeit", "± ${location.acc.toInt()} m")
                 InfoRow(Icons.Rounded.Place, "Gemeldet über", providerName(location.source.ifBlank { bag.provider }))

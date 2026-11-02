@@ -36,7 +36,7 @@ data class MapMarker(
     val color: Color = Color(0xFF2F5DF5),
 )
 
-data class MapCircle(val id: String, val lat: Double, val lon: Double, val radiusM: Double, val color: Color)
+data class MapCircle(val id: String, val lat: Double, val lon: Double, val radiusM: Double, val color: Color, val accuracy: Boolean = false)
 data class MapLine(val points: List<Pair<Double, Double>>, val color: Color, val widthDp: Float = 5f)
 
 /** Changing [key] moves the camera to fit [points]. */
@@ -58,12 +58,12 @@ fun TrackerMap(
     bottomPadding: Dp = 0.dp,
     onMarkerClick: (String) -> Unit = {},
     onCenterChanged: ((Double, Double) -> Unit)? = null,
-    satellite: Boolean = false,
 ) {
+    val prefs = rememberMapPrefs()
     if (mapsKeyAvailable) {
-        GoogleTrackerMap(modifier, markers, circles, lines, camera, bottomPadding, onMarkerClick, onCenterChanged, satellite)
+        GoogleTrackerMap(modifier, markers, circles, lines, camera, bottomPadding, onMarkerClick, onCenterChanged, prefs)
     } else {
-        OsmTrackerMap(modifier, markers, circles, lines, camera, bottomPadding, onMarkerClick, onCenterChanged, satellite)
+        OsmTrackerMap(modifier, markers, circles, lines, camera, bottomPadding, onMarkerClick, onCenterChanged, prefs)
     }
 }
 
@@ -76,7 +76,7 @@ fun MarkerBubble(marker: MapMarker) {
                 Modifier.size(64.dp).shadow(10.dp, CircleShape).background(Color.White, CircleShape).padding(4.dp)
                     .background(Brush.linearGradient(listOf(marker.color, marker.color.copy(red = (marker.color.red * 0.6f)))), CircleShape),
                 contentAlignment = Alignment.Center,
-            ) { Text(marker.label.ifBlank { "🎒" }, fontSize = 32.sp) }
+            ) { Text(marker.label.ifBlank { "🎒" }, fontSize = 34.sp) }
             Canvas(Modifier.size(width = 18.dp, height = 10.dp)) {
                 drawPath(Path().apply { moveTo(0f, 0f); lineTo(size.width, 0f); lineTo(size.width / 2, size.height); close() }, Color.White)
             }

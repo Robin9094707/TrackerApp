@@ -122,8 +122,8 @@ fun GreetingSplash(name: String, onFinished: () -> Unit) {
     val text = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
         bag.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow))
-        text.animateTo(1f, tween(450))
-        delay(1100)
+        text.animateTo(1f, tween(400))
+        delay(900)
         onFinished()
     }
     val wobble = rememberInfiniteTransition(label = "wobble")

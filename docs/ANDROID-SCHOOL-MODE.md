@@ -8,7 +8,7 @@ Native Android-App (Kotlin, Jetpack Compose, Material 3) für Familienmitglieder
 2. **Admin-Seite öffnen:** `https://find.rjuhas.eu/` → als Hauptadmin anmelden → Bereich **Schultaschen & Freigaben**.
 3. **Tracker als Schultasche markieren:** Beim gewünschten Tracker „Als Schultasche“ wählen (Apple, Google, Samsung oder Fusion; mehrere möglich) und optional den Namen des Kindes eintragen. Der Server sammelt ab dann alle Reports dieser Tasche dauerhaft im Verlauf (Apple alle 20 s, Google alle 30–35 s, Samsung alle 20–30 s).
 4. **Dauerhaften Link erzeugen:** Begrüßungsnamen eintragen (z. B. „Jessy“) → „Neuen Link erzeugen“. Der Link wird kopiert. Er lautet `https://find.rjuhas.eu/school/…` und kann jederzeit widerrufen werden.
-5. **App installieren:** `RJ-Tracker-Android-v1.1.1.apk` auf dem Handy öffnen (Installation aus unbekannten Quellen erlauben).
+5. **App installieren:** `RJ-Tracker-Android-v1.2.0.apk` auf dem Handy öffnen (Installation aus unbekannten Quellen erlauben).
 6. **Link in der App einfügen:** Nach der Begrüßung und kurzen Einführung „Aus Zwischenablage einfügen“ → „Verbinden“. Alternativ den Link direkt antippen; Android öffnet ihn in der App.
 7. **In der App Orte festlegen:** Tab **Orte** → „Schule festlegen“ und „Zuhause festlegen“ (Karte verschieben, Radius einstellen). Dann **Einstellungen** (Zahnrad) → Stundenplan (Schulbeginn, optional Schulende, schulfreie Tage) speichern.
 

@@ -21,6 +21,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +57,7 @@ fun LocationHeader(
     title: String,
     address: String?,
     ts: Long?,
+    addressLoading: Boolean = false,
     battery: String?,
     placeLabel: String? = null,
     placeColor: Color = MaterialTheme.colorScheme.primary,
@@ -69,8 +71,11 @@ fun LocationHeader(
             trailing()
         }
         Spacer(Modifier.height(6.dp))
-        Text(address?.ifBlank { null } ?: "Adresse wird ermittelt …", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Normal),
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f), maxLines = 3, overflow = TextOverflow.Ellipsis)
+        when {
+            !address.isNullOrBlank() -> Text(address, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Normal),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f), maxLines = 3, overflow = TextOverflow.Ellipsis)
+            addressLoading -> AddressSkeleton()
+        }
         Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(ago(ts, now), style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium), color = freshnessColor(ts, now))
@@ -94,6 +99,17 @@ fun LocationHeader(
     }
 }
 
+@Composable
+private fun AddressSkeleton() {
+    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "skeleton")
+    val alpha by transition.animateFloat(0.35f, 0.75f, androidx.compose.animation.core.infiniteRepeatable(
+        androidx.compose.animation.core.tween(700), androidx.compose.animation.core.RepeatMode.Reverse), label = "alpha")
+    Column(Modifier.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.fillMaxWidth(0.85f).height(16.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f * alpha * 2), RoundedCornerShape(8.dp)))
+        Box(Modifier.fillMaxWidth(0.5f).height(16.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f * alpha * 2), RoundedCornerShape(8.dp)))
+    }
+}
+
 /** Large rounded action tile (like "Ton abspielen" / "Route" in Find My). */
 @Composable
 fun ActionTile(
@@ -106,8 +122,8 @@ fun ActionTile(
     onClick: () -> Unit,
 ) {
     Surface(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(26.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = modifier.height(122.dp)) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.SpaceBetween) {
+        color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = modifier.height(112.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Box(Modifier.size(42.dp).background(if (enabled) color else color.copy(alpha = 0.35f), CircleShape), contentAlignment = Alignment.Center) { icon() }
             Column {
                 Text(title, style = MaterialTheme.typography.titleMedium, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))

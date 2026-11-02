@@ -49,6 +49,7 @@ import eu.rjuhas.rjtracker.android.data.LinkKind
 import eu.rjuhas.rjtracker.android.data.SavedLink
 import eu.rjuhas.rjtracker.android.data.SchoolOverview
 import eu.rjuhas.rjtracker.android.ui.common.StatusPill
+import eu.rjuhas.rjtracker.android.ui.common.rememberAddress
 import eu.rjuhas.rjtracker.android.ui.common.ago
 import eu.rjuhas.rjtracker.android.ui.common.dateTime
 import eu.rjuhas.rjtracker.android.ui.school.placeLine
@@ -115,7 +116,8 @@ private fun SchoolCard(link: SavedLink, overview: SchoolOverview?, onClick: () -
                 Surface(shape = RoundedCornerShape(20.dp), color = Color.White.copy(alpha = 0.96f)) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(eu.rjuhas.rjtracker.android.ui.school.bagTitle(bag), style = MaterialTheme.typography.titleMedium, color = Color(0xFF111A3A))
-                        Text(bag.currentPlace?.let { "Bei ${it.name}" } ?: (bag.location?.address?.ifBlank { null } ?: "Unterwegs"),
+                        val address = rememberAddress(bag.location?.lat, bag.location?.lon, bag.location?.address)
+                        Text(address.text ?: bag.currentPlace?.let { "Bei ${it.name}" } ?: "Wird geladen …",
                             color = Color(0xFF4A5170), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             placeLine(bag)?.let { StatusPill(it, placeColor(bag.currentPlace?.kind)) }

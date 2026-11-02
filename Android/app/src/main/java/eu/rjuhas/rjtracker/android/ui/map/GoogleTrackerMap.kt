@@ -36,7 +36,7 @@ internal fun GoogleTrackerMap(
     bottomPadding: Dp,
     onMarkerClick: (String) -> Unit,
     onCenterChanged: ((Double, Double) -> Unit)?,
-    satellite: Boolean,
+    prefs: MapPrefs,
 ) {
     val cameraState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(LatLng(51.1657, 10.4515), 5.5f)
@@ -65,16 +65,17 @@ internal fun GoogleTrackerMap(
     GoogleMap(
         modifier = modifier,
         cameraPositionState = cameraState,
-        properties = MapProperties(isBuildingEnabled = true, mapType = if (satellite) MapType.HYBRID else MapType.NORMAL),
+        properties = MapProperties(isBuildingEnabled = true, mapType = when (prefs.style) { MapStyle.SATELLITE -> if (prefs.satelliteLabels) MapType.HYBRID else MapType.SATELLITE; else -> MapType.NORMAL }),
         uiSettings = MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false, myLocationButtonEnabled = false),
         contentPadding = PaddingValues(bottom = bottomPadding, top = 8.dp),
-        mapColorScheme = ComposeMapColorScheme.FOLLOW_SYSTEM,
+        mapColorScheme = when (prefs.style) { MapStyle.DARK -> ComposeMapColorScheme.DARK; MapStyle.AUTO -> ComposeMapColorScheme.FOLLOW_SYSTEM; else -> ComposeMapColorScheme.LIGHT },
     ) {
         circles.forEach { circle ->
             key(circle.id) {
                 Circle(
                     center = LatLng(circle.lat, circle.lon), radius = circle.radiusM,
-                    fillColor = circle.color.copy(alpha = 0.16f), strokeColor = circle.color, strokeWidth = 4f,
+                    fillColor = circle.color.copy(alpha = if (circle.accuracy) 0.18f else 0.10f),
+                    strokeColor = circle.color.copy(alpha = if (circle.accuracy) 0f else 0.55f), strokeWidth = 3f,
                 )
             }
         }

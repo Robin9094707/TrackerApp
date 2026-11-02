@@ -7,6 +7,7 @@ mkdir -p "$OUT"
 PKG=eu.rjuhas.rjtracker.android
 shot() { adb exec-out screencap -p > "$OUT/$1.png"; echo "screenshot $1"; }
 tap_text() {
+  adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 || true
   adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
   adb pull /sdcard/ui.xml "$OUT/ui.xml" >/dev/null 2>&1
   local bounds
@@ -23,6 +24,9 @@ PY
   if [ -n "$bounds" ]; then adb shell input tap $bounds; echo "tapped $1"; else echo "text $1 not found"; fi
 }
 adb install -r "$APK"
+# The emulator's launcher sometimes shows an ANR dialog that would hide the app.
+adb shell settings put global hide_error_dialogs 1 || true
+adb shell settings put global anr_show_background 0 || true
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
 adb logcat -c
 adb reverse tcp:5000 tcp:5000

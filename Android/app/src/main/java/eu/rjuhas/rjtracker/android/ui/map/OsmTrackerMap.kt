@@ -35,6 +35,8 @@ import org.osmdroid.views.overlay.CopyrightOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polygon
 import org.osmdroid.views.overlay.Polyline
+import org.osmdroid.views.overlay.TilesOverlay
+import org.osmdroid.tileprovider.MapTileProviderBasic
 
 @Composable
 internal fun OsmTrackerMap(
@@ -46,14 +48,15 @@ internal fun OsmTrackerMap(
     bottomPadding: Dp,
     onMarkerClick: (String) -> Unit,
     onCenterChanged: ((Double, Double) -> Unit)?,
-    satellite: Boolean,
+    prefs: MapPrefs,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
     val dark = isSystemInDarkTheme()
+    val labelOverlays = remember { LabelOverlays(context) }
     val map = remember {
         MapView(context).apply {
-            setTileSource(if (dark) CARTO_DARK else CARTO_VOYAGER)
+            setTileSource(OSM_STANDARD)
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             isTilesScaledToDpi = true
@@ -102,18 +105,32 @@ internal fun OsmTrackerMap(
         }
     }
     AndroidView(factory = { map }, modifier = modifier, update = { view ->
-        val wanted = when { satellite -> ESRI_IMAGERY; dark -> CARTO_DARK; else -> CARTO_VOYAGER }
+        val style = if (prefs.style == MapStyle.AUTO) (if (dark) MapStyle.DARK else MapStyle.STANDARD) else prefs.style
+        val wanted = when (style) {
+            MapStyle.SATELLITE -> ESRI_IMAGERY
+            MapStyle.DARK -> ESRI_DARK
+            MapStyle.GRAY -> ESRI_GRAY
+            MapStyle.LIGHT -> ESRI_TOPO
+            else -> OSM_STANDARD
+        }
         if (view.tileProvider.tileSource.name() != wanted.name()) view.setTileSource(wanted)
+        val scale = if (prefs.largeLabels) 1.35f else 1f
+        if (view.tilesScaleFactor != scale) view.tilesScaleFactor = scale
         view.overlays.clear()
+        when {
+            style == MapStyle.SATELLITE && prefs.satelliteLabels -> { view.overlays.add(labelOverlays.transport); view.overlays.add(labelOverlays.places) }
+            style == MapStyle.DARK -> view.overlays.add(labelOverlays.darkReference)
+            style == MapStyle.GRAY -> view.overlays.add(labelOverlays.lightReference)
+        }
         view.overlays.add(CopyrightOverlay(context).apply {
-            setAlignBottom(false); setAlignRight(true); setOffset((8 * density).toInt(), (118 * density).toInt()); setTextSize(10)
+            setAlignBottom(false); setAlignRight(true); setOffset((10 * density).toInt(), (262 * density).toInt()); setTextSize(9)
         })
         circles.forEach { circle ->
             view.overlays.add(Polygon(view).apply {
                 points = Polygon.pointsAsCircle(GeoPoint(circle.lat, circle.lon), circle.radiusM)
-                fillPaint.color = circle.color.copy(alpha = 0.16f).toArgb()
-                outlinePaint.color = circle.color.toArgb()
-                outlinePaint.strokeWidth = 3f * density
+                fillPaint.color = circle.color.copy(alpha = if (circle.accuracy) 0.18f else 0.10f).toArgb()
+                outlinePaint.color = circle.color.copy(alpha = if (circle.accuracy) 0.0f else 0.55f).toArgb()
+                outlinePaint.strokeWidth = 1.5f * density
                 setOnClickListener { _, _, _ -> false }
             })
         }
@@ -160,7 +177,7 @@ private fun markerBitmap(marker: MapMarker, density: Float): Bitmap {
     }
     return when (marker.kind) {
         MarkerKind.BAG -> {
-            val head = circle(64f, 4f, marker.label.ifBlank { "🎒" }, 30f, android.graphics.Color.WHITE)
+            val head = circle(64f, 4f, marker.label.ifBlank { "🎒" }, 34f, android.graphics.Color.WHITE)
             val tip = 10f * density
             val pin = Bitmap.createBitmap(head.width, (head.height + tip).toInt(), Bitmap.Config.ARGB_8888)
             val canvas = Canvas(pin)
@@ -203,18 +220,29 @@ private fun markerBitmap(marker: MapMarker, density: Float): Bitmap {
 
 // Keyless sources only (CARTO now requires an API key). OSM tiles are used
 // within the OSMF tile policy: own User-Agent, on-device cache, family use.
-private val CARTO_VOYAGER = XYTileSource("OSMStandard", 1, 19, 256, ".png",
+private val OSM_STANDARD = XYTileSource("OSMStandard", 1, 19, 256, ".png",
     arrayOf("https://tile.openstreetmap.org/"), "© OpenStreetMap-Mitwirkende")
 
-private val CARTO_DARK = object : OnlineTileSourceBase("EsriDarkGray", 1, 16, 256, "",
-    arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/"), "Karte © Esri, OpenStreetMap") {
+/** Esri ArcGIS services use z/y/x ordering. */
+private fun esri(name: String, service: String, maxZoom: Int, png: Boolean = false) = object : OnlineTileSourceBase(name, 1, maxZoom, 256, if (png) ".png" else "",
+    arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/$service/MapServer/tile/"), "Karte © Esri, OpenStreetMap") {
     override fun getTileURLString(index: Long): String =
         baseUrl + MapTileIndex.getZoom(index) + "/" + MapTileIndex.getY(index) + "/" + MapTileIndex.getX(index)
 }
 
-/** Esri imagery uses z/y/x ordering. */
-private val ESRI_IMAGERY = object : OnlineTileSourceBase("EsriImagery", 1, 19, 256, "",
-    arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"), "Bilder © Esri") {
-    override fun getTileURLString(index: Long): String =
-        baseUrl + MapTileIndex.getZoom(index) + "/" + MapTileIndex.getY(index) + "/" + MapTileIndex.getX(index)
+private val ESRI_IMAGERY = esri("EsriImagery", "World_Imagery", 19)
+private val ESRI_TOPO = esri("EsriTopo", "World_Topo_Map", 19)
+private val ESRI_GRAY = esri("EsriLightGray", "Canvas/World_Light_Gray_Base", 16)
+private val ESRI_DARK = esri("EsriDarkGray", "Canvas/World_Dark_Gray_Base", 16)
+
+/** Transparent label layers drawn above the base map; created once per map. */
+private class LabelOverlays(private val context: android.content.Context) {
+    private fun overlay(source: OnlineTileSourceBase) = TilesOverlay(MapTileProviderBasic(context, source), context).apply {
+        loadingBackgroundColor = android.graphics.Color.TRANSPARENT
+        loadingLineColor = android.graphics.Color.TRANSPARENT
+    }
+    val transport by lazy { overlay(esri("EsriTransport", "Reference/World_Transportation", 19)) }
+    val places by lazy { overlay(esri("EsriPlaces", "Reference/World_Boundaries_and_Places", 19)) }
+    val lightReference by lazy { overlay(esri("EsriLightRef", "Canvas/World_Light_Gray_Reference", 16)) }
+    val darkReference by lazy { overlay(esri("EsriDarkRef", "Canvas/World_Dark_Gray_Reference", 16)) }
 }

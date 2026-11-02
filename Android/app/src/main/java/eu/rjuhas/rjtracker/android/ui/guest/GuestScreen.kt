@@ -86,6 +86,10 @@ import eu.rjuhas.rjtracker.android.ui.map.MapLine
 import eu.rjuhas.rjtracker.android.ui.map.MapMarker
 import eu.rjuhas.rjtracker.android.ui.map.MarkerKind
 import eu.rjuhas.rjtracker.android.ui.map.TrackerMap
+import eu.rjuhas.rjtracker.android.ui.map.MapSettingsSheet
+import eu.rjuhas.rjtracker.android.ui.map.rememberMapPrefs
+import eu.rjuhas.rjtracker.android.ui.common.rememberAddress
+import androidx.compose.material.icons.rounded.Layers
 import eu.rjuhas.rjtracker.android.ui.school.RefreshIcon
 import eu.rjuhas.rjtracker.android.ui.school.RoundButton
 import kotlinx.coroutines.channels.Channel
@@ -175,6 +179,9 @@ fun GuestScreen(linkId: String, showBack: Boolean, onBack: () -> Unit) {
     }
     val view = vm.view
     val location = view?.location
+    val address = rememberAddress(location?.lat, location?.lon, location?.address)
+    val mapPrefs = rememberMapPrefs()
+    var showMapSettings by remember { mutableStateOf(false) }
     LaunchedEffect(view?.permissions?.showHistory) { if (view?.permissions?.showHistory == true) vm.loadHistory() }
     LaunchedEffect(location?.ts, showHistory, vm.history) { cameraKey++ }
     val clusters = remember(vm.history) { clusterRoute(vm.history) }
@@ -188,7 +195,7 @@ fun GuestScreen(linkId: String, showBack: Boolean, onBack: () -> Unit) {
     val sheetState = rememberBottomSheetScaffoldState(rememberStandardBottomSheetState(SheetValue.PartiallyExpanded, skipHiddenState = true), snackbar)
     BottomSheetScaffold(
         scaffoldState = sheetState,
-        sheetPeekHeight = 372.dp,
+        sheetPeekHeight = 404.dp,
         sheetShape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
         sheetShadowElevation = 12.dp,
         snackbarHost = { SnackbarHost(it) },
@@ -197,7 +204,8 @@ fun GuestScreen(linkId: String, showBack: Boolean, onBack: () -> Unit) {
                 item {
                     LocationHeader(
                         title = view?.title ?: "Wird geladen …",
-                        address = vm.error ?: location?.address,
+                        address = vm.error ?: address.text,
+                        addressLoading = vm.error == null && address.loading,
                         ts = location?.ts,
                         battery = location?.battery,
                         placeLabel = if (view != null && view.expiresTs > 0) "Freigabe bis ${dateTime(view.expiresTs)}" else null,
@@ -255,13 +263,17 @@ fun GuestScreen(linkId: String, showBack: Boolean, onBack: () -> Unit) {
         Box(Modifier.fillMaxSize()) {
             TrackerMap(
                 modifier = Modifier.fillMaxSize(), markers = markers,
-                circles = listOfNotNull(location?.takeIf { it.acc > 0 }?.let { MapCircle("acc", it.lat, it.lon, it.acc, Color(0xFF2F7BF5)) }),
+                circles = listOfNotNull(location?.takeIf { it.acc > 0 && mapPrefs.showAccuracy }?.let { MapCircle("acc", it.lat, it.lon, it.acc, Color(0xFF2F7BF5), accuracy = true) }),
                 lines = if (showHistory && clusters.size > 1) listOf(MapLine(clusters.map { it.lat to it.lon }, Color(0xFF6A3DF5))) else emptyList(),
-                camera = focus.takeIf { it.isNotEmpty() }?.let { CameraTarget(cameraKey, it, 16.5f) }, bottomPadding = 372.dp,
+                camera = focus.takeIf { it.isNotEmpty() }?.let { CameraTarget(cameraKey, it, 16.5f) }, bottomPadding = 404.dp,
             )
             if (showBack) Box(Modifier.statusBarsPadding().padding(14.dp)) {
                 RoundButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Zurück") }
             }
+            Box(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(14.dp)) {
+                RoundButton(onClick = { showMapSettings = true }) { Icon(Icons.Rounded.Layers, "Karte einstellen") }
+            }
         }
     }
+    if (showMapSettings) MapSettingsSheet(onDismiss = { showMapSettings = false })
 }

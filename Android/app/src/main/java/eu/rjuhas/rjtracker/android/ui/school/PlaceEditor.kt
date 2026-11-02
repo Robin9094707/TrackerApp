@@ -43,6 +43,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import eu.rjuhas.rjtracker.android.data.Place
 import eu.rjuhas.rjtracker.android.ui.common.placeColor
+import eu.rjuhas.rjtracker.android.ui.common.rememberAddress
 import eu.rjuhas.rjtracker.android.ui.map.CameraTarget
 import eu.rjuhas.rjtracker.android.ui.map.MapCircle
 import eu.rjuhas.rjtracker.android.ui.map.TrackerMap
@@ -89,6 +90,8 @@ fun PlaceEditorDialog(draft: PlaceDraft, onDismiss: () -> Unit, onSave: (Place) 
                         }
                     }
                     OutlinedTextField(name, { name = it.take(60) }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    val pinAddress = rememberAddress(center.first, center.second, null)
+                    Text(pinAddress.text ?: "Adresse wird geladen …", style = MaterialTheme.typography.titleMedium, maxLines = 2)
                     Text("Radius ${radius.toInt()} m · für Schulen 100–200 m empfohlen", style = MaterialTheme.typography.bodyMedium)
                     Slider(radius, { radius = it }, valueRange = 30f..600f)
                     Row(verticalAlignment = Alignment.CenterVertically) {

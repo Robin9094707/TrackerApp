@@ -24,6 +24,7 @@ class RJApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Graph.init(this)
+        eu.rjuhas.rjtracker.android.ui.map.MapPrefsStore.init(this)
         Configuration.getInstance().apply {
             userAgentValue = "RJTrackerAndroid/1.0 (${packageName})"
             osmdroidBasePath = cacheDir.resolve("osmdroid")
