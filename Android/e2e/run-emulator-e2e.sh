@@ -25,7 +25,8 @@ PY
 adb install -r "$APK"
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
 adb logcat -c
-adb shell am start -W -a android.intent.action.VIEW -d "rjtracker://school/$TOKEN?server=http://10.0.2.2:5000" $PKG
+adb reverse tcp:5000 tcp:5000
+adb shell am start -W -a android.intent.action.VIEW -d "'rjtracker://school/$TOKEN?server=http://localhost:5000'" $PKG
 sleep 1.2; shot 01-greeting
 sleep 2.4; shot 02-connect
 sleep 1.4; shot 03-success
@@ -38,6 +39,7 @@ tap_text "Heute"; sleep 2
 adb shell input swipe 540 600 540 1700 600; sleep 2
 adb shell input keyevent KEYCODE_BACK; sleep 3; shot 09-home
 adb logcat -d > "$OUT/logcat.txt"
+grep "RJTracker" "$OUT/logcat.txt" | head -20 || true
 if grep -q "FATAL EXCEPTION" "$OUT/logcat.txt"; then
   grep -A30 "FATAL EXCEPTION" "$OUT/logcat.txt" | head -60
   echo "App crashed"; exit 1

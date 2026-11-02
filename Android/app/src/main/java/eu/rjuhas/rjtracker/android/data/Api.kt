@@ -52,6 +52,7 @@ class Api(private val client: OkHttpClient = defaultClient) {
                     text
                 }
             } catch (error: IOException) {
+                android.util.Log.w("RJTracker", "Request failed: ${error.javaClass.simpleName}: ${error.message}")
                 throw ApiException(0, "network", "Keine Verbindung zum Server. Bitte Internet prüfen.")
             }
         }
