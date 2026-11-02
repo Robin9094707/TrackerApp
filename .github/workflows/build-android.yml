@@ -39,7 +39,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
+      - name: Android SDK 37 on the preinstalled runner SDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKMANAGER" ] || SDKMANAGER="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | tail -1)"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" "platforms;android-37.0" "build-tools;36.0.0" > /dev/null
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
       - name: Unit tests and release APK
         env:
           # Optional secret. Without it the app uses its built-in OpenStreetMap map.
