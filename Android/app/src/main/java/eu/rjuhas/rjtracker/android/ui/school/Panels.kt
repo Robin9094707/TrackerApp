@@ -23,7 +23,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Battery5Bar
 import androidx.compose.material.icons.rounded.DirectionsWalk
-import androidx.compose.material.icons.rounded.Directions
 import androidx.compose.material.icons.rounded.GpsFixed
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Place
@@ -61,13 +60,11 @@ import eu.rjuhas.rjtracker.android.ui.common.InfoRow
 import eu.rjuhas.rjtracker.android.ui.common.PointCluster
 import eu.rjuhas.rjtracker.android.ui.common.SectionCard
 import eu.rjuhas.rjtracker.android.ui.common.StatusPill
-import eu.rjuhas.rjtracker.android.ui.common.ago
 import eu.rjuhas.rjtracker.android.ui.common.clock
 import eu.rjuhas.rjtracker.android.ui.common.dateTime
 import eu.rjuhas.rjtracker.android.ui.common.dayTitle
 import eu.rjuhas.rjtracker.android.ui.common.distanceM
 import eu.rjuhas.rjtracker.android.ui.common.durationText
-import eu.rjuhas.rjtracker.android.ui.common.openNavigation
 import eu.rjuhas.rjtracker.android.ui.common.placeColor
 import eu.rjuhas.rjtracker.android.ui.common.providerName
 import eu.rjuhas.rjtracker.android.ui.common.shareText
@@ -92,66 +89,39 @@ fun headline(record: DayRecord?): String = when (record?.status) {
 
 @Composable
 fun TodayPanel(vm: SchoolViewModel, onFocus: (Pair<Double, Double>) -> Unit) {
-    val context = LocalContext.current
     val bag = vm.bag
     val today = bag?.today
+    val location = bag?.location
     LazyColumn(contentPadding = listPadding, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item {
-            SectionCard {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(bag?.emoji ?: "🎒", style = MaterialTheme.typography.displaySmall)
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(headline(today), style = MaterialTheme.typography.titleLarge)
-                        val place = bag?.currentPlace
-                        Text(
-                            if (place != null) "Gerade bei ${place.name} · seit ${clock(place.sinceTs)}" else (bag?.location?.address?.ifBlank { null } ?: "Unterwegs"),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                if (today != null && today.status !in setOf("free", "setup")) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        StatusPill(today.statusText.ifBlank { today.status }, statusColor(today.status))
-                        if (today.earlyLeave) StatusPill("Früher gegangen", StatusColors.late)
-                    }
-                }
-            }
-        }
+        // Attendance only where it is meaningful; missing data never becomes a headline.
         if (today != null && (today.arrivalTs != null || today.homeDepartureTs != null)) item {
             SectionCard(title = "Schulweg heute") {
+                if (today.status == "on_time" || today.status == "late") {
+                    StatusPill(if (today.status == "late") "${today.lateMinutes} min nach Schulbeginn" else "Pünktlich", statusColor(today.status))
+                }
                 TimelineRow(Icons.Rounded.Home, StatusColors.home, "Zuhause verlassen", clock(today.homeDepartureTs), today.homeDepartureTs != null)
                 TimelineRow(Icons.Rounded.DirectionsWalk, StatusColors.neutral, "Unterwegs", today.travelMinutes?.let { durationText(it) } ?: "–", today.travelMinutes != null)
-                TimelineRow(Icons.Rounded.School, StatusColors.school, "In der Schule", clock(today.arrivalTs), today.arrivalTs != null)
+                TimelineRow(Icons.Rounded.School, StatusColors.school, "In der Schule", if (today.alreadyThere) "schon dort" else clock(today.arrivalTs), today.arrivalTs != null)
                 TimelineRow(Icons.Rounded.Timer, StatusColors.school, "Schule verlassen",
                     if (today.leaveTs != null) "${clock(today.leaveTs)} · ${durationText(today.presentMinutes)}" else if (today.arrivalTs != null) "noch dort · ${durationText(today.presentMinutes)}" else "–",
                     today.leaveTs != null, last = true)
             }
         }
-        bag?.location?.let { location ->
-            item {
-                SectionCard(title = "Letzter Standort") {
-                    InfoRow(Icons.Rounded.Place, "Adresse", location.address.ifBlank { "%.5f, %.5f".format(location.lat, location.lon) })
-                    InfoRow(Icons.Rounded.Schedule, "Gesehen", "${ago(location.ts)} · ${dateTime(location.ts)}")
-                    InfoRow(Icons.Rounded.GpsFixed, "Genauigkeit", "± ${location.acc.toInt()} m · ${providerName(location.source)}")
-                    if (bag.battery.isNotBlank()) InfoRow(Icons.Rounded.Battery5Bar, "Batterie", bag.battery)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(onClick = { openNavigation(context, location.lat, location.lon, bag.displayName) }, modifier = Modifier.weight(1f)) {
-                            Icon(Icons.Rounded.Directions, null); Spacer(Modifier.width(8.dp)); Text("Navigieren")
-                        }
-                        FilledTonalButton(onClick = { onFocus(location.lat to location.lon) }, modifier = Modifier.weight(1f)) { Text("Auf Karte zeigen") }
-                    }
-                }
+        if (location != null) item {
+            SectionCard(title = "Standortdetails") {
+                InfoRow(Icons.Rounded.Schedule, "Zuletzt geortet", "${dateTime(location.ts)} Uhr")
+                InfoRow(Icons.Rounded.GpsFixed, "Genauigkeit", "± ${location.acc.toInt()} m")
+                InfoRow(Icons.Rounded.Place, "Gemeldet über", providerName(location.source.ifBlank { bag.provider }))
+                if (bag.battery.isNotBlank()) InfoRow(Icons.Rounded.Battery5Bar, "Batterie", bag.battery)
+                FilledTonalButton(onClick = { onFocus(location.lat to location.lon) }, modifier = Modifier.fillMaxWidth()) { Text("Auf der Karte zeigen") }
             }
         }
         vm.overview?.schedule?.let { schedule ->
             item {
-                val weekday = today().dayOfWeek.value.toString()
-                val cfg = schedule.days[weekday]
+                val cfg = schedule.days[today().dayOfWeek.value.toString()]
                 SectionCard(title = "Stundenplan heute") {
                     Text(if (cfg?.enabled == true) "Beginn ${cfg.start} Uhr" + (if (cfg.end.isNotBlank()) " · Ende ${cfg.end} Uhr" else "") else "Heute ist kein Schultag eingetragen.",
                         style = MaterialTheme.typography.bodyLarge)
-                    Text("Toleranz ${schedule.graceMinutes} min · als abwesend nach ${schedule.absentAfterMinutes} min", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

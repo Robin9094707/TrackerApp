@@ -15,6 +15,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.TurnRight
+import eu.rjuhas.rjtracker.android.ui.common.ActionTile
+import eu.rjuhas.rjtracker.android.ui.common.LocationHeader
+import eu.rjuhas.rjtracker.android.ui.common.TileIcon
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Battery5Bar
@@ -154,12 +160,13 @@ class GuestViewModel(private val linkId: String) : ViewModel() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GuestScreen(linkId: String, onBack: () -> Unit) {
+fun GuestScreen(linkId: String, showBack: Boolean, onBack: () -> Unit) {
     val vm: GuestViewModel = viewModel(key = linkId) { GuestViewModel(linkId) }
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var cameraKey by remember { mutableIntStateOf(0) }
+    var showHistory by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { vm.messages.collect { snackbar.showSnackbar(it) } }
     LaunchedEffect(lifecycle) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -169,68 +176,77 @@ fun GuestScreen(linkId: String, onBack: () -> Unit) {
     val view = vm.view
     val location = view?.location
     LaunchedEffect(view?.permissions?.showHistory) { if (view?.permissions?.showHistory == true) vm.loadHistory() }
-    LaunchedEffect(location?.ts, vm.history) { cameraKey++ }
+    LaunchedEffect(location?.ts, showHistory, vm.history) { cameraKey++ }
     val clusters = remember(vm.history) { clusterRoute(vm.history) }
     val markers = buildList {
-        clusters.forEachIndexed { index, cluster ->
+        if (showHistory) clusters.forEachIndexed { index, cluster ->
             if (cluster.count > 1) add(MapMarker("c$index", cluster.lat, cluster.lon, MarkerKind.CLUSTER, "${cluster.count}", "${clock(cluster.startTs)}–${clock(cluster.endTs)}", Color(0xFF6A3DF5)))
         }
-        location?.let { add(MapMarker("tracker", it.lat, it.lon, MarkerKind.BAG, view.emoji, view.title, Color(0xFF2F5DF5))) }
+        location?.let { add(MapMarker("tracker", it.lat, it.lon, MarkerKind.BAG, view.emoji, view.title, Color(0xFFE5484D))) }
     }
-    val focus = (vm.history.map { it.lat to it.lon } + listOfNotNull(location?.let { it.lat to it.lon })).takeIf { it.isNotEmpty() }
+    val focus = (if (showHistory) vm.history.map { it.lat to it.lon } else emptyList()) + listOfNotNull(location?.let { it.lat to it.lon })
     val sheetState = rememberBottomSheetScaffoldState(rememberStandardBottomSheetState(SheetValue.PartiallyExpanded, skipHiddenState = true), snackbar)
     BottomSheetScaffold(
         scaffoldState = sheetState,
-        sheetPeekHeight = 300.dp,
+        sheetPeekHeight = 372.dp,
+        sheetShape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+        sheetShadowElevation = 12.dp,
         snackbarHost = { SnackbarHost(it) },
         sheetContent = {
-            LazyColumn(Modifier.fillMaxWidth().fillMaxSize(0.9f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyColumn(Modifier.fillMaxWidth().fillMaxSize(0.92f), contentPadding = PaddingValues(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 item {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(view?.emoji ?: "📍", style = MaterialTheme.typography.displaySmall)
-                        Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(view?.title ?: "Freigabe", style = MaterialTheme.typography.headlineSmall)
-                            Text(vm.error ?: ago(location?.ts), color = if (vm.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
+                    LocationHeader(
+                        title = view?.title ?: "Wird geladen …",
+                        address = vm.error ?: location?.address,
+                        ts = location?.ts,
+                        battery = location?.battery,
+                        placeLabel = if (view != null && view.expiresTs > 0) "Freigabe bis ${dateTime(view.expiresTs)}" else null,
+                    )
                 }
                 if (vm.gone) item {
-                    SectionCard {
+                    SectionCard(modifier = Modifier.padding(horizontal = 16.dp)) {
                         Text("Diese Freigabe ist nicht mehr verfügbar. Bitte frag nach einem neuen Link.")
                         TextButton(onClick = { vm.remove(onBack) }) { Icon(Icons.Rounded.Delete, null); Spacer(Modifier.width(6.dp)); Text("Entfernen") }
                     }
                 }
-                if (location != null && view != null) item {
-                    SectionCard {
-                        if (location.address.isNotBlank()) InfoRow(Icons.Rounded.Place, "Adresse", location.address)
-                        InfoRow(Icons.Rounded.Schedule, "Gesehen", dateTime(location.ts))
-                        if (location.acc > 0) InfoRow(Icons.Rounded.GpsFixed, "Genauigkeit", "± ${location.acc.toInt()} m" + if (view.permissions.showProvider) " · ${providerName(location.source)}" else "")
-                        if (location.battery.isNotBlank()) InfoRow(Icons.Rounded.Battery5Bar, "Batterie", location.battery)
-                        if (view.expiresTs > 0) InfoRow(Icons.Rounded.HourglassBottom, "Freigabe gültig bis", dateTime(view.expiresTs))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            if (view.permissions.canNavigate) Button(onClick = { openNavigation(context, location.lat, location.lon, view.title) }, Modifier.weight(1f)) {
-                                Icon(Icons.Rounded.Directions, null); Spacer(Modifier.width(8.dp)); Text("Navigieren")
-                            }
-                            if (view.permissions.canLocate) FilledTonalButton(onClick = { vm.refreshNow() }, Modifier.weight(1f)) { Text("Aktualisieren") }
+                item {
+                    Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ActionTile(icon = { if (vm.refreshing) RefreshIcon(true) else TileIcon(Icons.Rounded.Refresh) }, title = "Aktualisieren",
+                            subtitle = if (view?.permissions?.canLocate == true) (if (vm.refreshing) "Wird geortet …" else "Jetzt orten") else "Nicht freigegeben",
+                            color = Color(0xFF2F7BF5), enabled = view?.permissions?.canLocate == true && !vm.refreshing, modifier = Modifier.weight(1f)) { vm.refreshNow() }
+                        ActionTile(icon = { TileIcon(Icons.Rounded.TurnRight) }, title = "Route", subtitle = "Navigation starten",
+                            color = Color(0xFF2FB36B), enabled = location != null && view.permissions.canNavigate, modifier = Modifier.weight(1f)) {
+                            location?.let { openNavigation(context, it.lat, it.lon, view.title) }
                         }
                     }
                 }
+                if (location != null && view != null) item {
+                    SectionCard(modifier = Modifier.padding(horizontal = 16.dp), title = "Standortdetails") {
+                        InfoRow(Icons.Rounded.Schedule, "Zuletzt geortet", "${dateTime(location.ts)} Uhr")
+                        if (location.acc > 0) InfoRow(Icons.Rounded.GpsFixed, "Genauigkeit", "± ${location.acc.toInt()} m")
+                        if (view.permissions.showProvider && location.source.isNotBlank()) InfoRow(Icons.Rounded.Place, "Gemeldet über", providerName(location.source))
+                    }
+                }
                 if (view?.permissions?.showHistory == true) {
-                    item { Text("Standortverlauf", style = MaterialTheme.typography.titleMedium) }
                     item {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Standortverlauf", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                            FilterChip(selected = showHistory, onClick = { showHistory = !showHistory }, label = { Text(if (showHistory) "Auf Karte" else "Zeigen") })
+                        }
+                    }
+                    item {
+                        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             val days = (view.privacy.historyHours / 24).coerceIn(1, 30)
                             items((0 until days).toList()) { offset ->
                                 val day = today().minusDays(offset.toLong())
-                                FilterChip(selected = day == vm.day, onClick = { vm.loadHistory(day) },
+                                FilterChip(selected = day == vm.day, onClick = { vm.loadHistory(day); showHistory = true },
                                     label = { Text(if (offset == 0) "Heute" else if (offset == 1) "Gestern" else shortDay(day)) })
                             }
                         }
                     }
-                    item { Text("${vm.history.size} Reports · ${clusters.count { it.count >= 3 }} Aufenthalte", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    item { Text("${vm.history.size} Meldungen · ${clusters.count { it.count >= 3 }} Aufenthalte", Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     items(clusters.filter { it.count >= 3 }) { cluster ->
-                        Text("${clock(cluster.startTs)} – ${clock(cluster.endTs)} · ${cluster.count} Reports")
+                        Text("${clock(cluster.startTs)} – ${clock(cluster.endTs)} · ${cluster.count} Meldungen", Modifier.padding(horizontal = 20.dp))
                     }
                 }
             }
@@ -239,20 +255,12 @@ fun GuestScreen(linkId: String, onBack: () -> Unit) {
         Box(Modifier.fillMaxSize()) {
             TrackerMap(
                 modifier = Modifier.fillMaxSize(), markers = markers,
-                circles = listOfNotNull(location?.takeIf { it.acc > 0 }?.let { MapCircle("acc", it.lat, it.lon, it.acc, Color(0xFF2F5DF5)) }),
-                lines = if (clusters.size > 1) listOf(MapLine(clusters.map { it.lat to it.lon }, Color(0xFF6A3DF5))) else emptyList(),
-                camera = focus?.let { CameraTarget(cameraKey, it) }, bottomPadding = 280.dp,
+                circles = listOfNotNull(location?.takeIf { it.acc > 0 }?.let { MapCircle("acc", it.lat, it.lon, it.acc, Color(0xFF2F7BF5)) }),
+                lines = if (showHistory && clusters.size > 1) listOf(MapLine(clusters.map { it.lat to it.lon }, Color(0xFF6A3DF5))) else emptyList(),
+                camera = focus.takeIf { it.isNotEmpty() }?.let { CameraTarget(cameraKey, it, 16.5f) }, bottomPadding = 372.dp,
             )
-            Row(Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (showBack) Box(Modifier.statusBarsPadding().padding(14.dp)) {
                 RoundButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Zurück") }
-                Spacer(Modifier.width(10.dp))
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f), modifier = Modifier.weight(1f).shadow(6.dp, CircleShape)) {
-                    Text(view?.title ?: "Freigabe", Modifier.padding(horizontal = 18.dp, vertical = 14.dp), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                if (view?.permissions?.canLocate == true) {
-                    Spacer(Modifier.width(10.dp))
-                    RoundButton(onClick = { vm.refreshNow() }) { RefreshIcon(vm.refreshing) }
-                }
             }
         }
     }

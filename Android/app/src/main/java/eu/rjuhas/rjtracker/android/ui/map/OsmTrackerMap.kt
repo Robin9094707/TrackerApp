@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -23,7 +24,9 @@ import org.osmdroid.events.DelayedMapListener
 import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
 import org.osmdroid.events.ZoomEvent
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
+import org.osmdroid.tileprovider.tilesource.XYTileSource
+import org.osmdroid.util.MapTileIndex
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
@@ -43,12 +46,14 @@ internal fun OsmTrackerMap(
     bottomPadding: Dp,
     onMarkerClick: (String) -> Unit,
     onCenterChanged: ((Double, Double) -> Unit)?,
+    satellite: Boolean,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
+    val dark = isSystemInDarkTheme()
     val map = remember {
         MapView(context).apply {
-            setTileSource(TileSourceFactory.MAPNIK)
+            setTileSource(if (dark) CARTO_DARK else CARTO_VOYAGER)
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             isTilesScaledToDpi = true
@@ -84,18 +89,25 @@ internal fun OsmTrackerMap(
         val points = target.points.map { GeoPoint(it.first, it.second) }
         if (points.isEmpty()) return@LaunchedEffect
         map.post {
+            // Keep the target in the visible upper part above the bottom sheet.
+            val shift = (bottomPadding.value * density / 2).toInt()
             if (points.distinct().size == 1) {
-                map.controller.animateTo(points.first(), target.singleZoom.toDouble(), 700L)
+                map.controller.setZoom(target.singleZoom.toDouble())
+                map.controller.setCenter(points.first())
             } else {
                 val box = BoundingBox.fromGeoPointsSafe(points).increaseByScale(1.35f)
-                map.zoomToBoundingBox(box, true, (48 * density).toInt())
+                map.zoomToBoundingBox(box, false, (48 * density).toInt())
             }
+            map.post { map.scrollBy(0, shift); map.invalidate() }
         }
     }
     AndroidView(factory = { map }, modifier = modifier, update = { view ->
-        view.setPadding(0, 0, 0, (bottomPadding.value * density).toInt())
+        val wanted = when { satellite -> ESRI_IMAGERY; dark -> CARTO_DARK; else -> CARTO_VOYAGER }
+        if (view.tileProvider.tileSource.name() != wanted.name()) view.setTileSource(wanted)
         view.overlays.clear()
-        view.overlays.add(CopyrightOverlay(context))
+        view.overlays.add(CopyrightOverlay(context).apply {
+            setAlignBottom(false); setAlignRight(true); setOffset((8 * density).toInt(), (118 * density).toInt()); setTextSize(10)
+        })
         circles.forEach { circle ->
             view.overlays.add(Polygon(view).apply {
                 points = Polygon.pointsAsCircle(GeoPoint(circle.lat, circle.lon), circle.radiusM)
@@ -118,7 +130,7 @@ internal fun OsmTrackerMap(
             view.overlays.add(Marker(view).apply {
                 position = GeoPoint(item.lat, item.lon)
                 icon = BitmapDrawable(view.resources, markerBitmap(item, density))
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                setAnchor(Marker.ANCHOR_CENTER, if (item.kind == MarkerKind.BAG) Marker.ANCHOR_BOTTOM else Marker.ANCHOR_CENTER)
                 title = item.title.ifBlank { null }
                 setOnMarkerClickListener { _, _ -> onMarkerClick(item.id); true }
             })
@@ -147,7 +159,22 @@ private fun markerBitmap(marker: MapMarker, density: Float): Bitmap {
         return bitmap
     }
     return when (marker.kind) {
-        MarkerKind.BAG -> circle(52f, 4f, marker.label.ifBlank { "🎒" }, 22f, android.graphics.Color.WHITE)
+        MarkerKind.BAG -> {
+            val head = circle(64f, 4f, marker.label.ifBlank { "🎒" }, 30f, android.graphics.Color.WHITE)
+            val tip = 10f * density
+            val pin = Bitmap.createBitmap(head.width, (head.height + tip).toInt(), Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(pin)
+            paint.color = android.graphics.Color.WHITE
+            val path = android.graphics.Path().apply {
+                moveTo(head.width / 2f - 9f * density, head.height - 6f * density)
+                lineTo(head.width / 2f + 9f * density, head.height - 6f * density)
+                lineTo(head.width / 2f, head.height + tip)
+                close()
+            }
+            canvas.drawPath(path, paint)
+            canvas.drawBitmap(head, 0f, 0f, null)
+            pin
+        }
         MarkerKind.CLUSTER -> circle(if (marker.label.length > 2) 40f else 34f, 2f, marker.label, 12f, android.graphics.Color.WHITE)
         MarkerKind.CURSOR -> circle(24f, 4f, "", 0f, 0)
         MarkerKind.EVIDENCE -> circle(18f, 2f, "", 0f, 0)
@@ -172,4 +199,18 @@ private fun markerBitmap(marker: MapMarker, density: Float): Bitmap {
             bitmap
         }
     }
+}
+
+private val CARTO_VOYAGER = XYTileSource("CartoVoyager", 1, 20, 512, "@2x.png",
+    arrayOf("https://a.basemaps.cartocdn.com/rastertiles/voyager/", "https://b.basemaps.cartocdn.com/rastertiles/voyager/", "https://c.basemaps.cartocdn.com/rastertiles/voyager/"),
+    "© OpenStreetMap-Mitwirkende © CARTO")
+private val CARTO_DARK = XYTileSource("CartoDark", 1, 20, 512, "@2x.png",
+    arrayOf("https://a.basemaps.cartocdn.com/dark_all/", "https://b.basemaps.cartocdn.com/dark_all/", "https://c.basemaps.cartocdn.com/dark_all/"),
+    "© OpenStreetMap-Mitwirkende © CARTO")
+
+/** Esri imagery uses z/y/x ordering. */
+private val ESRI_IMAGERY = object : OnlineTileSourceBase("EsriImagery", 1, 19, 256, "",
+    arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"), "Bilder © Esri") {
+    override fun getTileURLString(index: Long): String =
+        baseUrl + MapTileIndex.getZoom(index) + "/" + MapTileIndex.getY(index) + "/" + MapTileIndex.getX(index)
 }

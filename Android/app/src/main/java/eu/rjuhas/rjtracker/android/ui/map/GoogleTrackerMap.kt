@@ -6,6 +6,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.google.android.gms.maps.CameraUpdateFactory
@@ -16,6 +17,7 @@ import com.google.maps.android.compose.Circle
 import com.google.maps.android.compose.ComposeMapColorScheme
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.MapType
 import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.MarkerComposable
 import com.google.maps.android.compose.Polyline
@@ -34,6 +36,7 @@ internal fun GoogleTrackerMap(
     bottomPadding: Dp,
     onMarkerClick: (String) -> Unit,
     onCenterChanged: ((Double, Double) -> Unit)?,
+    satellite: Boolean,
 ) {
     val cameraState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(LatLng(51.1657, 10.4515), 5.5f)
@@ -62,7 +65,7 @@ internal fun GoogleTrackerMap(
     GoogleMap(
         modifier = modifier,
         cameraPositionState = cameraState,
-        properties = MapProperties(isBuildingEnabled = true),
+        properties = MapProperties(isBuildingEnabled = true, mapType = if (satellite) MapType.HYBRID else MapType.NORMAL),
         uiSettings = MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false, myLocationButtonEnabled = false),
         contentPadding = PaddingValues(bottom = bottomPadding, top = 8.dp),
         mapColorScheme = ComposeMapColorScheme.FOLLOW_SYSTEM,
@@ -88,6 +91,7 @@ internal fun GoogleTrackerMap(
                     state = rememberUpdatedMarkerState(position = LatLng(marker.lat, marker.lon)),
                     title = marker.title.ifBlank { null },
                     zIndex = if (marker.kind == MarkerKind.BAG || marker.kind == MarkerKind.CURSOR) 10f else 1f,
+                    anchor = if (marker.kind == MarkerKind.BAG) Offset(0.5f, 1f) else Offset(0.5f, 0.5f),
                     onClick = { onMarkerClick(marker.id); false },
                 ) { MarkerBubble(marker) }
             }

@@ -1,6 +1,10 @@
 package eu.rjuhas.rjtracker.android.ui.map
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
@@ -54,11 +58,12 @@ fun TrackerMap(
     bottomPadding: Dp = 0.dp,
     onMarkerClick: (String) -> Unit = {},
     onCenterChanged: ((Double, Double) -> Unit)? = null,
+    satellite: Boolean = false,
 ) {
     if (mapsKeyAvailable) {
-        GoogleTrackerMap(modifier, markers, circles, lines, camera, bottomPadding, onMarkerClick, onCenterChanged)
+        GoogleTrackerMap(modifier, markers, circles, lines, camera, bottomPadding, onMarkerClick, onCenterChanged, satellite)
     } else {
-        OsmTrackerMap(modifier, markers, circles, lines, camera, bottomPadding, onMarkerClick, onCenterChanged)
+        OsmTrackerMap(modifier, markers, circles, lines, camera, bottomPadding, onMarkerClick, onCenterChanged, satellite)
     }
 }
 
@@ -66,11 +71,16 @@ fun TrackerMap(
 @Composable
 fun MarkerBubble(marker: MapMarker) {
     when (marker.kind) {
-        MarkerKind.BAG -> Box(
-            Modifier.size(52.dp).shadow(8.dp, CircleShape).background(Color.White, CircleShape).padding(4.dp)
-                .background(marker.color, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) { Text(marker.label.ifBlank { "🎒" }, fontSize = 24.sp) }
+        MarkerKind.BAG -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier.size(64.dp).shadow(10.dp, CircleShape).background(Color.White, CircleShape).padding(4.dp)
+                    .background(Brush.linearGradient(listOf(marker.color, marker.color.copy(red = (marker.color.red * 0.6f)))), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) { Text(marker.label.ifBlank { "🎒" }, fontSize = 32.sp) }
+            Canvas(Modifier.size(width = 18.dp, height = 10.dp)) {
+                drawPath(Path().apply { moveTo(0f, 0f); lineTo(size.width, 0f); lineTo(size.width / 2, size.height); close() }, Color.White)
+            }
+        }
         MarkerKind.CLUSTER -> Box(
             Modifier.size(if (marker.label.length > 2) 40.dp else 34.dp).shadow(4.dp, CircleShape)
                 .background(marker.color, CircleShape).border(2.dp, Color.White, CircleShape),

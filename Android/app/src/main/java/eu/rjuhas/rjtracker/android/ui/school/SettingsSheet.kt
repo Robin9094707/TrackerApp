@@ -63,7 +63,7 @@ private val weekdays = listOf("1" to "Montag", "2" to "Dienstag", "3" to "Mittwo
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SchoolSettingsSheet(vm: SchoolViewModel, link: SavedLink, onDismiss: () -> Unit, onRemoved: () -> Unit) {
+fun SchoolSettingsSheet(vm: SchoolViewModel, link: SavedLink, onDismiss: () -> Unit, onRemoved: () -> Unit, onAllLinks: () -> Unit) {
     val context = LocalContext.current
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val original = vm.overview?.schedule ?: Schedule()
@@ -134,6 +134,7 @@ fun SchoolSettingsSheet(vm: SchoolViewModel, link: SavedLink, onDismiss: () -> U
             Button(onClick = { vm.saveSchedule(schedule) }, modifier = Modifier.fillMaxWidth()) { Text("Stundenplan speichern") }
 
             HorizontalDivider()
+            FilledTonalButton(onClick = onAllLinks, modifier = Modifier.fillMaxWidth()) { Text("Alle Links · weiteren Link hinzufügen") }
             TextButton(onClick = { confirmRemove = true }) { Text("Link von diesem Gerät entfernen", color = MaterialTheme.colorScheme.error) }
         }
     }

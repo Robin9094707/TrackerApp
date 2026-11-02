@@ -100,11 +100,13 @@ private fun MainNav(links: List<SavedLink>, name: String, pendingLink: String?, 
         composable("home") { HomeScreen(links, name) { nav.navigate(route(it)) } }
         composable("school/{id}") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
-            SchoolScreen(id) { if (!nav.popBackStack()) nav.navigate("home") { popUpTo(0) } }
+            SchoolScreen(id, showBack = links.size > 1,
+                onBack = { if (!nav.popBackStack()) nav.navigate("home") { popUpTo(0) } },
+                onAllLinks = { nav.navigate("home") { launchSingleTop = true } })
         }
         composable("guest/{id}") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
-            GuestScreen(id) { if (!nav.popBackStack()) nav.navigate("home") { popUpTo(0) } }
+            GuestScreen(id, showBack = true) { if (!nav.popBackStack()) nav.navigate("home") { popUpTo(0) } }
         }
         composable("add") {
             AddLinkContent(initialLink = pendingLink, onConnected = { link ->

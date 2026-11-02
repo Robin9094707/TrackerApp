@@ -51,8 +51,8 @@ import eu.rjuhas.rjtracker.android.data.SchoolOverview
 import eu.rjuhas.rjtracker.android.ui.common.StatusPill
 import eu.rjuhas.rjtracker.android.ui.common.ago
 import eu.rjuhas.rjtracker.android.ui.common.dateTime
-import eu.rjuhas.rjtracker.android.ui.common.statusColor
-import eu.rjuhas.rjtracker.android.ui.school.headline
+import eu.rjuhas.rjtracker.android.ui.school.placeLine
+import eu.rjuhas.rjtracker.android.ui.common.placeColor
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -114,11 +114,11 @@ private fun SchoolCard(link: SavedLink, overview: SchoolOverview?, onClick: () -
             overview?.bags?.forEach { bag ->
                 Surface(shape = RoundedCornerShape(20.dp), color = Color.White.copy(alpha = 0.96f)) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(bag.displayName, style = MaterialTheme.typography.titleMedium, color = Color(0xFF111A3A))
+                        Text(eu.rjuhas.rjtracker.android.ui.school.bagTitle(bag), style = MaterialTheme.typography.titleMedium, color = Color(0xFF111A3A))
                         Text(bag.currentPlace?.let { "Bei ${it.name}" } ?: (bag.location?.address?.ifBlank { null } ?: "Unterwegs"),
                             color = Color(0xFF4A5170), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            bag.today?.takeIf { it.status !in setOf("free", "setup") }?.let { StatusPill(headline(it), statusColor(it.status)) }
+                            placeLine(bag)?.let { StatusPill(it, placeColor(bag.currentPlace?.kind)) }
                             Spacer(Modifier.weight(1f))
                             Text(ago(bag.location?.ts), style = MaterialTheme.typography.bodySmall, color = Color(0xFF4A5170))
                         }
