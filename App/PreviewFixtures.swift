@@ -17,6 +17,12 @@ enum PreviewFixtures {
         case "/api/internal-shares": json = #"{"received":[],"outgoing":[],"recipients":[],"catalog":[]}"#
         case "/api/v2/storage": json = #"{"cleanup":[{"id":"logs","label":"Alte Protokolle","description":"Alte Logdateien bereinigen","available":true,"bytes":1000}]}"#
         case "/api/google/guardian/status": json = #"{"runtime":{"ready":true,"tools_installed":true,"secrets_uploaded":true}}"#
+        case "/api/mobile/v1/school-plan":
+            let calendar = Calendar.current
+            let today = HistoryCalendar.key(Date(), calendar: calendar)
+            json = """
+            {"enabled":false,"revision":0,"day":"\(today)","today":"\(today)","timezone":"\(calendar.timeZone.identifier)","places":[],"routines":[],"current":[],"visits":[],"checks":[]}
+            """
         case "/api/mobile/v1/history/days":
             let calendar = Calendar.current
             let today = HistoryCalendar.key(Date(), calendar: calendar)
@@ -65,7 +71,7 @@ enum PreviewFixtures {
            "location":{"latitude":52.5142,"longitude":13.3501,"timestamp":\(now-4500),"accuracy_m":65,"address":{"label":"Tiergarten, Berlin"}}},
           {"ref":"google:demo-case","name":"Koffer","provider":"google","emoji":"🧳","battery":"Unbekannt"}],
          "saved_places":[{"id":"demo-place","label":"Brandenburger Tor","emoji":"🏛️","latitude":52.5163,"longitude":13.3777,"radius_m":100}],
-         "geofences":[],"alerts":{"unread_count":0,"events":[]},"session":{"user":{"display_name":"Demo"}}}
+         "geofences":[],"alerts":{"unread_count":0,"events":[]},"session":{"user":{"display_name":"Demo","is_main_admin":true}}}
         """
         return try! JSONDecoder().decode(BootstrapResponse.self, from: Data(json.utf8))
     }

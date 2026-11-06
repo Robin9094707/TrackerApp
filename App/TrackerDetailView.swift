@@ -29,11 +29,21 @@ struct TrackerDetailView: View {
     }
     private var serverBody: some View {
         ScrollView {
-            VStack(spacing: 18) {
+            LazyVStack(spacing: 18) {
                 header
                 actions
                 if model.isLocating(current) {
                     ProgressView("Standort wird abgefragt …").font(.footnote)
+                }
+                if model.bootstrap?.session?.user?.isMainAdmin == true {
+                    NavigationLink {
+                        SchoolPlanView(tracker: current)
+                    } label: {
+                        detailRow("Schultasche & Routinen", subtitle: "Orte, Zeiten und Aufenthalte für dieses Objekt", icon: "backpack.fill", color: .indigo)
+                            .rjCompactCard()
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("tracker-school-plan")
                 }
                 RJGroupedSection(title: "Verlauf & Mitteilungen") {
                     NavigationLink { HistoryView(tracker: current) } label: {
@@ -74,6 +84,7 @@ struct TrackerDetailView: View {
                 }
             }
             .padding(16)
+            .frame(maxWidth: 850).frame(maxWidth: .infinity)
         }
         .rjScreenChrome()
         .navigationTitle(current.name)

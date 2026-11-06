@@ -53,6 +53,12 @@ struct NativeGoogleTrackerView: View {
                     NavigationLink { NativeGoogleHistoryView(deviceID: deviceID) } label: { Label("Alle \(tracker.reportCount) Reports ansehen", systemImage: "clock.arrow.circlepath") }
                         .accessibilityIdentifier("tracker-history-link")
                     if let serverTracker = model.bootstrap?.trackers.first(where: { $0.provider == "google" && $0.apiID == deviceID }) {
+                        if model.bootstrap?.session?.user?.isMainAdmin == true {
+                            NavigationLink { SchoolPlanView(tracker: serverTracker) } label: {
+                                Label("Schultasche & Routinen", systemImage: "backpack.fill")
+                            }
+                            .accessibilityIdentifier("tracker-school-plan")
+                        }
                         NavigationLink { TrackerDetailView(tracker: serverTracker, preferNativeGoogle: false) } label: {
                             Label("Bisheriger Serververlauf & Automationen", systemImage: "externaldrive.badge.icloud")
                         }

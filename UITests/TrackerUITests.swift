@@ -30,6 +30,18 @@ final class TrackerUITests: XCTestCase {
         bag.tap()
         XCTAssertTrue(app.otherElements["tracker-detail-header"].waitForExistence(timeout: 10))
         capture("02-Tracker-Details")
+        let school = app.buttons["tracker-school-plan"]
+        XCTAssertTrue(school.waitForExistence(timeout: 10))
+        school.tap()
+        let edit = app.buttons["Schultaschenmodus einrichten"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 10))
+        edit.tap()
+        let enabled = app.switches["school-plan-enabled"]
+        XCTAssertTrue(enabled.waitForExistence(timeout: 10))
+        enabled.tap()
+        XCTAssertEqual(enabled.value as? String, "1")
+        XCTAssertTrue(app.buttons["Ort hinzufügen"].exists)
+        app.buttons["Abbrechen"].tap()
         app.tabBars.buttons["Orte"].tap()
         XCTAssertTrue(app.staticTexts["Brandenburger Tor"].waitForExistence(timeout: 10))
         capture("03-Places")
