@@ -156,12 +156,24 @@ final class TrackerUITests: XCTestCase {
         for provider in ["apple", "google", "all"] {
             let app = XCUIApplication()
             app.launchArguments = ["--ui-testing", "--ui-testing-local-google", "-native.localMode", "NO",
-                "-tracker.provider", provider, "-serverURL", "https://offline.example.invalid"]
+                "-tracker.provider", provider, "-tracker.scope", "all", "-tracker.sort", "favorites",
+                "-serverURL", "https://offline.example.invalid"]
             app.launch()
             expandInspector(app)
-            let expectedRow = provider == "apple" ? "tracker-row-apple:demo-keys" : "tracker-row-google:demo-local-tag"
-            XCTAssertTrue(app.buttons[expectedRow].waitForExistence(timeout: 20))
             XCTAssertEqual(app.buttons["local-google-launcher"].firstMatch.exists, provider != "apple")
+            let expectedRow = provider == "apple" ? "tracker-row-apple:demo-keys" : "tracker-row-google:demo-local-tag"
+            let row = app.buttons[expectedRow]
+            // The dashboard lazily creates cards. With all networks selected,
+            // favorites push the local Google card below the first viewport.
+            // Waiting alone cannot materialize it; reveal it as a user would.
+            let library = app.scrollViews.firstMatch
+            XCTAssertTrue(library.waitForExistence(timeout: 20))
+            for _ in 0..<6 {
+                if row.exists && row.isHittable { break }
+                library.swipeUp()
+            }
+            XCTAssertTrue(row.waitForExistence(timeout: 10), "Missing tracker for provider: \(provider)")
+            XCTAssertTrue(row.isHittable, "Tracker must be reachable for provider: \(provider)")
             app.tabBars.buttons["Ich"].tap()
             XCTAssertTrue(app.buttons["Mit Tracker-Server verbinden"].waitForExistence(timeout: 10))
             XCTAssertEqual(app.buttons["local-google-launcher"].firstMatch.exists, provider != "apple")
