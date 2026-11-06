@@ -319,8 +319,13 @@ private struct SchoolPlanEditor: View {
         NavigationStack {
             Form {
                 Section {
-                    Toggle("Schultaschenmodus aktiv", isOn: $draft.enabled)
-                        .accessibilityIdentifier("school-plan-enabled")
+                    HStack {
+                        Text("Schultaschenmodus aktiv").accessibilityHidden(true)
+                        Spacer()
+                        Toggle("Schultaschenmodus aktiv", isOn: $draft.enabled)
+                            .labelsHidden()
+                            .accessibilityIdentifier("school-plan-enabled")
+                    }
                 } footer: {
                     Text("Die Orte und Routinen gelten für \(tracker.name). Die Anzeige beruht auf Meldungen des Trackers.")
                 }

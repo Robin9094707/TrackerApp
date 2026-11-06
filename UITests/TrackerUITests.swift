@@ -38,8 +38,10 @@ final class TrackerUITests: XCTestCase {
         edit.tap()
         let enabled = app.switches["school-plan-enabled"]
         XCTAssertTrue(enabled.waitForExistence(timeout: 10))
-        enabled.tap()
-        XCTAssertEqual(enabled.value as? String, "1")
+        XCTAssertTrue(enabled.isHittable)
+        enabled.coordinate(withNormalizedOffset: CGVector(dx: 0.80, dy: 0.5)).tap()
+        let switchedOn = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "1"), object: enabled)
+        wait(for: [switchedOn], timeout: 5)
         XCTAssertTrue(app.buttons["Ort hinzufügen"].exists)
         app.buttons["Abbrechen"].tap()
         app.tabBars.buttons["Orte"].tap()
