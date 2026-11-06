@@ -56,7 +56,7 @@ struct SchoolBagHub: View {
                         ForEach(model.bootstrap?.trackers ?? []) { tracker in
                             NavigationLink { SchoolPlanView(tracker: tracker) } label: {
                                 TrackerListRow(tracker: tracker).rjCard()
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(.plain).accessibilityIdentifier("school-bag-\(tracker.ref)")
                         }
                     }
                 }

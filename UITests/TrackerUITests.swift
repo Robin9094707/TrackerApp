@@ -283,7 +283,7 @@ final class TrackerUITests: XCTestCase {
     @MainActor
     func testPanelDashboardMapAndBarkSettings() {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "-appearance", "light", "-tracker.provider", "all", "-tracker.scope", "all"]
+        app.launchArguments = ["--ui-testing", "--ui-testing-school-week", "-appearance", "light", "-tracker.provider", "all", "-tracker.scope", "all"]
         app.launch()
         XCTAssertTrue(app.buttons["tracker-row-fusion:demo-bag"].waitForExistence(timeout: 20))
         capture("Panel-Dashboard")
@@ -296,6 +296,19 @@ final class TrackerUITests: XCTestCase {
         XCTAssertTrue(app.switches["Bark aktiv"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.textFields["Bark-Server"].exists)
         capture("Panel-Bark")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["Schultaschen"].firstMatch.tap()
+        let bag = app.buttons["school-bag-fusion:demo-bag"]
+        XCTAssertTrue(bag.waitForExistence(timeout: 10))
+        bag.tap()
+        XCTAssertTrue(app.staticTexts["Deine Schulwoche"].waitForExistence(timeout: 10))
+        capture("Panel-School-Week-Overview")
+        let late = app.staticTexts["Etwa 12 Min. verspätet"]
+        for _ in 0..<5 where !late.isHittable { app.swipeUp() }
+        XCTAssertTrue(late.isHittable)
+        XCTAssertTrue(app.staticTexts["Erste Ortung +35 Min."].exists)
+        XCTAssertTrue(app.staticTexts["Anwesenheit nicht bestätigt"].firstMatch.exists)
+        capture("Panel-School-Week-Evidence")
     }
 
     @MainActor

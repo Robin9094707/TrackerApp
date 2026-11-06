@@ -233,6 +233,9 @@ jobs:
           if [ -d RJ-Tracker-tests.xcresult ]; then
             xcrun xcresulttool export attachments --path RJ-Tracker-tests.xcresult --output-path TestScreenshots || true
           fi
+          if [ -d RJ-Tracker-ipad-tests.xcresult ]; then
+            xcrun xcresulttool export attachments --path RJ-Tracker-ipad-tests.xcresult --output-path TestScreenshots-iPad || true
+          fi
 
       - name: Upload test results
         if: always()
@@ -247,6 +250,7 @@ jobs:
             RJ-Tracker-tests.log
             RJ-Tracker-release-tests.log
             TestScreenshots
+            TestScreenshots-iPad
           if-no-files-found: warn
           retention-days: 30
 
