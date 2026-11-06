@@ -31,6 +31,60 @@ struct SchoolPlanRoutine: Codable, Identifiable {
     }
 }
 
+struct SchoolPlanOptions: Codable {
+    var notificationsEnabled = false
+    var graceMinutes = 5
+    var reminderMinutes = 60
+    var dailySummary = true
+    var offDays: [String] = []
+    enum CodingKeys: String, CodingKey {
+        case notificationsEnabled = "notifications_enabled", graceMinutes = "grace_minutes"
+        case reminderMinutes = "reminder_minutes", dailySummary = "daily_summary", offDays = "off_days"
+    }
+}
+
+struct SchoolPlanWeek: Decodable {
+    struct Day: Decodable, Identifiable {
+        var day: String
+        var status: String
+        var present: Bool
+        var planned: Bool
+        var arrival: Double?
+        var delay: Int
+        var late: Int
+        var id: String { day }
+        enum CodingKeys: String, CodingKey {
+            case day, status, present, planned
+            case arrival = "arrival_ts", delay = "delay_minutes", late = "late_minutes"
+        }
+        var title: String {
+            switch status {
+            case "on_time": "Pünktlich geortet"
+            case "late": "Etwa \(late) Min. verspätet"
+            case "observed_late": "Erste Ortung +\(delay) Min."
+            case "upcoming": "Steht noch an"
+            case "waiting": "Noch nicht bestätigt"
+            case "free": "Schulfrei / nicht geplant"
+            default: "Anwesenheit nicht bestätigt"
+            }
+        }
+    }
+    struct Summary: Decodable {
+        var planned: Int
+        var confirmed: Int
+        var late: Int
+        var unconfirmed: Int
+        var lateMinutes: Int
+        enum CodingKeys: String, CodingKey {
+            case planned = "planned_days", confirmed = "confirmed_days", late = "late_days"
+            case unconfirmed = "unconfirmed_days", lateMinutes = "late_minutes"
+        }
+    }
+    var start: String
+    var days: [Day]
+    var summary: Summary
+}
+
 struct SchoolPlanSnapshot: Decodable {
     struct Observation: Decodable {
         var placeName: String
@@ -62,13 +116,22 @@ struct SchoolPlanSnapshot: Decodable {
         var end: String
         var status: String
         var observedAt: Double?
+        var attendanceStatus: String?
+        var delayMinutes: Int?
+        var lateMinutes: Int?
+        var observedMinutes: Int?
         enum CodingKeys: String, CodingKey {
             case id, start, end, status
             case placeID = "place_id", observedAt = "arrival_ts"
+            case attendanceStatus = "attendance_status", delayMinutes = "delay_minutes"
+            case lateMinutes = "late_minutes", observedMinutes = "observed_minutes"
         }
 
         var title: String {
-            switch status {
+            switch attendanceStatus ?? status {
+            case "on_time": "Pünktlich geortet"
+            case "late": "Etwa \(lateMinutes ?? 0) Minuten verspätet"
+            case "observed_late": "Erste Ortung \(delayMinutes ?? 0) Minuten nach Plan"
             case "confirmed": "Im Zeitfenster geortet"
             case "upcoming": "Steht noch an"
             case "waiting": "Warte auf Standortmeldung"
@@ -102,6 +165,8 @@ struct SchoolPlanSnapshot: Decodable {
     var current: [Observation]
     var visits: [Visit]
     var checks: [Check]
+    var options: SchoolPlanOptions?
+    var week: SchoolPlanWeek?
 
     var calendar: Calendar { HistoryCalendar.calendar(timezone: timezone) }
 
@@ -117,12 +182,14 @@ private struct SchoolPlanDraft: Encodable {
     var revision: Int
     var places: [SchoolPlanPlace]
     var routines: [SchoolPlanRoutine]
+    var options: SchoolPlanOptions
 
     init(_ snapshot: SchoolPlanSnapshot) {
         enabled = snapshot.enabled
         revision = snapshot.revision
         places = snapshot.places
         routines = snapshot.routines
+        options = snapshot.options ?? SchoolPlanOptions()
     }
 
     var canSave: Bool {
@@ -154,6 +221,7 @@ struct SchoolPlanView: View {
                     statusCard(snapshot)
                     if snapshot.enabled {
                         datePicker(snapshot)
+                        if let week = snapshot.week { weekCard(week, snapshot) }
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16, alignment: .top)], spacing: 16) {
                             routineCard(snapshot)
                             visitCard(snapshot)
@@ -166,7 +234,7 @@ struct SchoolPlanView: View {
             }.padding(16).frame(maxWidth: 1000).frame(maxWidth: .infinity)
         }
         .rjScreenChrome()
-        .navigationTitle("Schultasche & Routinen")
+        .navigationTitle("Schultasche & Wochenplan")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if snapshot != nil {
@@ -230,6 +298,48 @@ struct SchoolPlanView: View {
         }
     }
 
+    private func weekCard(_ week: SchoolPlanWeek, _ value: SchoolPlanSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            RJSectionTitle(title: "Deine Schulwoche", subtitle: "Woche ab \(week.start)", symbol: "calendar.badge.checkmark")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: 10)], spacing: 10) {
+                weekMetric("Bestätigt", value: "\(week.summary.confirmed)/\(week.summary.planned)", tint: .accentColor)
+                weekMetric("Verspätet", value: "\(week.summary.late)", tint: .orange)
+                weekMetric("Unbestätigt", value: "\(week.summary.unconfirmed)", tint: .secondary)
+            }
+            ForEach(week.days) { day in
+                Button {
+                    guard day.day <= value.today else { return }
+                    requestedDay = day.day == value.today ? nil : day.day
+                } label: {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: day.present ? "checkmark.circle.fill" : day.status == "free" ? "minus.circle" : "clock")
+                            .foregroundStyle(day.present ? Color.accentColor : Color.secondary).font(.title3)
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let date = HistoryCalendar.date(day.day, calendar: value.calendar) {
+                                Text(date.formatted(Date.FormatStyle(locale: TrackerTimeText.locale, timeZone: value.calendar.timeZone).weekday(.wide).day().month()))
+                                    .font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                            }
+                            Text(day.title).font(.subheadline).foregroundStyle(day.status == "late" ? Color.orange : Color.secondary)
+                        }
+                        Spacer(minLength: 4)
+                        if let arrival = day.arrival { Text(value.time(arrival)).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary) }
+                    }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(day.day == value.day ? Color.accentColor.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 14))
+                }.buttonStyle(.plain).disabled(day.day > value.today)
+            }
+            Text("Die Ortung bestätigt die Tasche am Schulort. Eine späte erste Meldung kann durch verzögerte Ortung entstehen; fehlende Meldungen belegen keine Abwesenheit. Verspätungen bleiben Schätzungen.")
+                .font(.caption).foregroundStyle(.secondary)
+        }.rjCard().accessibilityIdentifier("school-week")
+    }
+
+    private func weekMetric(_ title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value).font(.system(.title2, design: .rounded, weight: .bold)).foregroundStyle(tint)
+            Text(title).font(.caption).foregroundStyle(.secondary)
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+            .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
+    }
+
     private func routineCard(_ value: SchoolPlanSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             RJSectionTitle(title: "Geplant", subtitle: "Zeitfenster für diesen Tag", symbol: "calendar")
@@ -243,6 +353,9 @@ struct SchoolPlanView: View {
                     Label(check.title, systemImage: check.symbol)
                         .font(.subheadline)
                         .foregroundStyle(check.status == "confirmed" ? Color.green : Color.secondary)
+                    if check.attendanceStatus == "observed_late" {
+                        Text("Die tatsächliche Ankunft kann früher gewesen sein.").font(.caption).foregroundStyle(.secondary)
+                    }
                     if let time = check.observedAt {
                         Text("Im Zeitfenster erstmals um \(value.time(time)) gemeldet")
                             .font(.caption).foregroundStyle(.secondary)
@@ -287,7 +400,7 @@ struct SchoolPlanView: View {
             error = nil
         } catch is CancellationError {
         } catch APIError.http(let code, _) where code == 404 && snapshot == nil {
-            if requestID == id { error = "Der Tagesplan benötigt die aktualisierte Serverdatei (Backend 20.7.1) und einen serverseitigen Tracker." }
+            if requestID == id { error = "Der Tagesplan benötigt die aktualisierte Serverdatei (Backend 21.0.0) und einen serverseitigen Tracker." }
         } catch {
             if requestID == id { self.error = error.localizedDescription }
         }
@@ -314,6 +427,7 @@ private struct SchoolPlanEditor: View {
     @State private var editingPlace: SchoolPlanPlace?
     @State private var error: String?
     @State private var saving = false
+    @State private var offDay = Date()
 
     var body: some View {
         NavigationStack {
@@ -328,6 +442,27 @@ private struct SchoolPlanEditor: View {
                     }
                 } footer: {
                     Text("Die Orte und Routinen gelten für \(tracker.name). Die Anzeige beruht auf Meldungen des Trackers.")
+                }
+                Section {
+                    Toggle("Schulmeldungen senden", isOn: $draft.options.notificationsEnabled)
+                    Stepper("Toleranz: \(draft.options.graceMinutes) Min.", value: $draft.options.graceMinutes, in: 0...60)
+                    Stepper("Erinnerung alle \(draft.options.reminderMinutes) Min.", value: $draft.options.reminderMinutes, in: 15...180, step: 15)
+                    Toggle("Tagesrückblick am Ende", isOn: $draft.options.dailySummary)
+                    NavigationLink { BarkSettingsView() } label: { Label("Bark einrichten", systemImage: "bell.badge.fill") }
+                } header: { Text("Meldungen & Pünktlichkeit") } footer: {
+                    Text("Der Server meldet bestätigte Ankunft, Verlassen und noch fehlende Ortungen. Erinnerungen enden mit der Bestätigung oder dem geplanten Ende. Es gelten deine Benachrichtigungskanäle und Ruhezeiten.")
+                }
+                Section("Schulfreie Tage") {
+                    DatePicker("Freier Tag", selection: $offDay, displayedComponents: .date)
+                        .environment(\.timeZone, timeZone)
+                    Button("Tag hinzufügen") {
+                        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = timeZone
+                        let key = HistoryCalendar.key(offDay, calendar: calendar)
+                        draft.options.offDays = Array(Set(draft.options.offDays + [key])).sorted()
+                    }.disabled(draft.options.offDays.count >= 100)
+                    ForEach(draft.options.offDays, id: \.self) { day in
+                        HStack { Text(day); Spacer(); Button("Entfernen", systemImage: "minus.circle", role: .destructive) { draft.options.offDays.removeAll { $0 == day } }.labelStyle(.iconOnly).buttonStyle(.borderless) }
+                    }
                 }
                 Section("Orte") {
                     ForEach(draft.places) { place in

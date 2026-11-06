@@ -42,7 +42,9 @@ final class TrackerUITests: XCTestCase {
         enabled.coordinate(withNormalizedOffset: CGVector(dx: 0.80, dy: 0.5)).tap()
         let switchedOn = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "1"), object: enabled)
         wait(for: [switchedOn], timeout: 5)
-        XCTAssertTrue(app.buttons["Ort hinzufügen"].exists)
+        let addPlace = app.buttons["Ort hinzufügen"]
+        for _ in 0..<5 where !addPlace.isHittable { app.swipeUp() }
+        XCTAssertTrue(addPlace.exists)
         app.buttons["Abbrechen"].tap()
         app.tabBars.buttons["Orte"].tap()
         XCTAssertTrue(app.staticTexts["Brandenburger Tor"].waitForExistence(timeout: 10))
@@ -56,17 +58,10 @@ final class TrackerUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["tracker-row-fusion:demo-bag"].waitForExistence(timeout: 20))
         capture("04-Dark-Large-Text")
-        let navigation = app.navigationBars["Objekte"]
-        let initialY = navigation.frame.minY
-        let handle = sheetGrabber(in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        handle.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)))
-        XCTAssertLessThan(navigation.frame.minY, initialY - 100)
-        capture("08-Dark-Expanded")
-        let expandedY = navigation.frame.minY
-        let expandedHandle = sheetGrabber(in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        expandedHandle.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)))
-        XCTAssertGreaterThan(navigation.frame.minY, expandedY + 100)
-        capture("09-Dark-Collapsed")
+        XCTAssertTrue(app.staticTexts["Alles im Blick."].exists)
+        app.buttons["tracker-row-fusion:demo-bag"].tap()
+        XCTAssertTrue(app.otherElements["tracker-detail-header"].waitForExistence(timeout: 10))
+        capture("08-Dark-Large-Detail")
     }
 
     @MainActor
@@ -286,6 +281,24 @@ final class TrackerUITests: XCTestCase {
     }
 
     @MainActor
+    func testPanelDashboardMapAndBarkSettings() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "-appearance", "light", "-tracker.provider", "all", "-tracker.scope", "all"]
+        app.launch()
+        XCTAssertTrue(app.buttons["tracker-row-fusion:demo-bag"].waitForExistence(timeout: 20))
+        capture("Panel-Dashboard")
+        app.buttons["Karte"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["dashboard-map-fit"].waitForExistence(timeout: 10))
+        app.buttons["dashboard-map-fit"].tap()
+        capture("Panel-Map")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["Bark"].firstMatch.tap()
+        XCTAssertTrue(app.switches["Bark aktiv"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["Bark-Server"].exists)
+        capture("Panel-Bark")
+    }
+
+    @MainActor
     private func sheetGrabber(in app: XCUIApplication) -> XCUIElement {
         // UIKit localizes this system control when the app declares German.
         app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Sheet Grabber", "Aufzeichnungsblatt")).firstMatch
@@ -293,11 +306,8 @@ final class TrackerUITests: XCTestCase {
 
     @MainActor
     private func expandInspector(_ app: XCUIApplication) {
-        let grabber = sheetGrabber(in: app).firstMatch
-        if grabber.waitForExistence(timeout: 10) {
-            grabber.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.10)))
-        }
+        // The panel dashboard uses the full navigation area; no sheet expansion required.
+        XCTAssertTrue(app.tabBars.firstMatch.exists)
     }
 
     @MainActor

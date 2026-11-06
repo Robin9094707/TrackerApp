@@ -19,7 +19,7 @@ struct RootView: View {
         .onChange(of: model.connectionState) { _, state in
             if state == .connected { model.showingServerConnection = false }
         }
-        .tint(.blue)
+        .tint(Color.accentColor)
         .animation(reduceMotion ? nil : .smooth(duration: 0.35), value: model.connectionState)
         .alert("RJ Tracker", isPresented: Binding(get: { !model.showsMainInterface(localGoogleCredentials: google.hasCredentials) && model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK") { model.errorMessage = nil }
@@ -33,7 +33,7 @@ struct MainTabView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
     var body: some View {
-        TrackerHomeView()
+        TrackerDashboardShell()
             .task(id: scenePhase) {
                 if scenePhase == .active { await model.foregroundUpdates() }
             }

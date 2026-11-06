@@ -88,6 +88,7 @@ struct AlertsView: View {
 struct AlertDetailView: View {
     @Environment(AppModel.self) private var model
     let event: AlertEvent
+    private var current: AlertEvent { model.bootstrap?.alerts?.events?.first { $0.id == event.id } ?? event }
     var body: some View {
         List {
             Section {
@@ -95,16 +96,39 @@ struct AlertDetailView: View {
                 Text(event.body ?? "").textSelection(.enabled)
                 if let date = Date.fromUnix(event.ts) { Text(date.rjTimelineText).font(.caption).foregroundStyle(.secondary) }
             }
+            Section("Zustellung") {
+                if let delivery = current.delivery, !delivery.isEmpty {
+                    ForEach(delivery.keys.sorted(), id: \.self) { channel in
+                        let item = delivery[channel]?.objectValue ?? [:]
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(channel == "bark" ? "Bark" : channel.uppercased()).font(.headline)
+                            Text(deliveryTitle(item["status"]?.stringValue ?? ""))
+                            if let detail = item["detail"]?.stringValue { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                        }
+                    }
+                } else { Text("Noch kein Zustellergebnis. Zum Aktualisieren nach unten ziehen.").foregroundStyle(.secondary) }
+            }
             if let tracker = model.trackers.first(where: { $0.ref == event.trackerRef }) {
                 NavigationLink { TrackerDetailView(tracker: tracker) } label: { Label(tracker.name, systemImage: "airtag") }
             }
         }
         .scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Meldung").navigationBarTitleDisplayMode(.inline)
+        .refreshable { await model.refreshAlerts(limit: 500, unreadOnly: false) }
         .task {
             guard event.acknowledged != true else { return }
             do { try await model.runAction("acknowledge_event", payload: ["event_id": event.id, "acknowledged": true]) }
             catch { model.errorMessage = error.localizedDescription }
         }
     }
+    private func deliveryTitle(_ status: String) -> String {
+        switch status {
+        case "sent": "Vom Zustelldienst angenommen"
+        case "error": "Zustellung fehlgeschlagen"
+        case "partial": "Teilweise angenommen"
+        case "quiet_hours": "Durch Ruhezeit zurückgehalten"
+        default: "Noch nicht zugestellt"
+        }
+    }
+
 }
 

@@ -2,6 +2,11 @@ import XCTest
 @testable import SpotIntegration
 
 final class GooglePushReliabilityTests: XCTestCase {
+    func testPushHeadersPreserveBase64PaddingAndIgnoreOtherParameters() {
+        XCTAssertEqual(GooglePushHeader.parameter("dh", in: "p256ecdsa=other; dh=abc=="), "abc==")
+        XCTAssertEqual(GooglePushHeader.parameter("salt", in: "salt=\"abc-_\";rs=4096"), "abc-_")
+        XCTAssertEqual(GooglePushHeader.parameter("dh", in: "p256ecdsa=wrong"), "")
+    }
     func testRequestsWaitingForLoginSurviveReconnectAndSendOnlyOnce() {
         var subscriptions = GooglePushSubscriptions<String>()
         var sent: [String] = []

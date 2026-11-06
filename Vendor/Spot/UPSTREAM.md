@@ -24,3 +24,7 @@ Compared the vendored engine with:
 - [GoogleFindMyTools](https://github.com/leonboe1/GoogleFindMyTools), the related Find Hub protocol implementation, including its Firebase/MCS transport layout.
 
 Local integration fixes retain pending Nova actions across MCS reconnects, prevent expired actions from being sent on a later login, schedule initial requests directly from the loaded catalog, and preserve validated per-device keys when partial or older archived metadata arrives. No credential service, preference suite, archive path, or Core Data schema changed. Malformed truncated AES-GCM packets now fail without an out-of-bounds crash.
+
+## 7.0 transport review (2026-11-06)
+
+GoogleFindMyTools [PR #114](https://github.com/leonboe1/GoogleFindMyTools/pull/114), head `c378f8cffe5892c63de1361767eb1647dc584c45`, identifies semicolon-delimited Web Push header parameters and missing base64url padding as listener failure causes. RJ Tracker parses named dh/salt parameters in Swift and backports packet isolation/padding to its isolated Python bridge. The upstream dependency pin stays unchanged; no credential format migration or key deletion. See [the upgrade investigation](../../docs/UPGRADE-7.0.0.md).

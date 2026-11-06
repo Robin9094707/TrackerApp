@@ -1,3 +1,13 @@
+# 7.0.0 (Build 29) · Backend 21.0.0
+
+- Vollflächiges Tracker-Panel mit adaptiven Karten und eigenen Einstiegen in Karte, Schultaschen und Bark.
+- Schulwochen, geschätzte Verspätungen, getrennte unbestätigte Ortungen, freie Tage und serverseitige Meldungen.
+- Bark-Einrichtung, verschlüsselte Schlüssel, Sammelversand und sichtbare Zustellergebnisse.
+- Google: mehrteilige FCM-Antworten, Web-Push-Header, fehlerisolierte Protobuf-Entschlüsselung und abgestimmte Prozessfristen.
+- Backend-Threadkontext ohne Änderung des globalen Python-threading-Moduls; alte Android- und Gastlinks bleiben nutzbar.
+
+[Updateanleitung](docs/UPGRADE-7.0.0.md)
+
 # 6.2.0 · Schultasche & Routinen
 
 - Hauptadmins können den Schultaschenmodus direkt am Server-Tracker einschalten und pro Tracker Orte, Radien und wöchentliche Zeitfenster konfigurieren.
