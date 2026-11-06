@@ -1,3 +1,15 @@
+# RJ Tracker 6.2.0 · Backend 20.7.1
+
+**Schultasche & Routinen:** Hauptadmins können pro Server-Tracker Orte und wöchentliche Zeitfenster festlegen. Die Tagesübersicht zeigt erkannte Aufenthalte und Standortmeldungen im geplanten Zeitfenster. Der Standortverlauf bietet außerdem eine stabilere Kartensteuerung und die Ansicht „Heute komplett“.
+
+- [iOS 6.2.0 (Build 28, unsignierte IPA)](https://github.com/Robin9094707/TrackerApp/actions/runs/42212846517/artifacts/13501571800)
+- [AMP-Serverdatei 20.7.1](https://github.com/Robin9094707/TrackerApp/actions/runs/42212846517/artifacts/13499687738)
+- [Installationsanleitung](docs/UPGRADE-6.2.0.md) · [Änderungen](IOS-CHANGELOG.md) · [Getesteter Build auf `main`](https://github.com/Robin9094707/TrackerApp/actions/runs/42212846517)
+
+Für den Schultaschenmodus ist das Backend-Update erforderlich. Die IPA wird mit der bisherigen Signierungsidentität über die vorhandene App installiert.
+
+---
+
 # RJ Tracker 6.1.0 · Backend 20.6.0
 
 **AMP startet wieder:** Die Backend-Datei erkennt eine nach einem Server-Python-Update defekte Python-Umgebung (`Failed to import encodings module`) und baut sie automatisch neu auf. Dasselbe gilt für die Google-Umgebung des Servers. Daten, Anmeldungen und Tracker bleiben unverändert.

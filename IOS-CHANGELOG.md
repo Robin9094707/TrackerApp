@@ -1,3 +1,10 @@
+# 6.2.0 · Schultasche & Routinen
+
+- Hauptadmins können den Schultaschenmodus direkt am Server-Tracker einschalten und pro Tracker Orte, Radien und wöchentliche Zeitfenster konfigurieren.
+- Die Tagesübersicht zeigt bestätigte Meldungen und erkannte Aufenthalte bis zu 30 Tage zurück, soweit Standortmeldungen vorliegen.
+- Verbesserte Kartensteuerung im Verlauf, Vollbildansicht für Aufenthalte und „Heute komplett“ ab Mitternacht.
+- iOS 6.2.0 / Build 28. Für den Schultaschenmodus ist Backend 20.7.1 erforderlich. [Update-Anleitung](docs/UPGRADE-6.2.0.md).
+
 # 6.1.0 · AMP-Start repariert, Google stabil, alles in einem Stand
 
 - Backend 20.6.0: Die private Python-Umgebung wird vor jedem Start geprüft und nach einem Server-Python-Update automatisch neu aufgebaut (`Failed to import encodings module`). Fremde `PYTHONHOME`/`PYTHONPATH` werden nicht mehr übernommen. Neue Optionen `--amp-check` (Zustand anzeigen) und `--amp-repair`.
