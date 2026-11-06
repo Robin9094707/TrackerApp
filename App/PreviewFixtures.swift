@@ -17,10 +17,38 @@ enum PreviewFixtures {
         case "/api/internal-shares": json = #"{"received":[],"outgoing":[],"recipients":[],"catalog":[]}"#
         case "/api/v2/storage": json = #"{"cleanup":[{"id":"logs","label":"Alte Protokolle","description":"Alte Logdateien bereinigen","available":true,"bytes":1000}]}"#
         case "/api/google/guardian/status": json = #"{"runtime":{"ready":true,"tools_installed":true,"secrets_uploaded":true}}"#
-        case "/api/mobile/v1/history":
+        case "/api/mobile/v1/school-plan":
+            let calendar = Calendar.current
+            let today = HistoryCalendar.key(Date(), calendar: calendar)
+            json = """
+            {"enabled":false,"revision":0,"day":"\(today)","today":"\(today)","timezone":"\(calendar.timeZone.identifier)","places":[],"routines":[],"current":[],"visits":[],"checks":[]}
+            """
+        case "/api/mobile/v1/history/days":
+            let calendar = Calendar.current
+            let today = HistoryCalendar.key(Date(), calendar: calendar)
+            json = """
+            {"timezone":"\(calendar.timeZone.identifier)","today":"\(today)","days":[{"date":"\(today)","count":3,"networks":["apple","google"]}]}
+            """
+        case "/api/mobile/v1/history/stream":
             let now = Int(Date().timeIntervalSince1970)
-            let points = [HistoryPoint(latitude: 52.51, longitude: 13.37, accuracyM: 20, timestamp: now - 120, network: "apple"), HistoryPoint(latitude: 52.5101, longitude: 13.3701, accuracyM: 25, timestamp: now - 90, network: "google"), HistoryPoint(latitude: 52.5102, longitude: 13.3702, accuracyM: 20, timestamp: now - 60, network: "apple")]
-            return try? JSONEncoder().encode(HistoryResponse(status: "ok", tracker: bootstrap.trackers[0], points: points))
+            json = """
+            {"status":"ok","points":[],"has_more":false,"matching_total":3,"server_time":\(now)}
+            """
+        case "/api/mobile/v1/history":
+            let date = Date()
+            let now = Int(date.timeIntervalSince1970)
+            let start = max(Int(Calendar.current.startOfDay(for: date).timeIntervalSince1970), now - 120)
+            let points = [
+                HistoryPoint(latitude: 52.51, longitude: 13.37, accuracyM: 20, timestamp: start, network: "apple"),
+                HistoryPoint(latitude: 52.5101, longitude: 13.3701, accuracyM: 25, timestamp: min(start + 30, now), network: "google"),
+                HistoryPoint(latitude: 52.5102, longitude: 13.3702, accuracyM: 20, timestamp: min(start + 60, now), network: "apple")
+            ]
+            let stay: JSONValue = .object([
+                "latitude": .number(52.51), "longitude": .number(13.37), "radius_m": .number(25),
+                "start_ts": .number(Double(start)), "end_ts": .number(Double(now)),
+                "networks": .object(["apple": .number(2)])
+            ])
+            return try? JSONEncoder().encode(HistoryResponse(status: "ok", tracker: bootstrap.trackers[0], points: points, stays: [stay]))
         case "/api/v2/groups": json = #"{"groups":[{"id":"travel","label":"Reisen","emoji":"🧳"}]}"#
         case "/api/polling/settings": json = #"{"polling":{"enabled":true,"providers":{"apple":{"interval_min":30,"interval_max":120},"google":{"interval_min":60,"interval_max":180},"samsung":{"interval_min":40,"interval_max":120}}}}"#
         case "/api/diagnostics": json = #"{"status":"completed","checks":[{"id":"connection","title":"Serververbindung","status":"ok","summary":"Alle Ortungsnetzwerke antworten."}]}"#
@@ -43,7 +71,7 @@ enum PreviewFixtures {
            "location":{"latitude":52.5142,"longitude":13.3501,"timestamp":\(now-4500),"accuracy_m":65,"address":{"label":"Tiergarten, Berlin"}}},
           {"ref":"google:demo-case","name":"Koffer","provider":"google","emoji":"🧳","battery":"Unbekannt"}],
          "saved_places":[{"id":"demo-place","label":"Brandenburger Tor","emoji":"🏛️","latitude":52.5163,"longitude":13.3777,"radius_m":100}],
-         "geofences":[],"alerts":{"unread_count":0,"events":[]},"session":{"user":{"display_name":"Demo"}}}
+         "geofences":[],"alerts":{"unread_count":0,"events":[]},"session":{"user":{"display_name":"Demo","is_main_admin":true}}}
         """
         return try! JSONDecoder().decode(BootstrapResponse.self, from: Data(json.utf8))
     }

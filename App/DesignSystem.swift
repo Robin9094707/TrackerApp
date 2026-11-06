@@ -355,7 +355,7 @@ struct RJMapControlStack<Content: View>: View {
             stack.glassEffect(.regular.interactive(), in: Capsule())
         } else {
             stack.background(.regularMaterial, in: Capsule())
-                .overlay(Capsule().stroke(Color.primary.opacity(0.06), lineWidth: 0.5))
+                .overlay(Capsule().stroke(Color.primary.opacity(0.06), lineWidth: 0.5).allowsHitTesting(false))
                 .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
         }
     }

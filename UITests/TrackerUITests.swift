@@ -30,6 +30,20 @@ final class TrackerUITests: XCTestCase {
         bag.tap()
         XCTAssertTrue(app.otherElements["tracker-detail-header"].waitForExistence(timeout: 10))
         capture("02-Tracker-Details")
+        let school = app.buttons["tracker-school-plan"]
+        XCTAssertTrue(school.waitForExistence(timeout: 10))
+        school.tap()
+        let edit = app.buttons["Schultaschenmodus einrichten"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 10))
+        edit.tap()
+        let enabled = app.switches["school-plan-enabled"]
+        XCTAssertTrue(enabled.waitForExistence(timeout: 10))
+        XCTAssertTrue(enabled.isHittable)
+        enabled.coordinate(withNormalizedOffset: CGVector(dx: 0.80, dy: 0.5)).tap()
+        let switchedOn = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "1"), object: enabled)
+        wait(for: [switchedOn], timeout: 5)
+        XCTAssertTrue(app.buttons["Ort hinzufügen"].exists)
+        app.buttons["Abbrechen"].tap()
         app.tabBars.buttons["Orte"].tap()
         XCTAssertTrue(app.staticTexts["Brandenburger Tor"].waitForExistence(timeout: 10))
         capture("03-Places")
@@ -85,7 +99,37 @@ final class TrackerUITests: XCTestCase {
         XCTAssertTrue(bag.waitForExistence(timeout: 20))
         bag.tap()
         app.buttons["tracker-history-link"].tap()
-        XCTAssertTrue(app.buttons["Verlauf abspielen"].waitForExistence(timeout: 10))
+        let today = app.buttons["history-today"]
+        XCTAssertTrue(today.waitForExistence(timeout: 10))
+        today.tap()
+        let fit = app.buttons["history-map-fit"]
+        XCTAssertTrue(fit.waitForExistence(timeout: 10))
+        fit.tap()
+        fit.tap()
+        app.buttons["history-map-expand"].tap()
+        let close = app.buttons["history-map-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        app.buttons["history-map-full-fit"].tap()
+        close.tap()
+        XCTAssertTrue(fit.waitForExistence(timeout: 10))
+
+        let stays = app.buttons["Aufenthalte"].firstMatch
+        for _ in 0..<3 where !stays.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.025, dy: 0.77))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.025, dy: 0.34)))
+        }
+        XCTAssertTrue(stays.isHittable)
+        stays.tap()
+        let stay = app.buttons["history-stay-0"]
+        XCTAssertTrue(stay.waitForExistence(timeout: 10))
+        if !stay.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.025, dy: 0.77))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.025, dy: 0.47)))
+        }
+        XCTAssertTrue(stay.isHittable)
+        stay.tap()
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        close.tap()
         capture("10-History")
         app.tabBars.buttons["Ich"].tap()
         app.buttons["Konto & Sicherheit"].tap()

@@ -1,4 +1,4 @@
-# Universal Tag Studio 20.6.0 · SELF-HEALING AMP START AND GOOGLE RUNTIME
+# Universal Tag Studio 20.7.1 · SCHOOL BAG MODE AND NATIVE ANDROID LINKS
 # Backward-compatible single-file upgrade. Existing data/ directory layout,
 # tracker IDs, histories, shares and provider sessions are intentionally
 # preserved. Google integration: leonboe1/GoogleFindMyTools (GPL-3.0).
@@ -11983,7 +11983,7 @@ def tracker_lab_active_job():
     return None
 
 APP_NAME = "Universal Tag Studio"
-APP_VERSION = "20.6.0 API EDITION"
+APP_VERSION = "20.7.1 API EDITION"
 
 
 OPTIMIZED_ROUTE_DEFAULT_POINTS = int(os.environ.get("ULTRA_TRACKER_ROUTE_MAX_DISPLAY_POINTS", "4200"))
@@ -20346,7 +20346,10 @@ def select_request_tenant():
         path = request.path.rstrip("/")
         shared_match = re.match(r"^/(?:api/)?shared/([^/]+)", path)
         recovery_match = re.match(r"^/(?:api/)?(?:recovery-share|recovery)/([^/]+)", path)
-        if shared_match:
+        school_match = re.match(r"^/(?:api/)?school/([^/]+)", path)
+        if school_match and callable(globals().get("school_find_token_owner")):
+            tenant_id = school_find_token_owner(school_match.group(1))
+        elif shared_match:
             tenant_id = find_public_token_owner(shared_match.group(1), "shared")
         elif recovery_match:
             tenant_id = find_public_token_owner(recovery_match.group(1), "recovery")
@@ -20392,7 +20395,7 @@ def check_auth():
         "/.well-known/openid-configuration",
     }
     tenant_mcp_public = bool(re.match(r"^/t/[a-z0-9][a-z0-9_-]{0,63}/(?:mcp(?:/|$)|oauth(?:/|$)|\.well-known(?:/|$))", request.path))
-    if request.endpoint == "mcp_endpoint" or request.path in public_paths or tenant_mcp_public or request.path.startswith("/oauth/") or request.path.startswith("/shared/") or request.path.startswith("/api/shared/") or request.path.startswith("/recovery/") or request.path.startswith("/api/recovery-share/") or request.path.startswith("/api/shortcut/") or request.path.startswith("/api/password-reset/") or request.endpoint in ["index", "unlock", "unlock_two_factor", "mobile_pair_api", "mobile_pair_two_factor_api", "passkey_auth_begin_api", "passkey_auth_finish_api", "static", "favicon", "password_reset_request_api"]:
+    if request.endpoint == "mcp_endpoint" or request.path in public_paths or tenant_mcp_public or request.path.startswith("/oauth/") or request.path.startswith("/shared/") or request.path.startswith("/api/shared/") or request.path.startswith("/school/") or request.path.startswith("/api/school/") or request.path == "/.well-known/assetlinks.json" or request.path.startswith("/recovery/") or request.path.startswith("/api/recovery-share/") or request.path.startswith("/api/shortcut/") or request.path.startswith("/api/password-reset/") or request.endpoint in ["index", "unlock", "unlock_two_factor", "mobile_pair_api", "mobile_pair_two_factor_api", "passkey_auth_begin_api", "passkey_auth_finish_api", "static", "favicon", "password_reset_request_api"]:
         return
     if not session.get("app_unlocked"):
         return jsonify({"status": "locked"}), 401
@@ -28289,6 +28292,1498 @@ def findmy_maintenance_api():
 
 def findmy_maintenance_api_status():
     return jsonify(status="ok", findmy={**_findmy_update, "installed_version": findmy_installed_version()})
+
+
+# ---------------------------------------------------------------------------
+# 20.7 SCHOOL BAG MODE, NATIVE ANDROID LINK API AND ADMIN SHARING
+# ---------------------------------------------------------------------------
+# A school bag is any existing tracker (Apple, Google, Samsung or Fusion) the
+# owner marks in the admin console. A permanent family link (/school/<token>)
+# opens it in the Android app without any account. Presence at home/school is
+# derived on the server from all stored reports with hysteresis and outlier
+# protection, so one or two inaccurate AirTag reports never count as "left".
+# Existing guest links keep their format; links can now also point to single
+# Google or Samsung trackers and have a compact native app API.
+
+SCHOOL_SCHEMA = 1
+SCHOOL_EVENT_LIMIT = 3000
+SCHOOL_EVAL_INTERVAL_SECONDS = max(15, int(os.environ.get("ULTRA_TRACKER_SCHOOL_EVAL_SECONDS", "30")))
+SCHOOL_NOTIFY_MAX_AGE_SECONDS = 3 * 3600
+SCHOOL_ATTENDANCE_KEEP_DAYS = 400
+SCHOOL_HISTORY_MAX_SPAN_SECONDS = 31 * 24 * 3600
+SCHOOL_HISTORY_MAX_POINTS = 6000
+SCHOOL_PLACE_KINDS = {"home": "Zuhause", "school": "Schule", "other": "Ort"}
+SCHOOL_LOCATE_COOLDOWN_SECONDS = 10
+SCHOOL_GREETING_DEFAULT = os.environ.get("ULTRA_TRACKER_SCHOOL_GREETING", "Jessy")
+ANDROID_APP_PACKAGE = "eu.rjuhas.rjtracker.android"
+# SHA-256 of the signing certificate used by the GitHub Actions Android build.
+# Additional fingerprints (for example an own release key) can be added with
+# ULTRA_TRACKER_ANDROID_CERT_SHA256 (comma separated).
+ANDROID_APP_CERT_SHA256 = "DB:D1:58:2F:61:09:B5:43:90:95:3E:0C:7E:D8:A2:96:7B:BA:1F:A9:77:E0:07:EB:97:7B:22:F2:E7:4F:14:53"
+
+school_lock = threading.RLock()
+_school_eval_runtime = {}
+_school_locate_runtime = {}
+
+
+class SchoolError(Exception):
+    def __init__(self, message, status=400, code="invalid"):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+
+
+def school_file():
+    return Path(os.fspath(DATA_DIR)) / "school_mode.json"
+
+
+def default_school_schedule():
+    return {
+        "days": {str(day): {"enabled": day <= 5, "start": "08:00", "end": ""} for day in range(1, 8)},
+        "grace_minutes": 5,
+        "absent_after_minutes": 90,
+        "off_days": [],
+        "updated_ts": 0,
+    }
+
+
+def default_school_store():
+    return {
+        "schema": SCHOOL_SCHEMA, "bags": {}, "links": {}, "places": {},
+        "schedule": default_school_schedule(), "presence": {}, "events": [],
+        "event_seq": 0, "event_index": [], "attendance": {}, "attendance_notified": {},
+        "updated_ts": 0,
+    }
+
+
+def school_clock(value, default=""):
+    text = str(value or "").strip()
+    if not text:
+        return default
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
+    if not match or int(match.group(1)) > 23 or int(match.group(2)) > 59:
+        raise SchoolError("Uhrzeiten bitte als HH:MM angeben.")
+    return f"{int(match.group(1)):02d}:{match.group(2)}"
+
+
+def normalize_school_schedule(raw):
+    base = default_school_schedule()
+    raw = raw if isinstance(raw, dict) else {}
+    days = raw.get("days") if isinstance(raw.get("days"), dict) else {}
+    for day in range(1, 8):
+        row = days.get(str(day)) if isinstance(days.get(str(day)), dict) else {}
+        current = base["days"][str(day)]
+        try:
+            start = school_clock(row.get("start"), current["start"]) or current["start"]
+        except SchoolError:
+            start = current["start"]
+        try:
+            end = school_clock(row.get("end"), "")
+        except SchoolError:
+            end = ""
+        if end and end <= start:
+            end = ""
+        base["days"][str(day)] = {"enabled": settings_bool(row.get("enabled"), current["enabled"]), "start": start, "end": end}
+    base["grace_minutes"] = int_range(raw.get("grace_minutes"), 5, 0, 60)
+    base["absent_after_minutes"] = int_range(raw.get("absent_after_minutes"), 90, 15, 360)
+    off_days = []
+    for value in raw.get("off_days") or []:
+        if isinstance(value, dict):
+            day, label = str(value.get("day") or ""), str(value.get("label") or "")[:60]
+        else:
+            day, label = str(value or ""), ""
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+            off_days.append({"day": day, "label": label})
+    base["off_days"] = sorted({row["day"]: row for row in off_days}.values(), key=lambda row: row["day"])[-400:]
+    base["updated_ts"] = int(float(raw.get("updated_ts", 0) or 0))
+    return base
+
+
+def normalize_school_place(raw, place_id=None):
+    raw = raw if isinstance(raw, dict) else {}
+    try:
+        lat, lon = float(raw.get("lat")), float(raw.get("lon"))
+    except (TypeError, ValueError):
+        raise SchoolError("Für den Ort fehlen gültige Koordinaten.")
+    if not (math.isfinite(lat) and math.isfinite(lon) and -90 <= lat <= 90 and -180 <= lon <= 180):
+        raise SchoolError("Für den Ort fehlen gültige Koordinaten.")
+    kind = str(raw.get("kind") or "other").lower()
+    if kind not in SCHOOL_PLACE_KINDS:
+        kind = "other"
+    name = str(raw.get("name") or SCHOOL_PLACE_KINDS[kind]).strip()[:60] or SCHOOL_PLACE_KINDS[kind]
+    now_ts = int(time.time())
+    return {
+        "id": str(place_id or raw.get("id") or secrets.token_hex(6))[:32],
+        "kind": kind, "name": name, "lat": round(lat, 7), "lon": round(lon, 7),
+        "radius_m": int_range(raw.get("radius_m"), 120, 30, 2000),
+        "created_ts": int(float(raw.get("created_ts", now_ts) or now_ts)),
+        "updated_ts": now_ts if place_id is None else int(float(raw.get("updated_ts", now_ts) or now_ts)),
+    }
+
+
+def normalize_school_store(raw):
+    store = default_school_store()
+    raw = raw if isinstance(raw, dict) else {}
+    for key in ("bags", "links", "presence", "attendance", "attendance_notified"):
+        if isinstance(raw.get(key), dict):
+            store[key] = raw[key]
+    places = {}
+    for place_id, row in (raw.get("places") or {}).items() if isinstance(raw.get("places"), dict) else []:
+        try:
+            normalized = normalize_school_place(row, place_id)
+            normalized["created_ts"] = int(float(row.get("created_ts", 0) or 0)) or normalized["created_ts"]
+            normalized["updated_ts"] = int(float(row.get("updated_ts", 0) or 0)) or normalized["updated_ts"]
+            places[normalized["id"]] = normalized
+        except SchoolError:
+            continue
+    store["places"] = places
+    store["schedule"] = normalize_school_schedule(raw.get("schedule"))
+    store["events"] = [row for row in (raw.get("events") or []) if isinstance(row, dict)][-SCHOOL_EVENT_LIMIT:]
+    store["event_seq"] = max([int(row.get("seq", 0) or 0) for row in store["events"]] + [int(raw.get("event_seq", 0) or 0)])
+    store["event_index"] = [row for row in (raw.get("event_index") or []) if isinstance(row, dict)][-2000:]
+    store["updated_ts"] = int(float(raw.get("updated_ts", 0) or 0))
+    return store
+
+
+def school_store():
+    with school_lock:
+        store = state.get("school_mode")
+        if not isinstance(store, dict) or store.get("schema") != SCHOOL_SCHEMA:
+            store = normalize_school_store(safe_load_json(school_file(), default_school_store()))
+            state["school_mode"] = store
+        return store
+
+
+def school_save():
+    with school_lock:
+        store = school_store()
+        store["updated_ts"] = int(time.time())
+        atomic_write_json(school_file(), store, private=True)
+
+
+def school_public_base_url():
+    try:
+        return mcp_public_base_url(True)
+    except Exception:
+        return PUBLIC_BASE_URL_DEFAULT or ""
+
+
+def school_link_url(token):
+    return f"{school_public_base_url()}/school/{token}"
+
+
+def guest_link_url(link_id):
+    return f"{school_public_base_url()}/shared/{link_id}"
+
+
+# --- tracker helpers -------------------------------------------------------
+
+def school_model(ref):
+    """Resolve an exact tracker reference; never a fuzzy name match."""
+    ref = str(ref or "")
+    for model in mcp_all_trackers():
+        if str(model.get("ref") or "") == ref:
+            return model
+    return None
+
+
+def school_model_points(model, since_ts, until_ts=None):
+    until_ts = until_ts or time.time() + 60
+    window = {"since_ts": int(since_ts), "until_ts": int(until_ts)}
+    points = mcp_history_internal_points(model, window, raw_reports=True)
+    current = model.get("location")
+    normalized_current = normalize_point(current) if isinstance(current, dict) else None
+    if normalized_current and since_ts <= normalized_current["ts"] <= until_ts:
+        if not points or normalized_current["ts"] > float(points[-1].get("ts", 0) or 0) + 1:
+            points.append({**current, **normalized_current, "source": current.get("source") or model.get("provider")})
+    return sorted(points, key=lambda point: float(point.get("ts", 0) or 0))
+
+
+def school_point_public(point):
+    row = {
+        "lat": round(float(point["lat"]), 7), "lon": round(float(point["lon"]), 7),
+        "acc": round(float(point.get("acc", 0) or 0), 1), "ts": int(float(point["ts"])),
+        "source": str(point.get("source") or "unknown"),
+    }
+    if point.get("received_at"):
+        row["received_at"] = int(float(point.get("received_at") or 0))
+    return row
+
+
+def school_location_public(model):
+    location = mcp_clean_location((model or {}).get("location"))
+    if not location:
+        return None
+    address = location.get("address") if isinstance(location.get("address"), dict) else None
+    label = ""
+    if address:
+        label = str(address.get("label") or address.get("display_name") or address.get("street_line") or address.get("locality") or "")[:160]
+    return {
+        "lat": location["latitude"], "lon": location["longitude"], "acc": location["accuracy_m"],
+        "ts": location["timestamp"], "source": location.get("network") or "unknown",
+        "address": label, "freshness": (location.get("freshness") or {}).get("label", ""),
+    }
+
+
+def school_source_policies(ref):
+    """Make sure every network behind a bag collects history (never shortened)."""
+    provider, _, tracker_id = str(ref).partition(":")
+    targets = []
+    if provider == "fusion":
+        targets.append(("fusion", tracker_id))
+        if tracker_id in state.get("accessories", {}):
+            targets.append(("apple", tracker_id))
+        google_id, samsung_id = fusion_profile_source_ids(tracker_id)
+        if google_id:
+            targets.append(("google", google_id))
+        if samsung_id:
+            targets.append(("samsung", samsung_id))
+    elif provider in {"apple", "google", "samsung"}:
+        targets.append((provider, tracker_id))
+    return targets
+
+
+def school_enable_history(ref):
+    for provider, tracker_id in school_source_policies(ref):
+        try:
+            policy = history_direct_policy(provider, tracker_id, include_legacy=provider != "fusion")
+            if policy.get("enabled") and (policy.get("mode") != "days" or int(policy.get("days") or 0) >= 60):
+                continue
+            set_history_policy(provider, tracker_id, True, "days", max(90, int(policy.get("days") or 0)))
+        except Exception as exc:
+            logger.warning("Schultasche: Verlauf für %s:%s konnte nicht aktiviert werden (%s).", provider, tracker_id, type(exc).__name__)
+
+
+def school_bag_source_active(provider, tracker_id):
+    """Polling reason: school bags are collected even without other features."""
+    try:
+        store = state.get("school_mode")
+        if not isinstance(store, dict):
+            store = school_store()
+        bags = store.get("bags", {})
+    except Exception:
+        return False
+    if not bags:
+        return False
+    provider, tracker_id = str(provider), str(tracker_id)
+    for ref, bag in bags.items():
+        if not isinstance(bag, dict) or not bag.get("enabled", True):
+            continue
+        if (provider, tracker_id) in school_source_policies(ref):
+            return True
+    return False
+
+
+# --- presence engine -------------------------------------------------------
+
+def school_place_intervals(points, place, now_ts=None):
+    """Robust geofence presence from noisy crowd-sourced reports.
+
+    * Hysteresis: entering needs the inner radius, leaving the outer buffer.
+    * Accuracy-aware: a report counts as inside if its uncertainty circle
+      reaches the geofence and its accuracy is plausible for the place size.
+    * Outliers: one stray report never flips the state. Entering needs two
+      inside reports (or one precise report that is not contradicted for
+      8 minutes); leaving needs at least two clearly outside reports spanning
+      four minutes, three reports, one far precise report or a solid outside
+      report that stays uncontradicted for 20 minutes.
+    * Short gaps (< 6 minutes) between visits are merged.
+    """
+    now_ts = float(now_ts or time.time())
+    radius = float(place.get("radius_m", 120) or 120)
+    exit_radius = radius + max(40.0, min(200.0, radius * 0.5))
+    plausible_acc = max(150.0, radius * 2.0)
+    intervals, current = [], None
+    inside_state = None
+    pending_in, pending_out = [], []
+
+    def commit_enter(entered_unknown):
+        nonlocal current, inside_state, pending_in, pending_out
+        first = pending_in[0]
+        current = {"enter_ts": int(first["ts"]), "last_in_ts": int(pending_in[-1]["ts"]), "leave_ts": None,
+                   "entered_unknown": bool(entered_unknown), "reports": len(pending_in)}
+        inside_state, pending_in, pending_out = True, [], []
+
+    def commit_leave():
+        nonlocal current, inside_state, pending_in, pending_out
+        if current is not None:
+            current["leave_ts"] = int(pending_out[0]["ts"])
+            intervals.append(current)
+        current, inside_state, pending_in, pending_out = None, False, [], []
+
+    for point in points:
+        try:
+            lat, lon, ts = float(point["lat"]), float(point["lon"]), float(point["ts"])
+            acc = float(point.get("acc", 0) or 0)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if acc <= 0:
+            acc = 50.0
+        if acc > 1000:
+            continue
+        distance = haversine_distance(place["lat"], place["lon"], lat, lon)
+        slack = 0.5 * min(acc, 300.0)
+        is_inside = distance <= radius + slack and acc <= plausible_acc
+        is_outside = distance - slack > exit_radius
+        is_near = distance <= exit_radius
+        sample = {"ts": ts, "d": distance, "acc": acc}
+        if inside_state:
+            if is_inside or is_near:
+                pending_out = []
+                if is_inside:
+                    current["last_in_ts"] = int(ts)
+                    current["reports"] = current.get("reports", 0) + 1
+                continue
+            if not is_outside:
+                continue
+            pending_out.append(sample)
+            far = distance - acc > exit_radius + 400 and acc <= 100
+            span = pending_out[-1]["ts"] - pending_out[0]["ts"]
+            if far or len(pending_out) >= 3 or (len(pending_out) >= 2 and span >= 240):
+                commit_leave()
+            continue
+        # outside or unknown
+        if is_outside:
+            pending_in = []
+            if inside_state is None:
+                inside_state = False
+            continue
+        if not is_inside:
+            continue
+        if pending_in and ts - pending_in[-1]["ts"] > 45 * 60:
+            pending_in = []
+        pending_in.append(sample)
+        if len(pending_in) >= 2:
+            commit_enter(inside_state is None)
+        elif acc <= 60 and distance <= radius * 0.75:
+            # Precise single report: confirmed when the next report (any) is
+            # at least eight minutes later and not clearly outside.
+            pass
+    # End of stream: time-based confirmations.
+    if not inside_state and len(pending_in) == 1:
+        lone = pending_in[0]
+        if lone["acc"] <= 60 and lone["d"] <= radius * 0.75 and now_ts - lone["ts"] >= 8 * 60:
+            commit_enter(inside_state is None)
+    if inside_state and len(pending_out) == 1:
+        lone = pending_out[0]
+        if lone["acc"] <= 100 and now_ts - lone["ts"] >= 20 * 60:
+            commit_leave()
+    if current is not None:
+        intervals.append(current)
+    merged = []
+    for row in intervals:
+        if merged and merged[-1]["leave_ts"] is not None and row["enter_ts"] - merged[-1]["leave_ts"] < 6 * 60:
+            previous = merged[-1]
+            previous.update(last_in_ts=row["last_in_ts"], leave_ts=row["leave_ts"],
+                            reports=previous.get("reports", 0) + row.get("reports", 0))
+            continue
+        merged.append(dict(row))
+    state_now = {
+        "inside": inside_state if current is None else True,
+        "since_ts": (current or {}).get("enter_ts") or (merged[-1]["leave_ts"] if merged and merged[-1]["leave_ts"] else None),
+        "last_in_ts": merged[-1]["last_in_ts"] if merged else None,
+        "pending": "leaving" if current is not None and pending_out else ("entering" if current is None and pending_in else None),
+    }
+    return merged, state_now
+
+
+def school_day_window(day_key, schedule):
+    date_value = datetime.strptime(day_key, "%Y-%m-%d").replace(tzinfo=APP_TIMEZONE)
+    weekday = date_value.isoweekday()
+    config = schedule["days"].get(str(weekday), {"enabled": False, "start": "08:00", "end": ""})
+    hour, minute = (int(part) for part in config["start"].split(":"))
+    start_ts = date_value.replace(hour=hour, minute=minute).timestamp()
+    end_ts = None
+    if config.get("end"):
+        end_hour, end_minute = (int(part) for part in config["end"].split(":"))
+        end_ts = date_value.replace(hour=end_hour, minute=end_minute).timestamp()
+    day_start, day_end = local_day_bounds(day_key)
+    return weekday, config, start_ts, end_ts, day_start, day_end
+
+
+def school_attendance_record(day_key, visits, places, schedule, points, now_ts):
+    weekday, config, start_ts, end_ts, day_start, day_end = school_day_window(day_key, schedule)
+    off = next((row for row in schedule.get("off_days", []) if row.get("day") == day_key), None)
+    record = {
+        "day": day_key, "weekday": weekday, "start": config["start"], "end": config.get("end", ""),
+        "status": "free", "label": "", "arrival_ts": None, "leave_ts": None, "last_in_ts": None,
+        "present_minutes": 0, "late_minutes": 0, "early_leave": False, "already_there": False,
+        "home_departure_ts": None, "travel_minutes": None, "report_count": 0, "evidence": None,
+        "updated_ts": int(now_ts),
+    }
+    if off:
+        record.update(status="free", label=off.get("label") or "Schulfrei")
+        return record
+    if not config.get("enabled"):
+        record["label"] = "Kein Schultag"
+        return record
+    school_ids = [place_id for place_id, place in places.items() if place.get("kind") == "school"]
+    if not school_ids:
+        record.update(status="setup", label="Schule als Ort festlegen")
+        return record
+    window_start = start_ts - 4 * 3600
+    window_end = end_ts + 2 * 3600 if end_ts else start_ts + 10 * 3600
+    window_end = min(window_end, day_end)
+    school_visits = sorted(
+        [visit for place_id in school_ids for visit in visits.get(place_id, [])
+         if visit["enter_ts"] < window_end and (visit["leave_ts"] or now_ts) > window_start],
+        key=lambda visit: visit["enter_ts"],
+    )
+    record["report_count"] = sum(1 for point in points if day_start <= float(point["ts"]) < day_end)
+    grace, absent_after = schedule["grace_minutes"] * 60, schedule["absent_after_minutes"] * 60
+    if school_visits:
+        first = school_visits[0]
+        arrival = first["enter_ts"]
+        record["already_there"] = bool(first.get("entered_unknown") and first["enter_ts"] <= start_ts)
+        record["arrival_ts"] = int(arrival)
+        late_seconds = 0 if record["already_there"] else max(0, arrival - start_ts)
+        record["late_minutes"] = int(late_seconds // 60)
+        record["status"] = "late" if late_seconds > grace else "on_time"
+        last = school_visits[-1]
+        record["last_in_ts"] = int(last["last_in_ts"])
+        record["leave_ts"] = int(last["leave_ts"]) if last["leave_ts"] and last["leave_ts"] <= day_end else None
+        present = 0
+        for visit in school_visits:
+            begin = max(visit["enter_ts"], window_start)
+            finish = min(visit["leave_ts"] or now_ts, day_end)
+            present += max(0, finish - begin)
+        record["present_minutes"] = int(present // 60)
+        if end_ts and record["leave_ts"] and record["leave_ts"] < end_ts - 10 * 60:
+            record["early_leave"] = True
+        if record["leave_ts"] is None and last["leave_ts"] is None:
+            record["label"] = "In der Schule"
+    else:
+        if now_ts < start_ts + grace:
+            record["status"] = "upcoming"
+        elif now_ts < start_ts + absent_after:
+            record["status"] = "missing"
+        else:
+            record["status"] = "absent"
+        evidence_points = [point for point in points if start_ts <= float(point["ts"]) <= start_ts + absent_after]
+        if evidence_points:
+            sample = evidence_points[len(evidence_points) // 2]
+            nearest = min(places.values(), key=lambda place: haversine_distance(place["lat"], place["lon"], sample["lat"], sample["lon"]), default=None)
+            distance = haversine_distance(nearest["lat"], nearest["lon"], sample["lat"], sample["lon"]) if nearest else None
+            record["evidence"] = {
+                "ts": int(sample["ts"]), "lat": round(float(sample["lat"]), 6), "lon": round(float(sample["lon"]), 6),
+                "near_place": nearest["name"] if nearest and distance is not None and distance <= nearest["radius_m"] + 150 else "",
+                "reports": len(evidence_points),
+            }
+        elif record["status"] == "absent":
+            record["status"] = "no_data"
+    home_ids = [place_id for place_id, place in places.items() if place.get("kind") == "home"]
+    reference_ts = record["arrival_ts"] or (start_ts + absent_after)
+    departures = [visit["leave_ts"] for place_id in home_ids for visit in visits.get(place_id, [])
+                  if visit.get("leave_ts") and start_ts - 4 * 3600 <= visit["leave_ts"] <= reference_ts]
+    if departures:
+        record["home_departure_ts"] = int(max(departures))
+        if record["arrival_ts"]:
+            record["travel_minutes"] = max(0, int((record["arrival_ts"] - record["home_departure_ts"]) // 60))
+    return record
+
+
+SCHOOL_STATUS_TEXT = {
+    "on_time": "Pünktlich", "late": "Verspätet", "missing": "Noch nicht in der Schule",
+    "absent": "Nicht in der Schule", "no_data": "Keine Standortdaten", "upcoming": "Noch vor Schulbeginn",
+    "free": "Schulfrei", "setup": "Schule fehlt",
+}
+
+
+def school_event_append(store, event):
+    store["event_seq"] = int(store.get("event_seq", 0) or 0) + 1
+    event = {"seq": store["event_seq"], "created_ts": int(time.time()), **event}
+    store["events"].append(event)
+    store["events"] = store["events"][-SCHOOL_EVENT_LIMIT:]
+    return event
+
+
+def school_event_seen(store, key, ts, tolerance=25 * 60):
+    for row in store.get("event_index", []):
+        if row.get("key") == key and abs(int(row.get("ts", 0)) - int(ts)) <= tolerance:
+            return True
+    return False
+
+
+def school_fmt_time(ts):
+    return local_datetime(ts).strftime("%H:%M") if ts else "–"
+
+
+def school_bag_label(bag, model):
+    return str(bag.get("label") or (model or {}).get("name") or "Schultasche")[:60]
+
+
+def school_evaluate_bag(store, ref, bag, now_ts, emit=True):
+    model = school_model(ref)
+    if not model:
+        return None
+    places = store.get("places", {})
+    day_today = local_day_key(now_ts)
+    day_yesterday = local_day_key(now_ts - 86400)
+    since_ts = local_day_bounds(day_yesterday)[0] - 6 * 3600
+    points = school_model_points(model, since_ts, now_ts + 60)
+    visits, presence = {}, {}
+    label = school_bag_label(bag, model)
+    child = str(bag.get("child_name") or "").strip()
+    who = child or label
+    for place_id, place in places.items():
+        rows, current = school_place_intervals(points, place, now_ts)
+        visits[place_id] = rows
+        presence[place_id] = current
+        for row in rows:
+            candidates = []
+            if not row.get("entered_unknown"):
+                candidates.append(("enter", row["enter_ts"]))
+            if row.get("leave_ts"):
+                candidates.append(("leave", row["leave_ts"]))
+            for kind, ts in candidates:
+                key = f"{ref}|{place_id}|{kind}"
+                if school_event_seen(store, key, ts):
+                    continue
+                store["event_index"].append({"key": key, "ts": int(ts)})
+                store["event_index"] = store["event_index"][-2000:]
+                floor = max(int(place.get("created_ts", 0) or 0), int(bag.get("created_ts", 0) or 0))
+                if not emit or ts < floor or now_ts - ts > SCHOOL_NOTIFY_MAX_AGE_SECONDS:
+                    continue
+                verb = "ist angekommen" if kind == "enter" else "hat verlassen"
+                if kind == "enter":
+                    title = f"{who} · {place['name']} erreicht"
+                    body = f"{label} ist seit {school_fmt_time(ts)} bei {place['name']}."
+                else:
+                    stay = max(0, int((row["last_in_ts"] - row["enter_ts"]) // 60))
+                    title = f"{who} · {place['name']} verlassen"
+                    body = f"{label} hat {place['name']} um ca. {school_fmt_time(ts)} verlassen (zuletzt dort {school_fmt_time(row['last_in_ts'])}, Aufenthalt {stay // 60} h {stay % 60} min)."
+                school_event_append(store, {
+                    "type": f"{place['kind']}_{kind}", "kind": kind, "ref": ref, "place_id": place_id,
+                    "place_kind": place["kind"], "place_name": place["name"], "ts": int(ts),
+                    "title": title, "body": body, "verb": verb,
+                })
+    schedule = store["schedule"]
+    bag_attendance = store.setdefault("attendance", {}).setdefault(ref, {})
+    for day_key in (day_yesterday, day_today):
+        record = school_attendance_record(day_key, visits, places, schedule, points, now_ts)
+        record["status_text"] = SCHOOL_STATUS_TEXT.get(record["status"], record["status"])
+        bag_attendance[day_key] = record
+        if not emit or day_key != day_today:
+            continue
+        notified = store.setdefault("attendance_notified", {}).setdefault(day_key, {}).setdefault(ref, [])
+        floor = int(bag.get("created_ts", 0) or 0)
+        _, _, start_ts, _, _, _ = school_day_window(day_key, schedule)
+        configured_ts = max(floor, int(schedule.get("updated_ts", 0) or 0),
+                            max([int(place.get("created_ts", 0) or 0) for place in places.values() if place.get("kind") == "school"] or [0]))
+
+        def fresh(threshold):
+            # Only announce a missed threshold shortly after it passed and only
+            # if the schedule/school already existed at that moment.
+            return configured_ts <= threshold <= now_ts <= threshold + SCHOOL_NOTIFY_MAX_AGE_SECONDS
+
+        missing_threshold = start_ts + schedule["grace_minutes"] * 60
+        absent_threshold = start_ts + schedule["absent_after_minutes"] * 60
+        if record["status"] == "missing" and "missing" not in notified and fresh(missing_threshold):
+            notified.append("missing")
+            school_event_append(store, {
+                "type": "late_missing", "kind": "late", "ref": ref, "ts": int(now_ts),
+                "title": f"{who} · noch nicht in der Schule",
+                "body": f"Schulbeginn war {record['start']} Uhr. {label} wurde bisher nicht in der Schule geortet.",
+            })
+        if record["status"] in {"absent", "no_data"} and "absent" not in notified and fresh(absent_threshold):
+            notified.append("absent")
+            school_event_append(store, {
+                "type": "absent", "kind": "absent", "ref": ref, "ts": int(now_ts),
+                "title": f"{who} · nicht in der Schule",
+                "body": ("Keine Standortdaten seit Schulbeginn." if record["status"] == "no_data"
+                         else f"{label} war bis {school_fmt_time(now_ts)} nicht in der Schule."),
+            })
+        if record["status"] == "late" and record.get("arrival_ts") and "late_arrival" not in notified and now_ts - record["arrival_ts"] < SCHOOL_NOTIFY_MAX_AGE_SECONDS:
+            notified.append("late_arrival")
+            school_event_append(store, {
+                "type": "late_arrival", "kind": "late", "ref": ref, "ts": int(record["arrival_ts"]),
+                "title": f"{who} · {record['late_minutes']} min verspätet",
+                "body": f"Angekommen um {school_fmt_time(record['arrival_ts'])}, Schulbeginn {record['start']} Uhr.",
+            })
+    keep_after = local_day_key(now_ts - SCHOOL_ATTENDANCE_KEEP_DAYS * 86400)
+    for day_key in [day for day in bag_attendance if day < keep_after]:
+        bag_attendance.pop(day_key, None)
+    for day_key in [day for day in store.get("attendance_notified", {}) if day < day_yesterday]:
+        store["attendance_notified"].pop(day_key, None)
+    store.setdefault("presence", {})[ref] = {"updated_ts": int(now_ts), "places": presence,
+                                             "last_point_ts": int(points[-1]["ts"]) if points else None}
+    return {"model": model, "points": points, "visits": visits, "presence": presence}
+
+
+def school_evaluate(force=False, emit=True):
+    """Evaluate all bags of the active tenant. Cheap enough for 30 s cycles."""
+    tenant = current_tenant_id()
+    now_ts = time.time()
+    with school_lock:
+        last = _school_eval_runtime.get(tenant, 0)
+        if not force and now_ts - last < 10:
+            return False
+        _school_eval_runtime[tenant] = now_ts
+        store = school_store()
+        bags = {ref: bag for ref, bag in store.get("bags", {}).items() if isinstance(bag, dict) and bag.get("enabled", True)}
+        if not bags:
+            return False
+        events_before = store.get("event_seq", 0)
+        for ref, bag in bags.items():
+            try:
+                school_evaluate_bag(store, ref, bag, now_ts, emit=emit)
+            except Exception as exc:
+                logger.warning("Schultasche %s konnte nicht ausgewertet werden: %s", ref, type(exc).__name__)
+        school_save()
+        if store.get("event_seq", 0) != events_before:
+            logger.info("[SCHULTASCHE] %d neue Ereignisse", store.get("event_seq", 0) - events_before)
+        return True
+
+
+def school_worker():
+    while True:
+        time.sleep(SCHOOL_EVAL_INTERVAL_SECONDS)
+        for tenant_id in tenant_ids(active_only=True):
+            try:
+                with tenant_context(tenant_id):
+                    school_evaluate(force=True)
+            except Exception as exc:
+                logger.debug("Schultaschen-Auswertung für %s übersprungen: %s", tenant_id, type(exc).__name__)
+
+
+# Hook school bags into the existing demand-driven polling: no new job, the
+# same coalesced provider request serves history, alerts and school mode.
+_school_original_reasons = {
+    "apple": apple_active_reasons, "google": google_active_reasons, "samsung": samsung_active_reasons,
+}
+
+
+def _school_reason_wrapper(provider):
+    original = _school_original_reasons[provider]
+
+    def reasons(tracker_id):
+        result = list(original(tracker_id))
+        if provider == "apple" and tracker_id not in state.get("accessories", {}):
+            return result
+        if provider == "google" and google_server_collection_paused(tracker_id):
+            return result
+        if "school_bag" not in result and school_bag_source_active(provider, tracker_id):
+            result.append("school_bag")
+        return result
+    reasons.__name__ = original.__name__
+    reasons.__doc__ = original.__doc__
+    return reasons
+
+
+apple_active_reasons = _school_reason_wrapper("apple")
+google_active_reasons = _school_reason_wrapper("google")
+samsung_active_reasons = _school_reason_wrapper("samsung")
+_school_original_google_interval = google_interval_for
+_school_original_samsung_interval = samsung_interval_for
+
+
+def google_interval_for(device_id):
+    minimum, maximum = _school_original_google_interval(device_id)
+    if school_bag_source_active("google", device_id):
+        return min(minimum, 30), min(maximum, 35)
+    return minimum, maximum
+
+
+def samsung_interval_for(device_id):
+    minimum, maximum = _school_original_samsung_interval(device_id)
+    if school_bag_source_active("samsung", device_id):
+        return min(minimum, 20), min(maximum, 30)
+    return minimum, maximum
+
+
+# --- public school API -----------------------------------------------------
+
+def school_find_token_owner(token):
+    token = str(token or "")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{20,128}", token):
+        return "main"
+    for tenant_id in tenant_ids(active_only=True):
+        try:
+            ensure_tenant_state(tenant_id, start_workers=False)
+            with tenant_context(tenant_id):
+                if token in school_store().get("links", {}):
+                    return tenant_id
+        except Exception:
+            continue
+    return "main"
+
+
+def school_authorize(token):
+    key = f"{client_key()}:school"
+    if is_share_rate_limited(key):
+        raise SchoolError("Zu viele ungültige Versuche. Bitte später erneut versuchen.", 429, "rate_limited")
+    link = school_store().get("links", {}).get(str(token or ""))
+    if not isinstance(link, dict) or not link.get("active", True):
+        register_share_failure(key)
+        raise SchoolError("Dieser Schultaschen-Link ist ungültig oder wurde widerrufen. Bitte Robin nach einem neuen Link fragen.", 404, "invalid_link")
+    now_ts = int(time.time())
+    if now_ts - int(link.get("last_access_ts", 0) or 0) > 300:
+        link["last_access_ts"] = now_ts
+        link["access_count"] = int(link.get("access_count", 0) or 0) + 1
+        school_save()
+    return link
+
+
+def school_link_bags(link):
+    store = school_store()
+    refs = link.get("refs") or ["*"]
+    bags = store.get("bags", {})
+    return {ref: bag for ref, bag in bags.items() if isinstance(bag, dict) and bag.get("enabled", True) and ("*" in refs or ref in refs)}
+
+
+def school_bag_public(ref, bag, model, store):
+    presence = store.get("presence", {}).get(ref, {})
+    places = store.get("places", {})
+    current_place = None
+    for place_id, row in (presence.get("places") or {}).items():
+        if row.get("inside") and place_id in places:
+            current_place = {"id": place_id, "name": places[place_id]["name"], "kind": places[place_id]["kind"], "since_ts": row.get("since_ts")}
+            break
+    today = store.get("attendance", {}).get(ref, {}).get(local_day_key())
+    details = (model or {}).get("details") or {}
+    return {
+        "ref": ref, "label": school_bag_label(bag, model), "child_name": str(bag.get("child_name") or "")[:40],
+        "emoji": str(bag.get("emoji") or details.get("emoji") or "🎒")[:8], "provider": (model or {}).get("provider", "unknown"),
+        "battery": str((model or {}).get("battery") or "")[:40], "location": school_location_public(model),
+        "current_place": current_place, "presence": presence.get("places") or {}, "today": today,
+        "last_point_ts": presence.get("last_point_ts"),
+    }
+
+
+def school_overview(link):
+    school_evaluate(force=False)
+    store = school_store()
+    bags = []
+    for ref, bag in school_link_bags(link).items():
+        bags.append(school_bag_public(ref, bag, school_model(ref), store))
+    return {
+        "status": "ok", "kind": "school", "server_time": int(time.time()), "timezone": APP_TIMEZONE_NAME,
+        "viewer_name": str(link.get("viewer_name") or SCHOOL_GREETING_DEFAULT)[:40],
+        "label": str(link.get("label") or "Schultasche")[:60],
+        "bags": bags, "places": list(store.get("places", {}).values()), "schedule": store["schedule"],
+        "latest_event_seq": int(store.get("event_seq", 0) or 0),
+        "can_edit": bool(link.get("can_edit", True)),
+        "poll_seconds": 20,
+    }
+
+
+def school_json(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except SchoolError as exc:
+            return jsonify({"status": "error", "code": exc.code, "message": str(exc)}), exc.status
+    return wrapped
+
+
+@app.route("/api/school/<token>", methods=["GET"])
+@school_json
+def school_overview_api(token):
+    link = school_authorize(token)
+    return jsonify(school_overview(link))
+
+
+@app.route("/api/school/<token>/history", methods=["GET"])
+@school_json
+def school_history_api(token):
+    link = school_authorize(token)
+    bags = school_link_bags(link)
+    ref = str(request.args.get("ref") or next(iter(bags), ""))
+    if ref not in bags:
+        raise SchoolError("Diese Schultasche gehört nicht zu diesem Link.", 404, "unknown_bag")
+    now_ts = time.time()
+    until_ts = float_range(request.args.get("to"), now_ts, 0, now_ts + 60)
+    since_ts = float_range(request.args.get("from"), until_ts - 86400, 0, until_ts)
+    since_ts = max(since_ts, until_ts - SCHOOL_HISTORY_MAX_SPAN_SECONDS)
+    model = school_model(ref)
+    if not model:
+        raise SchoolError("Der Tracker ist auf dem Server nicht mehr vorhanden.", 404, "missing_tracker")
+    points = school_model_points(model, since_ts, until_ts)
+    places = school_store().get("places", {})
+    visits = []
+    context_points = school_model_points(model, since_ts - 12 * 3600, until_ts)
+    for place_id, place in places.items():
+        rows, _ = school_place_intervals(context_points, place, now_ts)
+        for row in rows:
+            if row["enter_ts"] <= until_ts and (row["leave_ts"] or now_ts) >= since_ts:
+                visits.append({"place_id": place_id, "place_name": place["name"], "place_kind": place["kind"], **row})
+    visits.sort(key=lambda row: row["enter_ts"])
+    raw_count = len(points)
+    if len(points) > SCHOOL_HISTORY_MAX_POINTS:
+        points = downsample_route_points(points, SCHOOL_HISTORY_MAX_POINTS)
+    return jsonify({
+        "status": "ok", "ref": ref, "from": int(since_ts), "to": int(until_ts), "raw_count": raw_count,
+        "points": [school_point_public(point) for point in points], "visits": visits,
+    })
+
+
+@app.route("/api/school/<token>/attendance", methods=["GET"])
+@school_json
+def school_attendance_api(token):
+    link = school_authorize(token)
+    days = int_range(request.args.get("days"), 30, 1, SCHOOL_ATTENDANCE_KEEP_DAYS)
+    cutoff = local_day_key(time.time() - days * 86400)
+    store = school_store()
+    result = {}
+    for ref in school_link_bags(link):
+        rows = [row for day, row in store.get("attendance", {}).get(ref, {}).items() if day >= cutoff]
+        rows.sort(key=lambda row: row["day"], reverse=True)
+        relevant = [row for row in rows if row.get("status") in {"on_time", "late", "absent", "no_data"}]
+        result[ref] = {
+            "days": rows,
+            "summary": {
+                "school_days": len(relevant),
+                "on_time": sum(1 for row in relevant if row["status"] == "on_time"),
+                "late": sum(1 for row in relevant if row["status"] == "late"),
+                "absent": sum(1 for row in relevant if row["status"] in {"absent", "no_data"}),
+                "late_minutes_total": sum(int(row.get("late_minutes") or 0) for row in relevant),
+                "average_arrival": school_average_clock([row.get("arrival_ts") for row in relevant if row.get("arrival_ts")]),
+            },
+        }
+    return jsonify({"status": "ok", "attendance": result, "schedule": store["schedule"]})
+
+
+def school_average_clock(timestamps):
+    minutes = [local_datetime(ts).hour * 60 + local_datetime(ts).minute for ts in timestamps if ts]
+    if not minutes:
+        return ""
+    average = int(round(sum(minutes) / len(minutes)))
+    return f"{average // 60:02d}:{average % 60:02d}"
+
+
+@app.route("/api/school/<token>/events", methods=["GET"])
+@school_json
+def school_events_api(token):
+    link = school_authorize(token)
+    school_evaluate(force=False)
+    store = school_store()
+    after = int_range(request.args.get("after"), 0, 0, 10 ** 12)
+    refs = set(school_link_bags(link))
+    rows = [row for row in store.get("events", []) if int(row.get("seq", 0)) > after and row.get("ref") in refs]
+    return jsonify({"status": "ok", "events": rows[-100:], "latest_seq": int(store.get("event_seq", 0) or 0)})
+
+
+@app.route("/api/school/<token>/locate", methods=["POST"])
+@school_json
+def school_locate_api(token):
+    link = school_authorize(token)
+    data = request.get_json(silent=True) or {}
+    bags = school_link_bags(link)
+    refs = [data.get("ref")] if data.get("ref") else list(bags)
+    scheduled = []
+    now_ts = time.time()
+    for ref in refs:
+        if ref not in bags:
+            continue
+        model = school_model(ref)
+        if not model:
+            continue
+        key = f"{current_tenant_id()}|{ref}"
+        before = int(float((model.get("location") or {}).get("ts", 0) or 0))
+        if now_ts - _school_locate_runtime.get(key, 0) >= SCHOOL_LOCATE_COOLDOWN_SECONDS:
+            _school_locate_runtime[key] = now_ts
+            mcp_trigger_locate(model)
+        scheduled.append({"ref": ref, "previous_ts": before})
+    if not scheduled:
+        raise SchoolError("Keine Schultasche für diesen Link gefunden.", 404, "unknown_bag")
+    return jsonify({"status": "scheduled", "trackers": scheduled, "check_after_seconds": 3, "max_wait_seconds": 40})
+
+
+@app.route("/api/school/<token>/places", methods=["POST"])
+@school_json
+def school_place_upsert_api(token):
+    link = school_authorize(token)
+    if not link.get("can_edit", True):
+        raise SchoolError("Dieser Link darf keine Orte ändern.", 403, "read_only")
+    data = request.get_json(silent=True) or {}
+    store = school_store()
+    place_id = str(data.get("id") or "")
+    existing = store["places"].get(place_id) if place_id else None
+    place = normalize_school_place({**(existing or {}), **data}, place_id or None)
+    if existing:
+        place["created_ts"] = existing.get("created_ts", place["created_ts"])
+        place["updated_ts"] = int(time.time())
+    if not existing and len(store["places"]) >= 20:
+        raise SchoolError("Höchstens 20 Orte möglich.")
+    store["places"][place["id"]] = place
+    school_save()
+    school_evaluate(force=True, emit=False)
+    return jsonify({"status": "ok", "place": place, "places": list(store["places"].values())})
+
+
+@app.route("/api/school/<token>/places/<place_id>", methods=["DELETE"])
+@school_json
+def school_place_delete_api(token, place_id):
+    link = school_authorize(token)
+    if not link.get("can_edit", True):
+        raise SchoolError("Dieser Link darf keine Orte ändern.", 403, "read_only")
+    store = school_store()
+    if store["places"].pop(str(place_id), None) is None:
+        raise SchoolError("Ort nicht gefunden.", 404, "unknown_place")
+    for presence in store.get("presence", {}).values():
+        (presence.get("places") or {}).pop(str(place_id), None)
+    school_save()
+    return jsonify({"status": "ok", "places": list(store["places"].values())})
+
+
+@app.route("/api/school/<token>/schedule", methods=["POST"])
+@school_json
+def school_schedule_api(token):
+    link = school_authorize(token)
+    if not link.get("can_edit", True):
+        raise SchoolError("Dieser Link darf den Stundenplan nicht ändern.", 403, "read_only")
+    data = request.get_json(silent=True) or {}
+    days = data.get("days") if isinstance(data.get("days"), dict) else {}
+    for row in days.values():
+        if isinstance(row, dict):
+            school_clock(row.get("start"), "08:00")
+            school_clock(row.get("end"), "")
+    store = school_store()
+    merged = {**store["schedule"], **{key: value for key, value in data.items() if key in {"days", "grace_minutes", "absent_after_minutes", "off_days"}}}
+    merged["updated_ts"] = int(time.time())
+    store["schedule"] = normalize_school_schedule(merged)
+    school_save()
+    school_evaluate(force=True, emit=False)
+    return jsonify({"status": "ok", "schedule": store["schedule"]})
+
+
+# --- guest links in the native app -----------------------------------------
+
+def guest_link_ref(link):
+    source_ref = str(link.get("source_ref") or "")
+    if source_ref.split(":", 1)[0] in {"google", "samsung", "apple", "fusion"}:
+        return source_ref
+    name = str(link.get("device") or "")
+    if name in state.get("fusion_profiles", {}):
+        return f"fusion:{name}"
+    return f"apple:{name}"
+
+
+def guest_app_token(link_id, link):
+    return shared_remember_token(link_id, link)
+
+
+def guest_app_authorize(link_id, data):
+    key = f"{client_key()}:{link_id}"
+    link = state.get("shared_links", {}).get(link_id)
+    status = share_link_status(link)
+    if status == "expired":
+        raise SchoolError("Diese Freigabe ist abgelaufen.", 410, "expired")
+    if status != "active":
+        raise SchoolError("Diese Freigabe ist nicht mehr aktiv.", 404, "inactive")
+    token = str(request.headers.get("X-Share-Token") or data.get("app_token") or "")
+    if token and hmac.compare_digest(token, guest_app_token(link_id, link)):
+        return link, None
+    if shared_access_authorized(link_id, link):
+        return link, guest_app_token(link_id, link)
+    if is_share_rate_limited(key):
+        raise SchoolError("Zu viele Versuche. Bitte später erneut versuchen.", 429, "rate_limited")
+    password = data.get("pw")
+    if not password:
+        raise SchoolError("Für diese Freigabe wird ein Passwort benötigt.", 401, "password_required")
+    if not verify_shared_password(link, password):
+        register_share_failure(key)
+        raise SchoolError("Das Passwort stimmt nicht.", 401, "wrong_password")
+    clear_share_failures(key)
+    return link, guest_app_token(link_id, link)
+
+
+def guest_visible_point(point, permissions, privacy):
+    public = shared_location_payload(dict(point), permissions, privacy)
+    if not public:
+        return None
+    row = {"lat": round(float(public["lat"]), 7), "lon": round(float(public["lon"]), 7), "ts": int(float(public["ts"]))}
+    if public.get("acc") is not None:
+        row["acc"] = round(float(public.get("acc") or 0), 1)
+    if permissions.get("show_provider", True):
+        row["source"] = str(point.get("source") or "unknown")
+    return row
+
+
+def guest_app_payload(link_id, link):
+    ref = guest_link_ref(link)
+    model = school_model(ref)
+    name = str(link.get("device") or "")
+    permissions = share_permissions(link, history_fallback=bool(state.get("share_history_enabled", {}).get(name)))
+    privacy = share_privacy_config(link)
+    delay = int(privacy.get("delay_minutes", 0) or 0) * 60
+    location = None
+    if model:
+        loc = model.get("location") if isinstance(model.get("location"), dict) else None
+        if delay and loc:
+            cutoff = time.time() - delay
+            recent = [point for point in school_model_points(model, cutoff - 7 * 86400, cutoff)]
+            loc = recent[-1] if recent else None
+        if loc and normalize_point(loc):
+            location = guest_visible_point({**loc, **normalize_point(loc), "source": loc.get("source") or model.get("provider")}, permissions, privacy)
+            public_full = shared_location_payload(dict(loc), permissions, privacy) or {}
+            address = public_full.get("address")
+            if isinstance(address, dict):
+                location["address"] = str(address.get("label") or address.get("display_name") or "")[:160]
+            if permissions.get("show_battery", True) and model.get("battery"):
+                location["battery"] = str(model.get("battery"))[:40]
+    details = (model or {}).get("details") or {}
+    meta = state.get("tracker_meta", {}).get(name, {}) if isinstance(state.get("tracker_meta", {}).get(name), dict) else {}
+    last_locate = int(float(link.get("last_locate_ts", 0) or 0))
+    return {
+        "status": "ok", "kind": "guest", "link_id": link_id, "server_time": int(time.time()),
+        "title": str(meta.get("name") or (model or {}).get("name") or details.get("name") or "Geteilter Tracker")[:80],
+        "emoji": str(meta.get("emoji") or details.get("emoji") or "📍")[:8],
+        "provider": (model or {}).get("provider", "unknown") if permissions.get("show_provider", True) else "tracker",
+        "share_kind": "fusion" if ref.startswith("fusion:") else "tracker",
+        "location": location, "permissions": permissions,
+        "privacy": {"precision": privacy.get("location_precision"), "delay_minutes": int(privacy.get("delay_minutes", 0) or 0),
+                    "history_hours": int(privacy.get("history_hours", 168) or 168)},
+        "expires_ts": int(float(link.get("expires_ts", 0) or 0)),
+        "next_locate_ts": last_locate + 30 if permissions.get("can_locate") else 0,
+        "available": bool(model),
+    }
+
+
+def guest_json_response(payload, token=None):
+    if token:
+        payload["app_token"] = token
+    return jsonify(payload)
+
+
+@app.route("/api/shared/<link_id>/app", methods=["POST"])
+@school_json
+def guest_app_api(link_id):
+    data = request.get_json(silent=True) or {}
+    link, token = guest_app_authorize(link_id, data)
+    record_share_access(link_id, "ok")
+    return guest_json_response(guest_app_payload(link_id, link), token)
+
+
+@app.route("/api/shared/<link_id>/app/history", methods=["POST"])
+@school_json
+def guest_app_history_api(link_id):
+    data = request.get_json(silent=True) or {}
+    link, token = guest_app_authorize(link_id, data)
+    name = str(link.get("device") or "")
+    permissions = share_permissions(link, history_fallback=bool(state.get("share_history_enabled", {}).get(name)))
+    if not permissions.get("show_history"):
+        raise SchoolError("Der Verlauf ist für diese Freigabe nicht freigegeben.", 403, "history_disabled")
+    privacy = share_privacy_config(link)
+    model = school_model(guest_link_ref(link))
+    if not model:
+        raise SchoolError("Der Tracker ist nicht mehr verfügbar.", 404, "missing_tracker")
+    now_ts = time.time()
+    cutoff = now_ts - int(privacy.get("delay_minutes", 0) or 0) * 60
+    earliest = now_ts - int(privacy.get("history_hours", 168) or 168) * 3600
+    until_ts = min(float_range(data.get("to"), cutoff, 0, cutoff), cutoff)
+    since_ts = max(float_range(data.get("from"), until_ts - 86400, 0, until_ts), earliest)
+    points = school_model_points(model, since_ts, until_ts)
+    raw_count = len(points)
+    if len(points) > SCHOOL_HISTORY_MAX_POINTS:
+        points = downsample_route_points(points, SCHOOL_HISTORY_MAX_POINTS)
+    rows = [row for row in (guest_visible_point(point, permissions, privacy) for point in points) if row]
+    return guest_json_response({"status": "ok", "from": int(since_ts), "to": int(until_ts), "raw_count": raw_count,
+                                "earliest_ts": int(earliest), "points": rows}, token)
+
+
+@app.route("/api/shared/<link_id>/app/locate", methods=["POST"])
+@school_json
+def guest_app_locate_api(link_id):
+    data = request.get_json(silent=True) or {}
+    link, token = guest_app_authorize(link_id, data)
+    name = str(link.get("device") or "")
+    permissions = share_permissions(link, history_fallback=bool(state.get("share_history_enabled", {}).get(name)))
+    if not permissions.get("can_locate"):
+        raise SchoolError("Live-Aktualisierung ist für diese Freigabe deaktiviert.", 403, "locate_disabled")
+    now_ts = time.time()
+    last = float(link.get("last_locate_ts", 0) or 0)
+    model = school_model(guest_link_ref(link))
+    previous = int(float(((model or {}).get("location") or {}).get("ts", 0) or 0))
+    if now_ts - last < 30:
+        return guest_json_response({"status": "cooldown", "remaining": max(1, int(math.ceil(30 - (now_ts - last)))), "previous_ts": previous}, token), 429
+    link["last_locate_ts"] = int(now_ts)
+    save_json(LINKS_FILE, "shared_links")
+    if model:
+        mcp_trigger_locate(model)
+    return guest_json_response({"status": "scheduled", "previous_ts": previous, "check_after_seconds": 3, "max_wait_seconds": 40}, token)
+
+
+def create_guest_share(ref, password, options):
+    """Admin console share for any tracker type; same record format as before."""
+    ref = str(ref or "")
+    provider, _, tracker_id = ref.partition(":")
+    model = school_model(ref)
+    if not model or provider not in {"apple", "google", "samsung", "fusion"}:
+        raise SchoolError("Tracker nicht gefunden.", 404, "missing_tracker")
+    if len(str(password or "")) < 4:
+        raise SchoolError("Das Gast-Passwort muss mindestens 4 Zeichen enthalten.")
+    now_ts = int(time.time())
+    permissions = {
+        "can_locate": settings_bool(options.get("can_locate"), True),
+        "show_history": settings_bool(options.get("show_history"), True),
+        "show_accuracy": True, "show_address": True, "show_battery": True,
+        "show_provider": settings_bool(options.get("show_provider"), True),
+        "show_geofences": False, "show_transit": False, "can_navigate": True,
+    }
+    privacy = share_privacy_config({"privacy": {"history_hours": options.get("history_hours", 168)}})
+    if provider in {"apple", "fusion"}:
+        device = tracker_id
+        google_id, samsung_id = fusion_profile_source_ids(device)
+        providers = (["apple"] if device in state.get("accessories", {}) else []) + (["google"] if google_id else []) + (["samsung"] if samsung_id else [])
+        source_ref = ref
+    else:
+        device, providers, source_ref, google_id, samsung_id = ref, [provider], ref, None, None
+    link_id = secrets.token_urlsafe(18)
+    state["shared_links"][link_id] = {
+        "device": device, **({"source_ref": source_ref} if source_ref else {}),
+        "share_kind": "fusion" if len(providers) >= 2 else "tracker",
+        "fusion_snapshot": {"was_fusion": len(providers) >= 2, "provider_count": len(providers), "providers": providers,
+                            "google_id": google_id, "samsung_id": samsung_id, "labels": {}},
+        "active": True, "created_ts": now_ts, "expires_ts": share_expiry_timestamp(options.get("expires_hours"), now_ts),
+        "last_locate_ts": 0, "last_access_ts": 0, "access_count": 0, "permissions": permissions, "privacy": privacy,
+        "created_via": "admin_console", **create_password_record(str(password)),
+    }
+    if permissions["show_history"]:
+        if provider in {"apple"} and device in state.get("accessories", {}):
+            state["share_history_enabled"][device] = True
+            save_json(SHARE_HIST_CFG_FILE, "share_history_enabled")
+        else:
+            school_enable_history(ref)
+    save_json(LINKS_FILE, "shared_links")
+    audit_event("share_created", link_id, f"{ref} · admin")
+    return link_id
+
+
+# --- landing pages, app links ----------------------------------------------
+
+_APP_LINK_HTML = '''<!doctype html><html lang="de"><head><meta charset="utf-8"><title>RJ Tracker · Link öffnen</title>STYLE</head><body><h1>TITLE</h1><small>BODY</small><section><a href="INTENT"><button>In der RJ Tracker App öffnen</button></a><p><small>Noch keine App? Bitte Robin nach der Android-App fragen. Danach diesen Link antippen oder in der App unter „Link einfügen“ einfügen.</small></p><pre id="link">LINK</pre><button id="copy">Link kopieren</button></section><script>copy.onclick=async()=>{try{await navigator.clipboard.writeText(document.getElementById('link').textContent);copy.textContent='Kopiert'}catch(e){}}</script></body></html>'''
+
+
+def app_link_page(kind, token):
+    path = f"/{kind}/{token}"
+    host = urllib.parse.urlsplit(school_public_base_url() or request.url_root).netloc or request.host
+    intent = f"intent://{host}{path}#Intent;scheme=https;package={ANDROID_APP_PACKAGE};end"
+    title = "Schultasche" if kind == "school" else "Geteilter Tracker"
+    body = ("Dieser dauerhafte Link öffnet den Schultaschenmodus in der Android-App." if kind == "school"
+            else "Dieser Link zeigt einen freigegebenen Tracker in der Android-App.")
+    page = (_APP_LINK_HTML.replace("STYLE", _SECURITY_STYLE).replace("TITLE", title).replace("BODY", body)
+            .replace("INTENT", html.escape(intent, quote=True)).replace("LINK", html.escape(f"{school_public_base_url()}{path}")))
+    return Response(page, mimetype="text/html", headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
+
+
+@app.route("/school/<token>", methods=["GET"])
+def school_landing(token):
+    return app_link_page("school", token if re.fullmatch(r"[A-Za-z0-9_-]{20,128}", token or "") else "")
+
+
+@app.route("/shared/<link_id>", methods=["GET"])
+def shared_landing(link_id):
+    return app_link_page("shared", link_id if re.fullmatch(r"[A-Za-z0-9_-]{8,160}", link_id or "") else "")
+
+
+@app.route("/.well-known/assetlinks.json", methods=["GET"])
+def android_asset_links():
+    fingerprints = [value.strip().upper() for value in ([ANDROID_APP_CERT_SHA256] + os.environ.get("ULTRA_TRACKER_ANDROID_CERT_SHA256", "").split(",")) if re.fullmatch(r"[0-9A-Fa-f:]{95}", value.strip())]
+    return jsonify([{
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {"namespace": "android_app", "package_name": ANDROID_APP_PACKAGE, "sha256_cert_fingerprints": fingerprints},
+    }])
+
+
+# --- admin console ----------------------------------------------------------
+
+def admin_require_main():
+    if not is_main_admin():
+        raise SchoolError("Nur der Hauptadmin darf das verwalten.", 403, "forbidden")
+
+
+def admin_school_state():
+    store = school_store()
+    trackers = []
+    for model in mcp_all_trackers():
+        if model.get("archived"):
+            continue
+        ref = str(model.get("ref") or "")
+        bag = store.get("bags", {}).get(ref)
+        location = model.get("location") if isinstance(model.get("location"), dict) else {}
+        trackers.append({
+            "ref": ref, "name": str(model.get("name") or ref)[:80], "provider": model.get("provider"),
+            "emoji": str(((model.get("details") or {}).get("emoji")) or "📍")[:8],
+            "last_seen_ts": int(float(location.get("ts", 0) or 0)),
+            "is_bag": bool(bag and bag.get("enabled", True)), "child_name": str((bag or {}).get("child_name") or ""),
+        })
+    links = [{
+        "id": token[:6] + "…", "token": token, "url": school_link_url(token), "viewer_name": row.get("viewer_name", ""),
+        "label": row.get("label", ""), "created_ts": row.get("created_ts", 0), "last_access_ts": row.get("last_access_ts", 0),
+        "active": bool(row.get("active", True)),
+    } for token, row in store.get("links", {}).items() if isinstance(row, dict) and row.get("active", True)]
+    shares = []
+    for link_id, link in state.get("shared_links", {}).items():
+        if not isinstance(link, dict) or share_link_status(link) != "active":
+            continue
+        ref = guest_link_ref(link)
+        model = school_model(ref)
+        shares.append({"id": link_id, "url": guest_link_url(link_id), "ref": ref,
+                       "name": str((model or {}).get("name") or link.get("device") or ref)[:80],
+                       "expires_ts": int(float(link.get("expires_ts", 0) or 0)),
+                       "history": bool((link.get("permissions") or {}).get("show_history"))})
+    return {"status": "ok", "trackers": trackers, "links": links, "shares": shares,
+            "places": list(store.get("places", {}).values()), "schedule": store.get("schedule")}
+
+
+@app.route("/admin/api/school", methods=["GET"])
+@school_json
+def admin_school_api():
+    admin_require_main()
+    return jsonify(admin_school_state())
+
+
+@app.route("/admin/api/school/bags", methods=["POST"])
+@school_json
+def admin_school_bag_api():
+    admin_require_main()
+    data = request.get_json(silent=True) or {}
+    ref = str(data.get("ref") or "")
+    if not school_model(ref):
+        raise SchoolError("Tracker nicht gefunden.", 404, "missing_tracker")
+    store = school_store()
+    if settings_bool(data.get("enabled"), True):
+        bag = store["bags"].get(ref) or {"created_ts": int(time.time())}
+        bag.update(enabled=True, child_name=str(data.get("child_name") or bag.get("child_name") or "")[:40],
+                   label=str(data.get("label") or bag.get("label") or "")[:60], updated_ts=int(time.time()))
+        store["bags"][ref] = bag
+        school_enable_history(ref)
+        audit_event("school_bag_enabled", ref, "Schultaschenmodus")
+    else:
+        store["bags"].pop(ref, None)
+        store.get("presence", {}).pop(ref, None)
+        audit_event("school_bag_disabled", ref, "Schultaschenmodus")
+    school_save()
+    return jsonify(admin_school_state())
+
+
+@app.route("/admin/api/school/links", methods=["POST"])
+@school_json
+def admin_school_link_api():
+    admin_require_main()
+    data = request.get_json(silent=True) or {}
+    store = school_store()
+    if not store.get("bags"):
+        raise SchoolError("Bitte zuerst mindestens einen Tracker als Schultasche markieren.")
+    token = secrets.token_urlsafe(24)
+    store["links"][token] = {
+        "viewer_name": str(data.get("viewer_name") or SCHOOL_GREETING_DEFAULT).strip()[:40] or SCHOOL_GREETING_DEFAULT,
+        "label": str(data.get("label") or "Schultasche")[:60], "refs": ["*"], "can_edit": True,
+        "active": True, "created_ts": int(time.time()), "last_access_ts": 0, "access_count": 0,
+    }
+    school_save()
+    audit_event("school_link_created", token[:6], "Dauerhafter Schultaschen-Link")
+    return jsonify({**admin_school_state(), "created_url": school_link_url(token)})
+
+
+@app.route("/admin/api/school/links/<token>", methods=["DELETE"])
+@school_json
+def admin_school_link_delete_api(token):
+    admin_require_main()
+    store = school_store()
+    if store["links"].pop(str(token), None) is None:
+        raise SchoolError("Link nicht gefunden.", 404, "unknown_link")
+    school_save()
+    audit_event("school_link_revoked", str(token)[:6], "Schultaschen-Link widerrufen")
+    return jsonify(admin_school_state())
+
+
+@app.route("/admin/api/shares", methods=["POST"])
+@school_json
+def admin_share_create_api():
+    admin_require_main()
+    data = request.get_json(silent=True) or {}
+    link_id = create_guest_share(data.get("ref"), data.get("password"), data)
+    return jsonify({**admin_school_state(), "created_url": guest_link_url(link_id)})
+
+
+@app.route("/admin/api/shares/<link_id>", methods=["DELETE"])
+@school_json
+def admin_share_delete_api(link_id):
+    admin_require_main()
+    if state.get("shared_links", {}).pop(str(link_id), None) is None:
+        raise SchoolError("Freigabe nicht gefunden.", 404, "unknown_share")
+    state.get("guest_push_channels", {}).pop(str(link_id), None)
+    save_json(LINKS_FILE, "shared_links")
+    atomic_write_json(GUEST_PUSH_FILE, state.get("guest_push_channels", {}), private=True)
+    audit_event("share_revoked", link_id, "admin")
+    return jsonify(admin_school_state())
+
+
+_SCHOOL_ADMIN_SECTION = '''<section id="schoolsection"><h2>Schultaschen &amp; Freigaben</h2><small>Tracker als Schultasche markieren, dauerhaften Link für die Android-App erzeugen oder einen Gastlink für einen beliebigen Tracker (auch einzelne Google- oder Samsung-Tracker) erstellen.</small><input id="schoolfilter" placeholder="Tracker suchen"><div id="schooltrackers"></div><h2>Dauerhafter Schultaschen-Link</h2><input id="schoolviewer" placeholder="Begrüßungsname in der App (z. B. Jessy)"><button id="schoollink">Neuen Link erzeugen</button><div id="schoollinks"></div><h2>Gastlink erstellen</h2><select id="sharetracker"></select><input id="sharepw" type="password" placeholder="Gast-Passwort (mindestens 4 Zeichen)" autocomplete="new-password"><select id="shareexp"><option value="24">24 Stunden</option><option value="72">3 Tage</option><option value="168" selected>7 Tage</option><option value="720">30 Tage</option><option value="0">Unbegrenzt</option></select><label><input id="sharehist" type="checkbox" checked>Standortverlauf zeigen</label><label><input id="sharelocate" type="checkbox" checked>Gast darf aktualisieren</label><button id="sharecreate">Gastlink erstellen</button><div id="shares"></div></section>'''
+_SCHOOL_ADMIN_SCRIPT = '''
+let schoolState={trackers:[]};
+function schoolCopy(url){navigator.clipboard&&navigator.clipboard.writeText(url).then(()=>{message.textContent='Link kopiert: '+url}).catch(()=>{message.textContent=url})}
+function schoolRow(text,buttons){const div=document.createElement('div');div.className='schoolrow';const span=document.createElement('span');span.textContent=text;div.append(span);for(const [label,fn,danger] of buttons){const b=document.createElement('button');b.textContent=label;if(danger)b.className='danger';b.onclick=()=>run(fn);div.append(b)}return div}
+function schoolRender(){const q=(schoolfilter.value||'').toLowerCase();schooltrackers.replaceChildren();sharetracker.replaceChildren();const names={apple:'Apple',google:'Google',samsung:'Samsung',fusion:'Fusion'};for(const t of schoolState.trackers){const seen=t.last_seen_ts?new Date(t.last_seen_ts*1000).toLocaleString():'noch kein Standort';const o=document.createElement('option');o.value=t.ref;o.textContent=t.emoji+' '+t.name+' · '+(names[t.provider]||t.provider);sharetracker.append(o);if(q&&!(t.name.toLowerCase().includes(q)||t.ref.toLowerCase().includes(q)))continue;schooltrackers.append(schoolRow((t.is_bag?'🎒 ':t.emoji+' ')+t.name+' · '+(names[t.provider]||t.provider)+' · '+seen+(t.is_bag&&t.child_name?' · '+t.child_name:''),[[t.is_bag?'Schultasche beenden':'Als Schultasche',async()=>{let child=t.child_name;if(!t.is_bag){child=prompt('Name des Kindes (optional)',t.child_name||'');if(child===null)return}schoolState=await api('admin/api/school/bags','POST',{ref:t.ref,enabled:!t.is_bag,child_name:child||''});schoolRender()},t.is_bag]]))}schoollinks.replaceChildren();for(const l of schoolState.links){schoollinks.append(schoolRow('🔗 '+(l.viewer_name||'App')+' · erstellt '+new Date(l.created_ts*1000).toLocaleDateString()+(l.last_access_ts?' · zuletzt '+new Date(l.last_access_ts*1000).toLocaleString():' · noch nicht geöffnet'),[['Kopieren',async()=>schoolCopy(l.url)],['Widerrufen',async()=>{if(!confirm('Link sofort ungültig machen?'))return;schoolState=await api('admin/api/school/links/'+encodeURIComponent(l.token),'DELETE',{});schoolRender()},true]]))}shares.replaceChildren();for(const s of schoolState.shares){shares.append(schoolRow('👥 '+s.name+' · '+(s.expires_ts?'bis '+new Date(s.expires_ts*1000).toLocaleString():'unbegrenzt')+(s.history?' · mit Verlauf':''),[['Kopieren',async()=>schoolCopy(s.url)],['Beenden',async()=>{if(!confirm('Gastlink beenden?'))return;schoolState=await api('admin/api/shares/'+encodeURIComponent(s.id),'DELETE',{});schoolRender()},true]]))}}
+async function loadSchool(){schoolState=await api('admin/api/school');schoolRender()}
+schoolfilter.oninput=schoolRender;
+schoollink.onclick=()=>run(async()=>{const j=await api('admin/api/school/links','POST',{viewer_name:schoolviewer.value});schoolState=j;schoolRender();schoolCopy(j.created_url)});
+sharecreate.onclick=()=>run(async()=>{const j=await api('admin/api/shares','POST',{ref:sharetracker.value,password:sharepw.value,expires_hours:shareexp.value,show_history:sharehist.checked,can_locate:sharelocate.checked});sharepw.value='';schoolState=j;schoolRender();schoolCopy(j.created_url)});
+'''
+_SCHOOL_ADMIN_STYLE = '<style>.schoolrow{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:.5px solid var(--line);font-size:15px}.schoolrow span{flex:1 1 260px}.schoolrow button{width:auto;min-height:34px;margin:0;padding:6px 16px;font-size:14px;background:var(--field);color:var(--accent)}.schoolrow button.danger{color:var(--danger)}#schooltrackers{max-height:460px;overflow:auto}</style>'
+
+
+def _install_school_admin_console():
+    global _ADMIN_HTML
+    page = _ADMIN_HTML
+    anchor = '<section><h2>Benutzerpasswort zurücksetzen</h2>'
+    if anchor not in page or "schoolsection" in page:
+        return
+    page = page.replace(anchor, _SCHOOL_ADMIN_SECTION + anchor, 1)
+    page = page.replace("await loadMCP();await loadFindMy()}", "await loadMCP();await loadFindMy();await loadSchool()}", 1)
+    page = page.replace("</script></body></html>", _SCHOOL_ADMIN_SCRIPT + "</script></body></html>", 1)
+    page = page.replace("</head>", _SCHOOL_ADMIN_STYLE + "</head>", 1)
+    _ADMIN_HTML = page
+
+
+# --- authenticated tracker routines ---------------------------------------
+
+def native_school_plan(raw):
+    if not isinstance(raw, dict):
+        raise SchoolError("Ungültiger Tagesplan.")
+    places, routines = raw.get("places", []), raw.get("routines", [])
+    if not isinstance(places, list) or len(places) > 20 or not isinstance(routines, list) or len(routines) > 40:
+        raise SchoolError("Pro Tracker sind höchstens 20 Orte und 40 Routinen möglich.")
+
+    def valid_id(row, key="id"):
+        value = row.get(key) if isinstance(row, dict) else None
+        if not isinstance(value, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,36}", value):
+            raise SchoolError("Ungültige Kennung im Tagesplan.")
+        return value
+
+    normalized_places = {}
+    for row in places:
+        key = valid_id(row)
+        if key in normalized_places:
+            raise SchoolError("Dieser Ort ist doppelt vorhanden.")
+        # Only accept user-editable fields. Creation metadata stays server-side.
+        place = normalize_school_place({field: row.get(field) for field in ("kind", "name", "lat", "lon", "radius_m")})
+        normalized_places[key] = {field: place[field] for field in ("kind", "name", "lat", "lon", "radius_m")}
+        normalized_places[key]["id"] = key
+
+    normalized_routines = {}
+    for row in routines:
+        key, place = valid_id(row), valid_id(row, "place_id")
+        days = row.get("days")
+        start, end = school_clock(row.get("start")), school_clock(row.get("end"))
+        if (key in normalized_routines or place not in normalized_places or not start or not end or start >= end
+                or not isinstance(days, list) or not days or any(type(day) is not int or not 1 <= day <= 7 for day in days)):
+            raise SchoolError("Wähle für jede Routine einen Ort, mindestens einen Wochentag und ein gültiges Zeitfenster am selben Tag.")
+        normalized_routines[key] = {"id": key, "place_id": place, "days": sorted(set(days)), "start": start, "end": end}
+    return list(normalized_places.values()), list(normalized_routines.values())
+
+
+def native_school_day(model, places, routines, day, now):
+    start, end = local_day_bounds(day)
+    horizon = min(now, end)
+    points = school_model_points(model, start - 6 * 3600, horizon)
+    visits, current = [], []
+    by_place = {place["id"]: place for place in places}
+    for place in places:
+        intervals, presence = school_place_intervals(points, place, horizon)
+        visits.extend({**row, "place_id": place["id"], "place_name": place["name"]}
+                      for row in intervals if row["last_in_ts"] >= start or (row["leave_ts"] or 0) >= start)
+        if presence["inside"] and presence["last_in_ts"] and now - presence["last_in_ts"] <= 1800:
+            current.append({"place_id": place["id"], "place_name": place["name"], "since_ts": presence["since_ts"],
+                            "last_in_ts": presence["last_in_ts"]})
+    day_date = local_datetime(start)
+    results = []
+    for routine in routines:
+        if day_date.isoweekday() not in routine["days"]:
+            continue
+        begin, finish = [day_date.replace(hour=int(clock[:2]), minute=int(clock[3:])).timestamp()
+                         for clock in (routine["start"], routine["end"])]
+        # A visit needs at least one report during the planned window. A stale open
+        # interval alone cannot count as presence at a later appointment.
+        window = [point for point in points if begin <= point["ts"] < finish]
+        confirmed, _ = school_place_intervals(window, by_place[routine["place_id"]], min(horizon, finish))
+        observed = confirmed[0] if confirmed else None
+        if observed:
+            status = "confirmed"
+        elif horizon < begin:
+            status = "upcoming"
+        elif horizon < finish:
+            status = "waiting"
+        else:
+            status = "unconfirmed"
+        results.append({**routine, "status": status, "arrival_ts": observed["enter_ts"] if observed else None,
+                        "last_in_ts": observed["last_in_ts"] if observed else None})
+    return {
+        "visits": sorted(visits, key=lambda row: row["enter_ts"]),
+        "current": sorted(current, key=lambda row: row["last_in_ts"], reverse=True) if day == local_day_key(now) else [],
+        "checks": sorted(results, key=lambda row: (row["start"], row["end"])),
+    }
+
+
+@app.route("/api/mobile/v1/school-plan", methods=["GET", "PUT"])
+@school_json
+def native_school_plan_api():
+    admin_require_main()
+    if current_tenant_id() != "main" or getattr(g, "api_principal", None):
+        raise SchoolError("Eine persönliche Hauptadmin-Anmeldung ist erforderlich.", 403, "forbidden")
+    ref = str(request.args.get("ref") or "")
+    model = school_model(ref)
+    if not model or model.get("archived"):
+        raise SchoolError("Tracker nicht gefunden.", 404, "missing_tracker")
+    now = time.time()
+    today = local_day_key(now)
+    day = str(request.args.get("day") or today)
+    try:
+        day_date = datetime.strptime(day, "%Y-%m-%d").date()
+        if day_date.isoformat() != day or not 0 <= (local_datetime(now).date() - day_date).days <= 30:
+            raise ValueError()
+    except ValueError:
+        raise SchoolError("Wähle einen Tag aus den letzten 31 Tagen.")
+
+    with school_lock:
+        store = school_store()
+        bag = store["bags"].get(ref) or {}
+        plan = bag.get("ios_plan") or {}
+        revision = int(plan.get("revision", 0))
+        if request.method == "PUT":
+            data = request.get_json(silent=True)
+            if not isinstance(data, dict) or type(data.get("enabled")) is not bool or type(data.get("revision")) is not int:
+                raise SchoolError("Ungültige Einstellungen.")
+            if data["revision"] != revision:
+                raise SchoolError("Der Tagesplan wurde inzwischen geändert. Bitte lade ihn neu.", 409, "plan_conflict")
+            places, routines = native_school_plan(data)
+            if data["enabled"] and not bag.get("enabled", bool(bag)):
+                school_enable_history(ref)
+            plan = {"revision": revision + 1, "places": places, "routines": routines}
+            updated = {**bag, "enabled": data["enabled"], "ios_plan": plan, "updated_ts": int(now)}
+            updated.setdefault("created_ts", int(now))
+            store["bags"][ref] = updated
+            try:
+                school_save()
+            except Exception:
+                if bag:
+                    store["bags"][ref] = bag
+                else:
+                    store["bags"].pop(ref, None)
+                raise
+            bag = updated
+        enabled = bool(bag and bag.get("enabled", True))
+        places = plan.get("places", [])
+        routines = plan.get("routines", [])
+    result = {"status": "ok", "day": day, "today": today, "timezone": APP_TIMEZONE_NAME, "enabled": enabled,
+              "revision": int(plan.get("revision", 0)), "places": places, "routines": routines, "location": school_location_public(model),
+              "current": [], "visits": [], "checks": []}
+    if request.method == "GET" and enabled and places:
+        result.update(native_school_day(model, places, routines, day, now))
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+
+_install_school_admin_console()
+
+if not _DISABLE_BACKGROUND:
+    threading.Thread(target=school_worker, daemon=True, name="school-bag-presence").start()
+
 
 
 if __name__ == "__main__":
