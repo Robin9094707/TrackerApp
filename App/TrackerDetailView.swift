@@ -30,6 +30,7 @@ struct TrackerDetailView: View {
     private var serverBody: some View {
         ScrollView {
             LazyVStack(spacing: 18) {
+                TrackerDetailMap(tracker: current)
                 header
                 actions
                 if model.isLocating(current) {

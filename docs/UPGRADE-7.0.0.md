@@ -11,7 +11,9 @@ Die Änderungen werden als Pull Request bereitgestellt. Das Erstellen des Builds
 
 ## Oberfläche
 
-Das Tracker-Panel bietet eine vollflächige Übersicht mit adaptiven Karten, türkisfarbenem Akzent, ruhigem Hintergrund und direkten Einstiegen in Karte, Schultaschen und Bark. Die Darstellung passt sich iPhone, iPad, dunkler Darstellung und größerer Schrift an. Objekte, Orte, Meldungen und Kontoverwaltung bleiben erreichbar. Die Karte wird bei Bedarf geöffnet; die Objektliste liegt nicht mehr in einem dauerhaft eingeblendeten Kartenblatt.
+Das Tracker-Panel bietet eine vollflächige Übersicht mit adaptiven Karten, türkisfarbenem Akzent, ruhigem Hintergrund und direkten Einstiegen in Karte, Schultaschen und Bark. Die Darstellung passt sich iPhone, iPad, dunkler Darstellung und größerer Schrift an. Objekte, Orte, Meldungen und Kontoverwaltung bleiben erreichbar. Beim Öffnen eines Trackers erscheint direkt eine Karte seines letzten gültigen Standorts mit Genauigkeitskreis. Über die Vergrößern-Taste öffnet sie sich im Vollbild mit Zentrieren und Satellitenansicht. Das gilt für Apple-, Samsung-, Fusion- und Google-Tracker sowie lokal gespeicherte Google-Standorte und Serverstandorte bei Serverausfall. Ohne gültigen Standort erscheint ein klarer Hinweis; es wird kein Standort erfunden. Für diese Kartenanzeige ist kein Backend-Update nötig.
+
+Die Übersichtskarte wird bei Bedarf geöffnet; die Objektliste liegt nicht mehr in einem dauerhaft eingeblendeten Kartenblatt.
 
 ## Schultasche
 
@@ -57,4 +59,4 @@ Diese Codekorrekturen sind offline reproduziert; echte neue Find-Hub-Meldungen u
 
 ## Prüfungen
 
-Die CI verlangt Backend-Regressionsprüfungen einschließlich bisheriger Android-/Gastlinks, isolierte Google-Paketprüfungen, Bark-API-/Retry-/Schlüsselprüfungen, Schulwochen-/Feiertags-/Zeitzonenprüfungen sowie iOS-Unit- und UI-Tests. Die IPA wird erst nach erfolgreichem Release-Build, Debug-Tests und Release-Kaltstarttest veröffentlicht. Simulator-Screenshots liegen beim Testartefakt.
+Die CI verlangt Backend-Regressionsprüfungen einschließlich bisheriger Android-/Gastlinks, isolierte Google-Paketprüfungen, Bark-API-/Retry-/Schlüsselprüfungen, Schulwochen-/Feiertags-/Zeitzonenprüfungen sowie iPhone-Unit- und UI-Tests einschließlich der Trackerkarten, Vollbildansicht und fehlender Standorte. Ein iPad-Simulatortest wird nicht ausgeführt. Die IPA wird erst nach erfolgreichem Release-Build, Debug-Tests und Release-Kaltstarttest veröffentlicht. Simulator-Screenshots liegen beim Testartefakt.

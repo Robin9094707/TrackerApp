@@ -17,6 +17,9 @@ struct NativeGoogleTrackerView: View {
         Form {
             if let tracker {
                 Section {
+                    TrackerDetailMap(tracker: mapTracker(tracker))
+                }.listRowBackground(Color.clear).listRowInsets(EdgeInsets()).listRowSeparator(.hidden)
+                Section {
                     HStack(alignment: .top, spacing: 8) {
                         TrackerLocationSummary(symbol: model.trackers.first(where: { $0.provider == "google" && $0.apiID == deviceID })?.emoji ?? "📡",
                             provider: "google", location: displayLocation(tracker),
@@ -121,6 +124,13 @@ struct NativeGoogleTrackerView: View {
             Button("Abbrechen", role: .cancel) {}
         }
     }
+    private func mapTracker(_ tracker: GoogleTrackerSnapshot) -> Tracker {
+        var item = model.trackers.first(where: { $0.provider == "google" && $0.apiID == deviceID })
+            ?? Tracker(ref: "google:" + deviceID, name: tracker.name, provider: "google", emoji: "📡")
+        item.location = displayLocation(tracker)
+        return item
+    }
+
     private func displayLocation(_ tracker: GoogleTrackerSnapshot) -> TrackerLocation? {
         let localLocation: TrackerLocation? = {
             guard let lat = tracker.latitude, let lon = tracker.longitude,

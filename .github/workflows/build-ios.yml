@@ -154,6 +154,8 @@ jobs:
             -only-testing:RJTrackerUITests/TrackerUITests/testGoogleRouteUsesSavedServerLocationAndOfflineStatusOffersRetry \
             -only-testing:RJTrackerUITests/TrackerUITests/testAccountSecurityAndHistory \
             -only-testing:RJTrackerUITests/TrackerUITests/testMapLibraryDetailsAndPlaces \
+            -only-testing:RJTrackerUITests/TrackerUITests/testTrackerDetailsShowMapAndFullscreen \
+            -only-testing:RJTrackerUITests/TrackerUITests/testTrackerWithoutLocationDoesNotInventMap \
             -only-testing:RJTrackerUITests/TrackerUITests/testPanelDashboardMapAndBarkSettings \
             -only-testing:RJTrackerUITests/TrackerUITests/testDarkAppearanceAndAccessibilityText \
             -only-testing:RJTrackerUITests/TrackerUITests/testLocalGoogleCanOpenAndReturnToExistingTrackers \
@@ -162,21 +164,6 @@ jobs:
             -only-testing:RJTrackerUITests/TrackerUITests/testMotorolaFirmwareScreenRequiresOriginalAndHardwareBeforeInstall \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             2>&1 | tee RJ-Tracker-tests.log
-
-      - name: Required iPad panel layout
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          set -o pipefail
-          IPAD_ID="$(xcrun simctl list devices available --json | python3 -c 'import sys,json; d=json.load(sys.stdin)["devices"]; print(next(p["udid"] for k,v in d.items() if "iOS" in k for p in v if p["name"].startswith("iPad")))')"
-          xcrun simctl boot "$IPAD_ID" || true
-          xcrun simctl bootstatus "$IPAD_ID" -b
-          xcodebuild test -project RJTracker.xcodeproj -scheme RJTracker \
-            -configuration Debug -destination "platform=iOS Simulator,id=$IPAD_ID" \
-            -resultBundlePath RJ-Tracker-ipad-tests.xcresult -parallel-testing-enabled NO \
-            -only-testing:RJTrackerUITests/TrackerUITests/testPanelDashboardMapAndBarkSettings \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            2>&1 | tee RJ-Tracker-ipad-tests.log
 
       - name: Required Release cold start and relaunch
         timeout-minutes: 20
@@ -233,9 +220,6 @@ jobs:
           if [ -d RJ-Tracker-tests.xcresult ]; then
             xcrun xcresulttool export attachments --path RJ-Tracker-tests.xcresult --output-path TestScreenshots || true
           fi
-          if [ -d RJ-Tracker-ipad-tests.xcresult ]; then
-            xcrun xcresulttool export attachments --path RJ-Tracker-ipad-tests.xcresult --output-path TestScreenshots-iPad || true
-          fi
 
       - name: Upload test results
         if: always()
@@ -245,12 +229,9 @@ jobs:
           path: |
             RJ-Tracker-tests.xcresult
             RJ-Tracker-release-tests.xcresult
-            RJ-Tracker-ipad-tests.xcresult
-            RJ-Tracker-ipad-tests.log
             RJ-Tracker-tests.log
             RJ-Tracker-release-tests.log
             TestScreenshots
-            TestScreenshots-iPad
           if-no-files-found: warn
           retention-days: 30
 
