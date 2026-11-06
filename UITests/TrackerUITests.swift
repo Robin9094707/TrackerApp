@@ -85,7 +85,37 @@ final class TrackerUITests: XCTestCase {
         XCTAssertTrue(bag.waitForExistence(timeout: 20))
         bag.tap()
         app.buttons["tracker-history-link"].tap()
-        XCTAssertTrue(app.buttons["Verlauf abspielen"].waitForExistence(timeout: 10))
+        let today = app.buttons["history-today"]
+        XCTAssertTrue(today.waitForExistence(timeout: 10))
+        today.tap()
+        let fit = app.buttons["history-map-fit"]
+        XCTAssertTrue(fit.waitForExistence(timeout: 10))
+        fit.tap()
+        fit.tap()
+        app.buttons["history-map-expand"].tap()
+        let close = app.buttons["history-map-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        app.buttons["history-map-full-fit"].tap()
+        close.tap()
+        XCTAssertTrue(fit.waitForExistence(timeout: 10))
+
+        let stays = app.buttons["Aufenthalte"].firstMatch
+        for _ in 0..<3 where !stays.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.025, dy: 0.77))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.025, dy: 0.34)))
+        }
+        XCTAssertTrue(stays.isHittable)
+        stays.tap()
+        let stay = app.buttons["history-stay-0"]
+        XCTAssertTrue(stay.waitForExistence(timeout: 10))
+        if !stay.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.025, dy: 0.77))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.025, dy: 0.47)))
+        }
+        XCTAssertTrue(stay.isHittable)
+        stay.tap()
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        close.tap()
         capture("10-History")
         app.tabBars.buttons["Ich"].tap()
         app.buttons["Konto & Sicherheit"].tap()

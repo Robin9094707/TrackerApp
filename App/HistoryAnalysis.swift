@@ -12,6 +12,36 @@ struct HistorySegment: Identifiable {
     }
 }
 
+/// Converts a report time to a fraction of the drawn line, which is measured by distance.
+struct HistoryRouteProgress {
+    private let timestamps: [Int]
+    private let distances: [Double]
+
+    init(points: [HistoryPoint]) {
+        timestamps = points.map(\.timestamp)
+        let locations = points.map { CLLocation(latitude: $0.latitude, longitude: $0.longitude) }
+        var accumulated = [0.0]
+        for (previous, current) in zip(locations, locations.dropFirst()) {
+            accumulated.append(accumulated[accumulated.count - 1] + current.distance(from: previous))
+        }
+        distances = accumulated
+    }
+
+    func fraction(at timestamp: Int) -> Double {
+        guard let first = timestamps.first, let last = timestamps.last, let total = distances.last, total > 0 else { return 0 }
+        if timestamp < first { return 0 }
+        if timestamp >= last { return 1 }
+        var low = 0
+        var high = timestamps.count - 1
+        while high - low > 1 {
+            let middle = (low + high) / 2
+            if timestamps[middle] <= timestamp { low = middle } else { high = middle }
+        }
+        let progress = Double(timestamp - timestamps[low]) / Double(timestamps[high] - timestamps[low])
+        return (distances[low] + (distances[high] - distances[low]) * progress) / total
+    }
+}
+
 struct HistoryDay: Identifiable {
     let date: Date
     let points: [HistoryPoint]
@@ -23,6 +53,7 @@ struct PreparedHistory {
     var displayPoints: [HistoryPoint] = []
     var points: [HistoryPoint] = []
     var mapSegments: [HistorySegment] = []
+    var mapProgress: [Int: HistoryRouteProgress] = [:]
     var mapPoints: [HistoryPoint] = []
     var days: [HistoryDay] = []
     var indexByID: [String: Int] = [:]
@@ -42,19 +73,22 @@ enum HistoryAnalysis {
         let allPoints = filtered(input, networks: networks)
         let allGroups = Dictionary(grouping: allPoints) { calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval($0.timestamp))) }
         let available = allGroups.keys.sorted(by: >).map { HistoryDay(date: $0, points: Array((allGroups[$0] ?? []).reversed())) }
-        let points = day.flatMap { allGroups[$0] } ?? allPoints
+        let points = day.map { allGroups[$0] ?? [] } ?? allPoints
         let display = detailed ? points : compactReports(points)
         let groups = Dictionary(grouping: display) { calendar.startOfDay(for: Date(timeIntervalSince1970: TimeInterval($0.timestamp))) }
         let days = groups.keys.sorted(by: >).map { HistoryDay(date: $0, points: Array((groups[$0] ?? []).reversed())) }
         let mapSegments = sourceSegments(points).map { segment in
             HistorySegment(id: segment.id, points: detailed ? segment.points : simplified(segment.points))
         }
+        let mapProgress = Dictionary(uniqueKeysWithValues: mapSegments.filter { $0.points.count > 1 }.map {
+            ($0.id, HistoryRouteProgress(points: $0.points))
+        })
         let accuracies = points.compactMap(\.accuracyM).filter { $0.isFinite && $0 > 0 }.sorted()
         let middle = accuracies.count / 2
         let median: Double? = accuracies.isEmpty ? nil : (accuracies.count.isMultiple(of: 2) ? (accuracies[middle - 1] + accuracies[middle]) / 2 : accuracies[middle])
         let gap = zip(points, points.dropFirst()).map { TimeInterval($1.timestamp - $0.timestamp) }.max() ?? 0
         let counts = Dictionary(grouping: points) { ($0.network ?? "unknown").rjNormalizedProvider }.mapValues(\.count)
-        return PreparedHistory(displayPoints: display, points: points, mapSegments: mapSegments, mapPoints: display, days: days,
+        return PreparedHistory(displayPoints: display, points: points, mapSegments: mapSegments, mapProgress: mapProgress, mapPoints: display, days: days,
                                indexByID: Dictionary(uniqueKeysWithValues: display.enumerated().map { ($0.element.id, $0.offset) }),
                                availableDays: available, medianAccuracy: median, longestGap: gap, sourceCounts: counts,
                                distanceM: distance(mapSegments), activity: activity(display))

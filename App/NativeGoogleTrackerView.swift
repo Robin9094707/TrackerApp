@@ -181,13 +181,16 @@ struct NativeGoogleTrackerView: View {
 struct NativeGoogleHistoryView: View {
     let deviceID: String
     @ObservedObject private var google = GoogleTrackerStore.shared
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var reports: [GoogleReportSnapshot] = []
     @State private var prepared = PreparedHistory()
     @State private var selectedDay: Date?
     @State private var selectedIndex = 0
-    @State private var position: MapCameraPosition = .automatic
+    @State private var camera = HistoryMapCameraRequest()
+    @State private var revealsTrail = false
+    @State private var preparationID = UUID()
+    @State private var loading = true
     @State private var limit = 80
+    private var today: Date { Calendar.current.startOfDay(for: Date()) }
     private var points: [HistoryPoint] { prepared.displayPoints }
     private var selected: HistoryPoint? { points.isEmpty ? nil : points[min(max(selectedIndex, 0), points.count - 1)] }
     private var lockedCount: Int { reports.filter { $0.latitude == nil }.count }
@@ -203,27 +206,32 @@ struct NativeGoogleHistoryView: View {
                     Text("\(reports.count) unterschiedliche Meldungen" + (lockedCount > 0 ? " · \(lockedCount) noch verschlüsselt" : ""))
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
-                if !prepared.availableDays.isEmpty {
+                if !loading {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             chip("Alle", detail: "\(prepared.availableDays.count) Tage", day: nil)
-                            ForEach(prepared.availableDays) { day in
+                            chip("Heute", detail: "Ab 00:00 Uhr", day: today)
+                            ForEach(prepared.availableDays.filter { $0.date != today }) { day in
                                 chip(day.date.formatted(.dateTime.weekday(.abbreviated).day()), detail: "\(day.points.count)", day: day.date)
                             }
                         }
                     }
                 }
-                if points.isEmpty {
+                if loading {
+                    ProgressView("Google-Verlauf wird geladen …").frame(maxWidth: .infinity).rjCard()
+                } else if points.isEmpty {
                     ContentUnavailableView("Keine entschlüsselten Standorte", systemImage: "lock.circle",
-                                           description: Text("Sobald Google-Meldungen entschlüsselt sind, erscheinen sie hier mit Karte und Zeitleiste.")).rjCard()
+                                           description: Text(selectedDay == nil ? "Sobald Google-Meldungen entschlüsselt sind, erscheinen sie hier mit Karte und Zeitleiste." : "Für diesen Tag liegen keine entschlüsselten Meldungen vor.")).rjCard()
                 } else {
-                    HistoryRouteMap(prepared: prepared, selected: selected, position: $position, onSelect: select)
+                    HistoryRouteMap(prepared: prepared, selected: selected, camera: camera,
+                                    revealThrough: revealsTrail ? selected?.timestamp : nil, onSelect: select)
                         .frame(height: 340)
                         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                         .shadow(color: .black.opacity(0.08), radius: 16, y: 6)
                         .overlay(alignment: .topTrailing) {
-                            Button { position = .automatic } label: { Image(systemName: "point.topleft.down.to.point.bottomright.curvepath").rjGlassControl() }
-                                .buttonStyle(.plain).padding(12).accessibilityLabel("Gesamte Auswahl auf Karte zeigen")
+                            RJMapControlStack {
+                                RJMapControlButton(symbol: "point.topleft.down.to.point.bottomright.curvepath", label: "Gesamte Auswahl auf Karte zeigen", action: showOverview)
+                            }.padding(12)
                         }
                     if let point = selected, let first = points.first, let last = points.last {
                         VStack(alignment: .leading, spacing: 10) {
@@ -237,7 +245,10 @@ struct NativeGoogleHistoryView: View {
                                 .font(.subheadline.weight(.medium))
                             if first.timestamp < last.timestamp {
                                 HistoryActivityStrip(activity: prepared.activity, progress: Double(point.timestamp - first.timestamp) / Double(last.timestamp - first.timestamp)).frame(height: 26)
-                                Slider(value: Binding(get: { Double(point.timestamp) }, set: { selectedIndex = HistoryAnalysis.nearestIndex(to: $0, in: points) }),
+                                Slider(value: Binding(get: { Double(point.timestamp) }, set: {
+                                    revealsTrail = true
+                                    selectedIndex = HistoryAnalysis.nearestIndex(to: $0, in: points)
+                                }),
                                        in: Double(first.timestamp)...Double(last.timestamp)) { editing in if !editing { focus() } }
                                     .accessibilityLabel("Zeitpunkt auswählen")
                             }
@@ -276,7 +287,9 @@ struct NativeGoogleHistoryView: View {
             let result = await google.reports(for: deviceID)
             if !Task.isCancelled { reports = result; await prepare(resetSelection: prepared.points.isEmpty) }
         }
-        .onChange(of: selectedDay) { _, _ in Task { await prepare(resetSelection: true) } }
+        .task(id: selectedDay) {
+            if !loading { await prepare(resetSelection: true) }
+        }
     }
 
     private var visibleDays: [HistoryDay] {
@@ -290,7 +303,9 @@ struct NativeGoogleHistoryView: View {
 
     private func chip(_ title: String, detail: String, day: Date?) -> some View {
         let active = selectedDay == day
-        return Button { selectedDay = day } label: {
+        return Button {
+            if active { showOverview() } else { selectedDay = day }
+        } label: {
             VStack(spacing: 2) {
                 Text(title).font(.subheadline.weight(.semibold))
                 Text(detail).font(.caption2).opacity(0.75)
@@ -302,15 +317,19 @@ struct NativeGoogleHistoryView: View {
     }
 
     private func select(_ point: HistoryPoint) {
-        if let index = prepared.indexByID[point.id] { selectedIndex = index; focus(); Haptics.impact() }
+        if let index = prepared.indexByID[point.id] { selectedIndex = index; revealsTrail = true; focus(); Haptics.impact() }
     }
     private func focus() {
         guard let point = selected else { return }
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
-            position = .region(RJMapCamera.focusedRegion(for: point.rjTrackerLocation, zoomMeters: max(1200, (point.accuracyM ?? 100) * 6)))
-        }
+        camera = HistoryMapCameraRequest(target: HistoryMapCameraRequest.focus(point.coordinate, accuracy: point.accuracyM))
+    }
+    private func showOverview() {
+        revealsTrail = false
+        camera = HistoryMapCameraRequest()
     }
     @MainActor private func prepare(resetSelection: Bool) async {
+        let id = UUID()
+        preparationID = id
         let input = reports.compactMap { report -> HistoryPoint? in
             guard let lat = report.latitude, let lon = report.longitude else { return nil }
             return HistoryPoint(latitude: lat, longitude: lon, accuracyM: report.accuracy, timestamp: Int(report.date.timeIntervalSince1970),
@@ -320,11 +339,15 @@ struct NativeGoogleHistoryView: View {
         let result = await Task.detached(priority: .userInitiated) {
             HistoryAnalysis.prepare(input, networks: ["google"], day: day)
         }.value
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, preparationID == id, day == selectedDay else { return }
         let previous = selected?.id
         prepared = result
-        if resetSelection { selectedIndex = max(0, result.displayPoints.count - 1); limit = 80; position = .automatic }
-        else if let previous { selectedIndex = result.indexByID[previous] ?? max(0, result.displayPoints.count - 1) }
+        loading = false
+        if resetSelection {
+            selectedIndex = max(0, result.displayPoints.count - 1)
+            limit = 80
+            showOverview()
+        } else if let previous { selectedIndex = result.indexByID[previous] ?? max(0, result.displayPoints.count - 1) }
     }
 }
 

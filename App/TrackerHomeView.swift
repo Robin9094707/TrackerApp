@@ -13,6 +13,7 @@ struct TrackerHomeView: View {
     @State private var tab = 0
     @State private var detent: PresentationDetent = .fraction(0.60)
     @State private var follow = true
+    @State private var waitingForUserLocation = false
     @AppStorage("mapAppearance") private var mapAppearance = "standard"
     @AppStorage("showMapZones") private var showZones = false
 
@@ -44,18 +45,21 @@ struct TrackerHomeView: View {
         .task { fitAll(); await google.restoreIfNeeded() }
         .onChange(of: google.trackers.map(\.id)) { _, _ in if selectedRef == nil && follow { fitAll() } }
         .onChange(of: located.compactMap(\.validLocation)) { _, _ in if selectedRef == nil && follow { fitAll() } }
-        .onChange(of: current?.location) { _, _ in if follow { focusCurrent() } }
+        .onChange(of: current?.validLocation.map { [$0.latitude, $0.longitude] }) { _, _ in if follow { focusCurrent() } }
         .onChange(of: detent) { _, value in
-            if value != .large { if selectedRef == nil { fitAll() } else if follow { focusCurrent() } }
+            if value != .large, follow { if selectedRef == nil { fitAll() } else { focusCurrent() } }
         }
         .onChange(of: model.locationService.location) { _, value in
-            guard let value, selectedRef == nil, follow else { return }
-            animate { position = .region(MKCoordinateRegion(center: value.coordinate, latitudinalMeters: 1500, longitudinalMeters: 1500)) }
+            guard let value, waitingForUserLocation else { return }
+            waitingForUserLocation = false
+            focusUser(value)
+        }
+        .onChange(of: model.locationService.message) { _, message in
+            if message != nil { waitingForUserLocation = false }
         }
         .onChange(of: path) { _, value in
             selectedRef = value.last
-            follow = true
-            if selectedRef != nil { focusCurrent() }
+            if selectedRef != nil { follow = true; focusCurrent() }
         }
     }
 
@@ -64,7 +68,7 @@ struct TrackerHomeView: View {
             UserAnnotation()
             ForEach(located) { tracker in
                 if let location = tracker.validLocation {
-                    if selectedRef == tracker.ref, let accuracy = location.accuracyM, accuracy > 0 {
+                    if selectedRef == tracker.ref, let accuracy = location.accuracyM, accuracy.isFinite, accuracy > 0 {
                         MapCircle(center: location.coordinate, radius: min(accuracy, 100_000))
                             .foregroundStyle(.blue.opacity(0.10))
                             .stroke(.blue.opacity(0.35), lineWidth: 1)
@@ -116,6 +120,9 @@ struct TrackerHomeView: View {
                     RJMapControlButton(symbol: "location", label: "Meine Position") {
                         selectedRef = nil
                         path = []
+                        follow = false
+                        waitingForUserLocation = true
+                        if let location = model.locationService.location { focusUser(location) }
                         model.locationService.request()
                     }
                 }
@@ -124,6 +131,7 @@ struct TrackerHomeView: View {
                         selectedRef = nil
                         path = []
                         follow = false
+                        waitingForUserLocation = false
                         fitAll()
                     }
                     if current != nil {
@@ -190,6 +198,7 @@ struct TrackerHomeView: View {
 
     private func select(_ tracker: Tracker) {
         selectedRef = tracker.ref
+        waitingForUserLocation = false
         tab = 0
         path = [tracker.ref]
         detent = .fraction(0.60)
@@ -206,6 +215,11 @@ struct TrackerHomeView: View {
     private func focusCurrent() {
         guard let location = current?.validLocation else { return }
         animate { position = .region(RJMapCamera.focusedRegion(for: location, panelCoverage: coverage)) }
+    }
+
+    private func focusUser(_ location: CLLocation) {
+        let point = TrackerLocation(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude)
+        animate { position = .region(RJMapCamera.focusedRegion(for: point, zoomMeters: 1500, panelCoverage: coverage)) }
     }
 
     private func animate(_ change: () -> Void) {

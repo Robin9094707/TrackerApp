@@ -36,12 +36,12 @@ struct HistoryView: View {
     @State private var timelineLimit = 60
     @State private var loadID = UUID()
     @State private var preparationID = UUID()
-    @State private var loading = false
+    @State private var loading = true
     @State private var preparing = false
     @State private var error: String?
-    @State private var position: MapCameraPosition = .automatic
+    @State private var camera = HistoryMapCameraRequest()
+    @State private var revealsTrail = false
     @State private var selectedIndex = 0
-    @State private var selectedDay: Date?
     @State private var enabledNetworks: Set<String> = []
     @State private var playing = false
     @State private var speed = 1.0
@@ -99,7 +99,7 @@ struct HistoryView: View {
                             Button("Erneut versuchen") { Task { await load(force: true) } }.buttonStyle(.bordered).buttonBorderShape(.capsule)
                         }.rjCard()
                     }
-                    if response != nil {
+                    if response != nil && (!points.isEmpty || (!loading && !preparing)) {
                         if loadedDays != nil, loadedScope != dateScope {
                             Label("Angezeigt: letzter erfolgreich geladener Zeitraum.", systemImage: "clock.badge.exclamationmark")
                                 .font(.footnote).foregroundStyle(.orange).frame(maxWidth: .infinity, alignment: .leading)
@@ -112,17 +112,19 @@ struct HistoryView: View {
                             }.rjCard()
                         } else {
                             historyMap.id("history-map")
-                            playback
-                            metrics
+                            Picker("Verlaufansicht", selection: $detailMode) {
+                                Text("Zeitleiste").tag(0)
+                                Text("Aufenthalte").tag(2)
+                                Text("Analyse").tag(1)
+                            }.pickerStyle(.segmented)
                             if networks.count > 1 { sourceFilters }
                             if let total = response?.matchingTotal, total > (response?.points.count ?? 0) {
                                 Label("\(response?.points.count ?? 0) von \(total) Reports geladen. Weitere werden automatisch nachgeladen; der Export enthält die bisher geladenen Originalreports.", systemImage: "info.circle")
                                     .font(.caption).foregroundStyle(.orange)
                             }
-                            Picker("Verlaufansicht", selection: $detailMode) {
-                                Text("Zeitleiste").tag(0); Text("Aufenthalte").tag(2); Text("Analyse").tag(1)
-                            }.pickerStyle(.segmented)
                             if detailMode == 0 {
+                                playback
+                                metrics
                                 searchField
                                 timeline(proxy: proxy)
                             } else if detailMode == 1 {
@@ -163,6 +165,9 @@ struct HistoryView: View {
                 selectedIndex += 1
                 focusSelected()
             }
+        }
+        .onChange(of: detailMode) { _, mode in
+            if mode != 0 { playing = false }
         }
         .onDisappear { playing = false }
         .sensoryFeedback(.selection, trigger: selectedIndex) { _, _ in !playing }
@@ -240,6 +245,17 @@ struct HistoryView: View {
                 }.padding(.vertical, 2)
             }
             .defaultScrollAnchor(.trailing)
+            Button {
+                chooseSingleDay(todayKey)
+                showOverview()
+            } label: {
+                Label("Heute komplett", systemImage: "calendar.badge.clock")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(minHeight: 36)
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            .accessibilityIdentifier("history-today")
             if calendarResponse == nil {
                 Text("Kalender wird geladen. Für die Tagesauswahl Backend 20.2 oder neuer verwenden.").font(.caption).foregroundStyle(.secondary)
             }
@@ -274,12 +290,11 @@ struct HistoryView: View {
     }
 
     private func chooseSingleDay(_ key: String) {
-        selectedDay = nil
         if key == todayKey { selectionMode = "today"; selectedDates = [todayKey] }
         else { selectionMode = "custom"; selectedDates = [key] }
     }
     private func chooseRange(_ count: Int) {
-        days = count; selectionMode = "custom"; selectedDay = nil
+        days = count; selectionMode = "custom"
         selectedDates = HistoryCalendar.range(days: count, now: Date(), calendar: historyCalendar)
     }
     private func weekday(_ date: Date) -> String {
@@ -329,7 +344,7 @@ struct HistoryView: View {
                     ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { showCalendar = false } }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Anzeigen (\(draftDates.count))") {
-                            selectedDates = draftDates; selectedDay = nil
+                            selectedDates = draftDates
                             selectionMode = draftDates == Set([todayKey]) ? "today" : "custom"
                             showCalendar = false
                         }.disabled(draftDates.isEmpty)
@@ -395,67 +410,80 @@ struct HistoryView: View {
     }
 
     private var historyMap: some View {
-        HistoryRouteMap(prepared: prepared, selected: selectedPoint, position: $position, satellite: satellite, onSelect: select)
+        routeMap
             .frame(height: 380)
             .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).stroke(Color.primary.opacity(0.06), lineWidth: 0.5))
             .shadow(color: .black.opacity(0.08), radius: 16, y: 6)
             .overlay(alignment: .topTrailing) {
-                RJGlassControls {
-                    VStack(spacing: 10) {
-                        Button { playing = false; position = .automatic } label: { Image(systemName: "point.topleft.down.to.point.bottomright.curvepath").rjGlassControl() }
-                            .accessibilityLabel("Gesamte Auswahl auf Karte zeigen")
-                        Button { fullscreen = true } label: { Image(systemName: "arrow.up.left.and.arrow.down.right").rjGlassControl() }
-                            .accessibilityLabel("Karte groß öffnen")
-                    }
-                }.buttonStyle(.plain).font(.body.weight(.medium)).padding(12)
+                RJMapControlStack {
+                    RJMapControlButton(symbol: "point.topleft.down.to.point.bottomright.curvepath", label: "Gesamte Auswahl auf Karte zeigen", action: showOverview)
+                        .accessibilityIdentifier("history-map-fit")
+                    RJMapControlDivider()
+                    RJMapControlButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Karte groß öffnen") { fullscreen = true }
+                        .accessibilityIdentifier("history-map-expand")
+                }.padding(12)
             }
             .overlay(alignment: .bottomTrailing) {
                 HStack(spacing: 10) {
-                    legendDot(.systemTeal, "Früher")
+                    Text("Früher").foregroundStyle(.secondary)
                     LinearGradient(colors: [Color(uiColor: .systemTeal), Color(uiColor: .systemBlue), Color(uiColor: .systemIndigo)], startPoint: .leading, endPoint: .trailing)
                         .frame(width: 44, height: 4).clipShape(Capsule())
-                    legendDot(.systemIndigo, "Später")
+                    Text("Später").foregroundStyle(.secondary)
                 }
                 .font(.caption2.weight(.semibold))
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .rjGlass(in: Capsule()).padding(.trailing, 12).padding(.bottom, 30)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Farbverlauf von früheren zu späteren Meldungen")
+                .allowsHitTesting(false)
             }
             .overlay(alignment: .topLeading) {
                 Label(rangeText, systemImage: "clock")
                     .font(.caption.weight(.semibold)).monospacedDigit()
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .rjGlass(in: Capsule()).padding(12)
+                    .allowsHitTesting(false)
             }
     }
-    private func legendDot(_ color: UIColor, _ text: String) -> some View {
-        Text(text).foregroundStyle(.secondary)
+
+    private var routeMap: some View {
+        HistoryRouteMap(prepared: prepared, selected: selectedPoint, camera: camera,
+                        revealThrough: revealsTrail ? selectedPoint?.timestamp : nil,
+                        satellite: satellite, onSelect: select)
     }
 
     private var fullscreenMap: some View {
-        ZStack(alignment: .bottom) {
-            HistoryRouteMap(prepared: prepared, selected: selectedPoint, position: $position, satellite: satellite, bottomInset: 300, onSelect: select)
-                .ignoresSafeArea()
-            playbackPanel(compact: true)
-                .padding(16)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
-                .shadow(color: .black.opacity(0.15), radius: 20, y: 8)
-                .padding(.horizontal, 12).padding(.bottom, 8)
-        }
-        .overlay(alignment: .topTrailing) {
-            RJGlassControls {
-                VStack(spacing: 10) {
-                    Button { fullscreen = false } label: { Image(systemName: "xmark").rjGlassControl() }
-                        .accessibilityLabel("Verlaufkarte schließen")
-                    Button { satellite.toggle() } label: { Image(systemName: satellite ? "map" : "globe.europe.africa").rjGlassControl() }
-                        .accessibilityLabel(satellite ? "Standardkarte" : "Satellitenkarte")
-                    Button { playing = false; position = .automatic } label: { Image(systemName: "point.topleft.down.to.point.bottomright.curvepath").rjGlassControl() }
-                        .accessibilityLabel("Gesamte Auswahl auf Karte zeigen")
+        VStack(spacing: 0) {
+            routeMap
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .topTrailing) {
+                    RJMapControlStack {
+                        RJMapControlButton(symbol: "xmark", label: "Verlaufkarte schließen") { fullscreen = false }
+                            .accessibilityIdentifier("history-map-close")
+                        RJMapControlDivider()
+                        RJMapControlButton(symbol: satellite ? "map" : "globe.europe.africa", label: satellite ? "Standardkarte" : "Satellitenkarte") {
+                            satellite.toggle()
+                        }
+                        RJMapControlDivider()
+                        RJMapControlButton(symbol: "point.topleft.down.to.point.bottomright.curvepath", label: "Gesamte Auswahl auf Karte zeigen", action: showOverview)
+                            .accessibilityIdentifier("history-map-full-fit")
+                    }.padding(12)
                 }
-            }.buttonStyle(.plain).font(.body.weight(.medium)).padding(.trailing, 16).padding(.top, 8)
+            ViewThatFits(in: .vertical) {
+                playbackPanel(compact: true).padding(16)
+                ScrollView { playbackPanel(compact: true).padding(16) }
+                    .frame(height: 140)
+            }
+            .background(.regularMaterial)
         }
+        .background(Color(uiColor: .systemBackground))
+    }
+
+    private func showOverview() {
+        playing = false
+        revealsTrail = false
+        camera = HistoryMapCameraRequest()
     }
 
     // MARK: Playback
@@ -493,6 +521,7 @@ struct HistoryView: View {
                             .frame(height: compact ? 22 : 30)
                         Slider(value: Binding(get: { Double(selectedPoint?.timestamp ?? first.timestamp) }, set: { value in
                             followLatest = false
+                            revealsTrail = true
                             selectedIndex = HistoryAnalysis.nearestIndex(to: value, in: points)
                         }), in: Double(first.timestamp)...Double(last.timestamp)) { editing in
                             if editing { playing = false } else { focusSelected() }
@@ -523,7 +552,11 @@ struct HistoryView: View {
                     Button { step(-1) } label: { Image(systemName: "backward.fill").font(.title2).frame(width: 52, height: 52) }
                         .disabled(selectedIndex == 0).accessibilityLabel("Vorherige Meldung")
                     Button {
-                        if selectedIndex >= points.count - 1 { selectedIndex = 0; focusSelected() }
+                        if !playing {
+                            followLatest = false
+                            revealsTrail = true
+                            if selectedIndex >= points.count - 1 { selectedIndex = 0; focusSelected() }
+                        }
                         playing.toggle()
                     } label: {
                         Image(systemName: playing ? "pause.fill" : "play.fill")
@@ -587,12 +620,6 @@ struct HistoryView: View {
 
     private var visibleStays: [JSONValue] {
         (response?.stays ?? []).filter { stay in
-            if let selectedDay {
-                let start = stay["start_ts"].numberValue ?? 0
-                let end = stay["end_ts"].numberValue ?? start
-                let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: selectedDay) ?? selectedDay.addingTimeInterval(86400)
-                if end < selectedDay.timeIntervalSince1970 || start >= tomorrow.timeIntervalSince1970 { return false }
-            }
             let sources = Set((stay["networks"].objectValue ?? [:]).keys.map { $0.rjNormalizedProvider })
             return sources.isEmpty || !sources.isDisjoint(with: enabledNetworks)
         }
@@ -608,20 +635,23 @@ struct HistoryView: View {
                 Button {
                     playing = false; followLatest = false
                     if let timestamp = stay["start_ts"].numberValue { selectedIndex = HistoryAnalysis.nearestIndex(to: timestamp, in: points) }
+                    revealsTrail = false
                     if let latitude = stay["latitude"].numberValue, let longitude = stay["longitude"].numberValue {
-                        let zoom = max(700, (stay["radius_m"].numberValue ?? 100) * 5)
-                        position = .region(.init(center: .init(latitude: latitude, longitude: longitude), latitudinalMeters: zoom, longitudinalMeters: zoom))
+                        let coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+                        if CLLocationCoordinate2DIsValid(coordinate) {
+                            camera = HistoryMapCameraRequest(target: HistoryMapCameraRequest.focus(coordinate, accuracy: stay["radius_m"].numberValue))
+                        }
                     }
                     fullscreen = true
-                } label: { HistoryStayRow(stay: stay, last: index == min(visibleStays.count, 100) - 1) }.buttonStyle(.plain)
+                } label: {
+                    HistoryStayRow(stay: stay, last: index == min(visibleStays.count, 100) - 1)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("history-stay-\(index)")
             }
             if visibleStays.count > 100 { Text("Die 100 neuesten Aufenthalte werden angezeigt.").font(.caption).foregroundStyle(.secondary) }
         }.rjCard()
-    }
-
-    private func chooseDay(_ date: Date?) {
-        selectedDay = date; timelineLimit = 60; playing = false
-        Task { await prepare(preserveSelection: true); position = .automatic }
     }
 
     private var searchField: some View {
@@ -729,19 +759,17 @@ struct HistoryView: View {
     }
 
     private func step(_ direction: Int) {
-        playing = false; followLatest = false
+        playing = false; followLatest = false; revealsTrail = true
         selectedIndex = min(max(0, selectedIndex + direction), max(0, points.count - 1))
         focusSelected()
     }
     private func select(_ point: HistoryPoint) {
-        playing = false; followLatest = false
+        playing = false; followLatest = false; revealsTrail = true
         if let index = prepared.indexByID[point.id] { selectedIndex = index; focusSelected(); Haptics.impact() }
     }
     private func focusSelected() {
         guard followSelection, let point = selectedPoint else { return }
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) {
-            position = .region(RJMapCamera.focusedRegion(for: point.rjTrackerLocation, zoomMeters: max(1200, (point.accuracyM ?? 100) * 6)))
-        }
+        camera = HistoryMapCameraRequest(target: HistoryMapCameraRequest.focus(point.coordinate, accuracy: point.accuracyM))
     }
     private func beginExport(gpx: Bool) {
         playing = false; exportGPX = gpx
@@ -755,17 +783,19 @@ struct HistoryView: View {
         let oldPoint = preserveSelection ? selectedPoint : nil
         let wasAtLatest = followLatest && selectedIndex >= points.count - 1
         let input = response?.points ?? []; let networks = enabledNetworks; let calendar = historyCalendar
-        if !preserveSelection { selectedDay = nil }
-        let day = selectedDay; let detailed = detailed
-        let work = Task.detached(priority: .userInitiated) { HistoryAnalysis.prepare(input, networks: networks, calendar: calendar, day: day, detailed: detailed) }
+        let detailed = detailed
+        let work = Task.detached(priority: .userInitiated) { HistoryAnalysis.prepare(input, networks: networks, calendar: calendar, detailed: detailed) }
         let result = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
         guard preparationID == id, !Task.isCancelled else { if preparationID == id { preparing = false }; return }
         prepared = result; preparing = false
-        if wasAtLatest { selectedIndex = max(result.displayPoints.count - 1, 0) }
-        else if let oldPoint {
+        if !preserveSelection {
+            followLatest = true
+            selectedIndex = max(result.displayPoints.count - 1, 0)
+            timelineLimit = 60
+            showOverview()
+        } else if !wasAtLatest, let oldPoint {
             selectedIndex = result.indexByID[oldPoint.id] ?? HistoryAnalysis.nearestIndex(to: Double(oldPoint.timestamp), in: result.displayPoints)
-        } else { selectedIndex = max(result.displayPoints.count - 1, 0); timelineLimit = 60; position = .automatic }
-        if let selectedDay, !result.availableDays.contains(where: { $0.date == selectedDay }) { self.selectedDay = nil }
+        } else { selectedIndex = max(result.displayPoints.count - 1, 0) }
         await filterTimeline()
     }
     @MainActor private func filterTimeline() async {
@@ -798,8 +828,14 @@ struct HistoryView: View {
         }.padding(.horizontal, 4)
     }
     @MainActor private func watchHistory() async {
-        do { calendarResponse = try await APIClient.shared.historyCalendar(tracker: tracker.ref) }
-        catch { liveError = "Kalender nicht verfügbar. Backend 20.2 prüfen." }
+        if calendarResponse == nil {
+            do {
+                let calendar = try await APIClient.shared.historyCalendar(tracker: tracker.ref)
+                guard !Task.isCancelled else { return }
+                calendarResponse = calendar
+            } catch is CancellationError { return }
+            catch { liveError = "Kalender nicht verfügbar. Backend 20.2 prüfen." }
+        }
         guard !Task.isCancelled else { return }
         if loadedScope != dateScope {
             streamCursor = nil; caughtUp = false; reportIDs = []; followLatest = true
@@ -817,7 +853,7 @@ struct HistoryView: View {
         }
     }
     @MainActor private func receiveReports() async {
-        guard !receiving, streamSupported else { return }
+        guard !receiving, streamSupported, loadedScope == dateScope else { return }
         receiving = true; defer { receiving = false }
         let requestedDays = days
         let requestedDates = requestDates; let requestedScope = dateScope
@@ -828,7 +864,7 @@ struct HistoryView: View {
                 guard requestedScope == dateScope, !Task.isCancelled else { return }
                 let previousCount = response?.points.count ?? 0
                 if response == nil { response = HistoryResponse(status: "ok", tracker: tracker, points: []) }
-                var merged = Dictionary(uniqueKeysWithValues: (response?.points ?? []).map { ($0.id, $0) })
+                var merged = Dictionary((response?.points ?? []).map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
                 var changed = false
                 for point in page.points {
                     if merged[point.id] != point { changed = true; merged[point.id] = point }
@@ -867,7 +903,7 @@ struct HistoryView: View {
             let preserve = loadedScope == requestedScope && response != nil
             let originalIDs = reportIDs
             if preserve {
-                var merged = Dictionary(uniqueKeysWithValues: (response?.points ?? []).map { ($0.id, $0) })
+                var merged = Dictionary((response?.points ?? []).map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
                 for point in loaded.points {
                     if var existing = merged[point.id] {
                         if let address = point.address { existing.address = address; merged[point.id] = existing }

@@ -1,5 +1,6 @@
 import XCTest
 import CoreLocation
+import MapKit
 @testable import RJTracker
 
 final class TrackerTests: XCTestCase {
@@ -92,6 +93,41 @@ final class TrackerTests: XCTestCase {
         XCTAssertLessThan(region.center.latitude, 52)
         XCTAssertLessThan(region.span.longitudeDelta, 1)
         XCTAssertNil(RJMapCamera.overview(locations: [], panelCoverage: 0.5))
+    }
+
+    func testHistoryCameraFitsOnePointAndCrossesTheDateLine() throws {
+        let one = CLLocationCoordinate2D(latitude: 52, longitude: 13)
+        let single = try XCTUnwrap(HistoryMapCameraRequest.bounds(for: [one]))
+        XCTAssertGreaterThan(single.size.width, 600)
+        XCTAssertLessThan(single.size.width, MKMapRect.world.size.width / 1000)
+        let crossing = try XCTUnwrap(HistoryMapCameraRequest.bounds(for: [
+            .init(latitude: 52, longitude: 179.9),
+            .init(latitude: 52.01, longitude: -179.9)
+        ]))
+        XCTAssertLessThan(crossing.size.width, MKMapRect.world.size.width / 1000)
+        XCTAssertNil(HistoryMapCameraRequest.bounds(for: [.init(latitude: .nan, longitude: 0)]))
+        guard case let .focus(_, meters) = HistoryMapCameraRequest.focus(one, accuracy: 1_000_000) else {
+            return XCTFail("Expected a focus request")
+        }
+        XCTAssertEqual(meters, 18_000)
+    }
+
+    func testRouteProgressUsesDistanceAndStopsAtSegmentEdges() {
+        var close = point(1100)
+        close.longitude += 0.001
+        var far = point(1200)
+        far.longitude += 0.004
+        let progress = HistoryRouteProgress(points: [point(1000), close, far])
+        XCTAssertEqual(progress.fraction(at: 999), 0)
+        XCTAssertEqual(progress.fraction(at: 1050), 0.125, accuracy: 0.001)
+        XCTAssertEqual(progress.fraction(at: 1100), 0.25, accuracy: 0.001)
+        XCTAssertEqual(progress.fraction(at: 1200), 1)
+    }
+
+    func testSelectingAnEmptyHistoryDayDoesNotShowOtherDates() {
+        let prepared = HistoryAnalysis.prepare([point(1000)], networks: ["apple"], day: Date(timeIntervalSince1970: 86400))
+        XCTAssertTrue(prepared.points.isEmpty)
+        XCTAssertEqual(prepared.availableDays.count, 1)
     }
 
     @MainActor
