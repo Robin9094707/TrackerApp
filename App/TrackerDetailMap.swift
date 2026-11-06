@@ -58,7 +58,11 @@ struct TrackerDetailMap: View {
         VStack(alignment: .leading, spacing: 3) {
             Label("Zuletzt gemeldeter Standort", systemImage: "clock.arrow.circlepath")
                 .foregroundStyle(.secondary)
-            FreshnessLabel(timestamp: tracker.reportTimestamp > 0 ? tracker.reportTimestamp : nil)
+            if tracker.reportTimestamp > 0 {
+                FreshnessLabel(timestamp: tracker.reportTimestamp)
+            } else {
+                Text("Zeitpunkt unbekannt").foregroundStyle(.secondary)
+            }
         }
     }
 
