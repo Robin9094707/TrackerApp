@@ -158,6 +158,61 @@ class BarkTests(unittest.TestCase):
                 M['send_bark_channel'](config, {'id': 'batch', 'body': 'x'})
         self.assertEqual(call.call_args.kwargs['payload']['device_keys'], ['key-one', 'key-two'])
 
+    def test_critical_bark_opens_exact_tracker_and_cancellation_blocks_sends(self):
+        self.save()
+        event = {'id': 'evt_123_012345abcdef', 'tracker_ref': 'samsung:key / ä',
+                 'type': 'movement_exit', 'bark_alarm': 'critical_repeat', 'bark_next_ts': 123}
+        STATE['notification_events'] = [event]
+        config = STATE['notification_settings']['channels']['bark']
+        send = Mock(return_value=(200, '{"code":200}'))
+        with patch.dict(G, http_request=send):
+            M['send_bark_channel'](config, event)
+            payload = send.call_args.kwargs['payload']
+            self.assertEqual(payload['level'], 'critical')
+            self.assertEqual(payload['url'], 'rjtracker://tracker?ref=samsung%3Akey%20%2F%20%C3%A4&alarm=1&event=evt_123_012345abcdef')
+            self.assertEqual(M['stop_tracker_bark_alarms'](['samsung:key / ä']), 1)
+            send.reset_mock()
+            M['send_bark_channel'](config, {**event, 'bark_accepted': []})
+            send.assert_not_called()
+
+    def test_reminder_queues_once_and_confirmation_stops_it(self):
+        event = {'id': 'evt_123_012345abcdef', 'tracker_ref': 'google:test',
+                 'type': 'location_found', 'bark_alarm': 'critical_repeat', 'bark_next_ts': 100}
+        STATE['notification_events'] = [event]
+        queue = Mock()
+        with patch.dict(G, notification_queue=queue):
+            M['queue_bark_alarm_reminders'](100)
+            M['queue_bark_alarm_reminders'](110)
+            self.assertEqual(queue.put_nowait.call_count, 1)
+            self.assertEqual(event['bark_next_ts'], 160)
+            with patch.dict(G, mcp_resolve_tracker=lambda ref: {'ref': ref}):
+                action = '/api/mobile/v1/action'
+                data = {'action': 'confirm_tracker_bark_alarm', 'event_id': event['id']}
+                self.assertEqual(self.client.post(action, json={**data, 'tracker': 'samsung:other'},
+                                                  headers=self.headers).status_code, 404)
+                self.assertEqual(self.client.post(action, json={**data, 'tracker': 'google:test'},
+                                                  headers=self.headers).status_code, 200)
+            self.assertTrue(event['acknowledged'])
+            self.assertEqual(event['bark_next_ts'], 0)
+            M['queue_bark_alarm_reminders'](170)
+            self.assertEqual(queue.put_nowait.call_count, 1)
+
+    def test_movement_uses_distinct_consecutive_reports_in_one_batch(self):
+        now = int(time.time())
+        def point(offset, lat=51.44, acc=10, name=None):
+            return {'ts': now + offset, 'lat': lat, 'lon': 6.76, 'acc': acc,
+                    'report_id': name or str(offset)}
+        movement = M['normalize_tracker_notification_config']({'movement': {
+            'enabled': True, 'anchor_lat': 51.43, 'anchor_lon': 6.76, 'radius': 150,
+            'armed_ts': now - 120, 'strict_reports': True, 'min_confirmations': 3,
+        }})['movement']
+        runtime = {'stable': 'inside', 'baseline_report_ts': now - 120}
+        outside = point(-60)
+        self.assertIsNone(M['confirmed_departure'](movement, runtime, [outside, outside, point(-50, acc=2000)]))
+        self.assertEqual(runtime['pending_count'], 0)
+        departure = M['confirmed_departure'](movement, runtime, [point(-40), point(-30), point(-20)])
+        self.assertEqual(departure[0]['report_id'], '-20')
+
     def test_bulk_queues_once_and_does_not_send_network_from_request(self):
         self.save()
         with patch.dict(G, http_request=Mock(side_effect=AssertionError('network is worker-only'))):

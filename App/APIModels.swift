@@ -57,7 +57,24 @@ struct TrackerDetails: Codable, Hashable {
     }
 }
 
-struct ToggleSummary: Codable, Hashable { var enabled: Bool? }
+struct ToggleSummary: Codable, Hashable {
+    var enabled: Bool?
+    var sources: [TrackerAlarmSource]?
+}
+
+struct TrackerAlarmSource: Codable, Hashable {
+    var mode: String?
+    var barkAlarm: String?
+    var radius: Double?
+    var minConfirmations: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case mode
+        case barkAlarm = "bark_alarm"
+        case radius = "radius_m"
+        case minConfirmations = "min_confirmations"
+    }
+}
 
 struct TrackerRefresh: Codable, Hashable {
     var completion: Double
@@ -169,6 +186,7 @@ struct AlertEvent: Codable, Identifiable, Hashable {
     var title: String?
     var body: String?
     var acknowledged: Bool?
+    var barkAlarm: String?
     var trackerRef: String?
     var delivery: [String: JSONValue]?
     var location: JSONValue?
@@ -176,6 +194,7 @@ struct AlertEvent: Codable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, ts, type, severity, title, body, acknowledged, location, delivery
         case trackerRef = "tracker_ref"
+        case barkAlarm = "bark_alarm"
     }
 }
 

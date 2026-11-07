@@ -386,6 +386,9 @@ final class TrackerUITests: XCTestCase {
         XCTAssertTrue(expand.waitForExistence(timeout: 10))
         XCTAssertTrue(app.maps.firstMatch.exists)
         XCTAssertTrue(expand.isHittable)
+        XCTAssertTrue(app.buttons["tracker-detail-map-center"].isHittable)
+        app.maps.firstMatch.pinch(withScale: 1.5, velocity: 1)
+        XCTAssertTrue(expand.isHittable)
         capture(screenshot)
         expand.tap()
         let center = app.buttons["tracker-detail-map-center"]

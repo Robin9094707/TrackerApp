@@ -6,6 +6,7 @@ struct TrackerDetailView: View {
     @Environment(AppModel.self) private var model
     let tracker: Tracker
     var preferNativeGoogle = true
+    var barkEventID: String? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var showEdit = false
     @State private var showAutomation = false
@@ -23,15 +24,24 @@ struct TrackerDetailView: View {
     var body: some View {
         Group {
             if preferNativeGoogle, tracker.provider == "google", GoogleTrackerStore.shared.hasDevice(tracker.apiID) {
-                NativeGoogleTrackerView(deviceID: tracker.apiID)
+                NativeGoogleTrackerView(deviceID: tracker.apiID, barkEventID: barkEventID)
             } else { serverBody }
         }
     }
     private var serverBody: some View {
+        TrackerDetailLayout(tracker: current) { serverDetails }
+            .navigationTitle(current.name)
+            .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var serverDetails: some View {
         ScrollView {
             LazyVStack(spacing: 18) {
-                TrackerDetailMap(tracker: current)
                 header
+                if let barkEventID {
+                    TrackerBarkConfirmation(tracker: current, eventID: barkEventID)
+                        .rjCompactCard()
+                }
                 actions
                 if model.isLocating(current) {
                     ProgressView("Standort wird abgefragt …").font(.footnote)
@@ -88,8 +98,6 @@ struct TrackerDetailView: View {
             .frame(maxWidth: 850).frame(maxWidth: .infinity)
         }
         .rjScreenChrome()
-        .navigationTitle(current.name)
-        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -340,7 +348,11 @@ struct TrackerAutomationView: View {
     @Environment(\.dismiss) private var dismiss
     let tracker: Tracker
     @State private var radius = 150.0
-    @State private var repeatAlarm = false
+    @State private var confirmations = 2
+    @State private var foundAgain = false
+    @State private var movementAgain = false
+    @State private var foundDelivery = TrackerAlarmDelivery.standard
+    @State private var movementDelivery = TrackerAlarmDelivery.standard
     @State private var retention = "unchanged"
     @State private var busy = false
     @State private var error: String?
@@ -348,19 +360,41 @@ struct TrackerAutomationView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Wenn gefunden", isOn: Binding(get: { current.foundNotification?.enabled == true }, set: { value in
-                    perform("set_found_notification", ["enabled": value, "mode": repeatAlarm ? "always" : "once"])
-                }))
-                Toggle("Beim Wegbewegen", isOn: Binding(get: { current.departureNotification?.enabled == true }, set: { value in
-                    perform("set_departure_notification", ["enabled": value, "radius_m": radius, "mode": repeatAlarm ? "always" : "once", "min_confirmations": 2])
-                })).disabled(current.validLocation == nil)
-            } header: { Text("Mitteilungen") } footer: {
-                Text("Der Bewegungsalarm bezieht sich auf den Standort beim Einschalten. Der Server bestätigt das Verlassen anhand neuer Meldungen.")
+                Toggle("Bei neuer Ortung", isOn: Binding(get: { current.foundNotification?.enabled == true }, set: setFound))
+                    .accessibilityIdentifier("tracker-found-alert")
+                Picker("Zustellung", selection: $foundDelivery) { deliveryChoices }
+                Toggle("Auch bei späteren Funden", isOn: $foundAgain)
+                if current.foundNotification?.enabled == true {
+                    Button("Fundmeldung neu scharfstellen") { setFound(true) }
+                }
+            } header: { Text("Fundmeldung") } footer: {
+                Text("Der Server meldet eine neue Ortung dieses Trackers. Änderungen gelten beim Scharfstellen.")
             }
-            Section("Beim nächsten Einschalten") {
-                Toggle("Wiederholt benachrichtigen", isOn: $repeatAlarm)
+            Section {
+                Toggle("Beim Wegbewegen", isOn: Binding(get: { current.departureNotification?.enabled == true }, set: setMovement))
+                    .disabled(current.validLocation == nil && current.departureNotification?.enabled != true)
+                    .accessibilityIdentifier("tracker-departure-alert")
+                Picker("Zustellung", selection: $movementDelivery) { deliveryChoices }
+                Picker("Reports außerhalb", selection: $confirmations) {
+                    Text("2 Reports").tag(2)
+                    Text("3 Reports").tag(3)
+                }
+                Toggle("Nach Rückkehr wieder scharf", isOn: $movementAgain)
                 LabeledContent("Bewegungsradius", value: radius.metersText)
                 Slider(value: $radius, in: 25...1000, step: 25)
+                if current.departureNotification?.enabled == true {
+                    Button("Bewegungsalarm neu scharfstellen") { setMovement(true) }
+                        .disabled(current.validLocation == nil)
+                }
+            } header: { Text("Bewegungsalarm") } footer: {
+                Text("Der Server verwendet den Standort beim Scharfstellen als Ausgangspunkt. Zwei oder drei neue, ausreichend genaue Meldungen außerhalb des Radius bestätigen die Wegbewegung.")
+            }
+            Section {
+                Button("Laufende Bark-Alarme stoppen", role: .destructive) {
+                    perform("stop_tracker_bark_alarms", [:])
+                }
+            } header: { Text("Laufender Alarm") } footer: {
+                Text("Für kritische Pushs müssen in Bark kritische Hinweise erlaubt sein. Wiederholungen kommen etwa jede Minute bis zur Bestätigung oder bis du sie stoppst.")
             }
             Section {
                 LabeledContent("Aufzeichnung", value: current.historyActive == true ? "Aktiv" : "Aus")
@@ -381,12 +415,43 @@ struct TrackerAutomationView: View {
             }
             if let error { Section { Text(error).foregroundStyle(.red) } }
         }
-        .disabled(busy)
+        .disabled(busy || !model.serverActionsAvailable)
+        .onAppear(perform: loadAlarmSettings)
         .navigationTitle("Mitteilungen & Verlauf").navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() }.disabled(busy) } }
         .overlay { if busy { ProgressView().padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18)) } }
         .interactiveDismissDisabled(busy)
     }
+    @ViewBuilder private var deliveryChoices: some View {
+        ForEach(TrackerAlarmDelivery.allCases) { delivery in
+            Text(delivery.title).tag(delivery)
+        }
+    }
+
+    private func loadAlarmSettings() {
+        let found = current.foundNotification?.sources?.first
+        let movement = current.departureNotification?.sources?.first
+        foundDelivery = TrackerAlarmDelivery(rawValue: found?.barkAlarm ?? "") ?? .standard
+        movementDelivery = TrackerAlarmDelivery(rawValue: movement?.barkAlarm ?? "") ?? .standard
+        foundAgain = found?.mode == "always"
+        movementAgain = movement?.mode == "always"
+        if let savedRadius = movement?.radius { radius = min(1000, max(25, savedRadius)) }
+        if movement?.minConfirmations == 3 { confirmations = 3 }
+    }
+
+    private func setFound(_ enabled: Bool) {
+        perform("set_found_notification", [
+            "enabled": enabled, "mode": foundAgain ? "always" : "once", "bark_alarm": foundDelivery.rawValue,
+        ])
+    }
+
+    private func setMovement(_ enabled: Bool) {
+        perform("set_departure_notification", [
+            "enabled": enabled, "radius_m": radius, "mode": movementAgain ? "always" : "once",
+            "min_confirmations": confirmations, "strict_reports": true, "bark_alarm": movementDelivery.rawValue,
+        ])
+    }
+
     private func perform(_ action: String, _ payload: [String: Any]) {
         guard !busy else { return }
         busy = true; error = nil
@@ -400,3 +465,50 @@ struct TrackerAutomationView: View {
 
 
 
+
+private enum TrackerAlarmDelivery: String, CaseIterable, Identifiable {
+    case standard, criticalOnce = "critical_once", criticalRepeat = "critical_repeat"
+
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .standard: "Standard-Push"
+        case .criticalOnce: "Bark kritisch, einmal"
+        case .criticalRepeat: "Bark kritisch, bis bestätigt"
+        }
+    }
+}
+
+struct TrackerBarkConfirmation: View {
+    @Environment(AppModel.self) private var model
+    let tracker: Tracker
+    let eventID: String
+    @State private var busy = false
+    @State private var confirmed = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if confirmed {
+                Label("Alarm bestätigt", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            } else {
+                Button("Bark-Alarm bestätigen", systemImage: "bell.slash.fill") {
+                    busy = true
+                    error = nil
+                    Task {
+                        defer { busy = false }
+                        do {
+                            try await model.runAction("confirm_tracker_bark_alarm", payload: [
+                                "tracker": tracker.ref, "event_id": eventID,
+                            ])
+                            confirmed = true
+                        } catch { self.error = error.localizedDescription }
+                    }
+                }
+                .disabled(busy || !model.serverActionsAvailable)
+                .accessibilityIdentifier("tracker-bark-confirm")
+            }
+            if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+        }
+    }
+}
