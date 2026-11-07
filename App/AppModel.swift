@@ -348,6 +348,11 @@ final class AppModel {
         if let error = google.errorMessage { errorMessage = error }
     }
 
+    private func reportLocateResult(_ message: String, for tracker: Tracker) {
+        locateMessages[tracker.ref] = message
+        statusMessage = "\(tracker.name): \(message)"
+    }
+
     func locate(_ tracker: Tracker) async {
         if tracker.provider == "google", GoogleTrackerStore.shared.hasDevice(tracker.apiID) {
             await locateGoogle(tracker.apiID)
@@ -361,6 +366,7 @@ final class AppModel {
             Haptics.impact()
             let response = try await api.requestJSON(path: "/api/mobile/v1/locate", method: "POST", json: ["tracker": tracker.ref])
             guard generation == sessionGeneration else { return }
+            statusMessage = "Ortung für \(tracker.name) angefordert."
             // Capture the baseline before the request reaches a provider worker.
             let request = response["trackers"].arrayValue.first
             let baseline = request?["refresh"]["completion"].numberValue
@@ -402,7 +408,7 @@ final class AppModel {
                             reply.map { $0.completion > start || (reuse && $0.completion == start) } ?? false
                         } ?? false
                         if reply?.available == false {
-                            self.locateMessages[tracker.ref] = "Apple-Verbindung nicht verfügbar. Bitte die Anmeldung prüfen."
+                            self.reportLocateResult("Apple-Verbindung nicht verfügbar. Bitte die Anmeldung prüfen.", for: tracker)
                             Haptics.warning()
                             return
                         }
@@ -411,18 +417,19 @@ final class AppModel {
                             self.api.clearHistoryCache()
                             switch reply?.status {
                             case "error":
-                                self.locateMessages[tracker.ref] = "Abfrage fehlgeschlagen. Der letzte Standort bleibt sichtbar."
+                                self.reportLocateResult("Abfrage fehlgeschlagen. Der letzte Standort bleibt sichtbar.", for: tracker)
                                 Haptics.warning()
                             case "responded":
-                                self.locateMessages[tracker.ref] = "Apple hat geantwortet. Weitere Standortdaten erscheinen automatisch."
+                                self.reportLocateResult("Apple hat geantwortet. Weitere Standortdaten erscheinen automatisch.", for: tracker)
                                 Haptics.success()
                             case "pin_required":
-                                self.locateMessages[tracker.ref] = "Samsung hat geantwortet. Zum Entschlüsseln ist die Samsung-PIN erforderlich."
+                                self.reportLocateResult("Samsung hat geantwortet. Zum Entschlüsseln ist die Samsung-PIN erforderlich.", for: tracker)
                                 Haptics.warning()
                             default:
-                                self.locateMessages[tracker.ref] = hasNewLocation
+                                let message = hasNewLocation
                                     ? "Neuer Standort empfangen."
                                     : "Abfrage abgeschlossen. Der letzte gemeldete Standort wird angezeigt."
+                                self.reportLocateResult(message, for: tracker)
                                 Haptics.success()
                             }
                             // The button and status update before the local catalog write.
@@ -436,17 +443,17 @@ final class AppModel {
                     } catch is CancellationError { return }
                     catch {
                         guard self.sessionGeneration == generation else { return }
-                        self.locateMessages[tracker.ref] = error.localizedDescription
+                        self.reportLocateResult(error.localizedDescription, for: tracker)
                         Haptics.warning()
                         return
                     }
                 }
-                self.locateMessages[tracker.ref] = "Der Anbieter hat noch nicht geantwortet. Der Server fragt weiter ab."
+                self.reportLocateResult("Der Anbieter hat noch nicht geantwortet. Der Server fragt weiter ab.", for: tracker)
             }
         } catch {
             guard generation == sessionGeneration else { return }
             locatingRefs.remove(tracker.ref)
-            locateMessages[tracker.ref] = error.localizedDescription
+            reportLocateResult(error.localizedDescription, for: tracker)
             Haptics.warning()
         }
     }
