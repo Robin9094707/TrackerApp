@@ -76,17 +76,35 @@ from findmy import (
 from findmy.util.http import HttpSession as FindMyHttpSession
 
 
+apple_reply_tracker = contextvars.ContextVar("apple_reply_tracker", default=None)
+
+
 class AppleIdentityHttpSession(FindMyHttpSession):
     def __init__(self, provider):
         super().__init__()
         self.provider = provider
 
     async def request(self, method, url, **kwargs):
-        if urllib.parse.urlsplit(url).hostname == "gsa.apple.com":
+        endpoint = urllib.parse.urlsplit(url)
+        if endpoint.hostname == "gsa.apple.com":
             headers = dict(kwargs.get("headers") or {})
             headers["User-Agent"] = self.provider.user_agent
             kwargs["headers"] = headers
-        return await super().request(method, url, **kwargs)
+        response = await super().request(method, url, **kwargs)
+        tracker = apple_reply_tracker.get()
+        if tracker is not None and endpoint.hostname == "gateway.icloud.com" and endpoint.path == "/findmyservice/v2/fetch":
+            # FindMy.py can retry an empty HTTP 200 or request another rolling
+            # key batch. Let the iPhone release its spinner during that work.
+            has_reports = False
+            if response.status_code == 200 and response.text().strip():
+                try:
+                    rows = response.json().get("acsnLocations", {}).get("locationPayload", [])
+                    has_reports = any(isinstance(row, dict) and row.get("locationInfo") for row in rows)
+                except (AttributeError, TypeError, ValueError):
+                    pass
+            if not has_reports:
+                publish_provider_reply("apple", tracker, "responded", first_only=True)
+        return response
 
 
 class AppleAccount(UpstreamAppleAccount):
@@ -10626,10 +10644,12 @@ def polling_attempt_begin(provider, tracker_id, trigger, reasons=None):
     return now_ts
 
 
-def publish_provider_reply(provider, tracker_id, status):
+def publish_provider_reply(provider, tracker_id, status, first_only=False):
     """Expose an Apple/Samsung reply while history and notifications are processed."""
     with polling_runtime_lock:
         tracker = polling_runtime_provider(provider)["trackers"].setdefault(tracker_id, {})
+        if first_only and float(tracker.get("mobile_reply_ts", 0) or 0) >= float(tracker.get("last_start_ts", 0) or 0):
+            return
         tracker.update(mobile_reply_ts=time.time(), mobile_reply_status=status)
 
 
@@ -10647,6 +10667,8 @@ def polling_attempt_finish(provider, tracker_id, trigger, status, reports=0, new
         started = float(tracker.get("last_start_ts", 0) or 0)
         if not tracker.get("mobile_reply_ts") or tracker["mobile_reply_ts"] < started or not started:
             tracker.update(mobile_reply_ts=now_ts, mobile_reply_status=status)
+        elif tracker.get("mobile_reply_status") == "responded":
+            tracker["mobile_reply_status"] = status
         tracker.update({
             "last_finish_ts": now_ts,
             "last_completion_status": str(status or "unknown")[:40],
@@ -12131,15 +12153,19 @@ def fetch_from_apple(device_names, trigger="manual"):
                 failed = False
                 mode = "history" if needs_full_report_history(name) else "latest_only"
                 try:
-                    if mode == "history":
-                        try:
-                            result = state["account"].fetch_location_history([accessory])
-                        except (AttributeError, NotImplementedError) as exc:
-                            logger.warning("fetch_location_history nicht verfügbar (%s); verwende nur den neuesten Standort.", exc)
-                            mode = "latest_fallback"
+                    reply_context = apple_reply_tracker.set(name)
+                    try:
+                        if mode == "history":
+                            try:
+                                result = state["account"].fetch_location_history([accessory])
+                            except (AttributeError, NotImplementedError) as exc:
+                                logger.warning("fetch_location_history nicht verfügbar (%s); verwende nur den neuesten Standort.", exc)
+                                mode = "latest_fallback"
+                                result = state["account"].fetch_location([accessory])
+                        else:
                             result = state["account"].fetch_location([accessory])
-                    else:
-                        result = state["account"].fetch_location([accessory])
+                    finally:
+                        apple_reply_tracker.reset(reply_context)
                     received, stored = process_report_results([(name, accessory)], result, mode)
                     received_total += received
                     stored_total += stored

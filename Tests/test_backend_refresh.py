@@ -1,4 +1,5 @@
 """Apple per-tracker completion; offline fixtures and existing store formats."""
+import asyncio
 import copy
 from pathlib import Path
 import sys
@@ -6,7 +7,7 @@ import time
 from queue import Queue
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_backend_calendar_mcp import M, APP, STATE
 G = M['fetch_from_apple'].__globals__
@@ -116,6 +117,21 @@ class RefreshTests(unittest.TestCase):
                         add_shared_history_points=Mock(return_value=0), add_points_to_apple_tests=Mock(),
                         recovery_capture_points=Mock(), process_tracker_location_reports=Mock()):
             self.assertTrue(M['fetch_from_apple'](['first']))
+
+    def test_findmy_empty_http_response_publishes_before_library_can_retry(self):
+        provider = SimpleNamespace(user_agent='test')
+        session = M['AppleIdentityHttpSession'](provider)
+        reply = SimpleNamespace(status_code=200, text=lambda: '')
+        M['polling_attempt_begin']('apple', 'first', 'test')
+        token = M['apple_reply_tracker'].set('first')
+        try:
+            with patch.object(M['FindMyHttpSession'], 'request', AsyncMock(return_value=reply)):
+                returned = asyncio.run(session.request('POST', 'https://gateway.icloud.com/findmyservice/v2/fetch'))
+            self.assertIs(returned, reply)
+            self.assertEqual(self.refresh()['status'], 'responded')
+            self.assertGreater(self.refresh()['completion'], 0)
+        finally:
+            M['apple_reply_tracker'].reset(token)
 
     def test_samsung_reports_current_reply_before_history_call_and_keeps_current_on_history_error(self):
         keys = ('samsung_devices', 'samsung_locations', 'samsung_stats', 'samsung_inflight',

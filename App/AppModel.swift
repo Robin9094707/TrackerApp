@@ -413,6 +413,9 @@ final class AppModel {
                             case "error":
                                 self.locateMessages[tracker.ref] = "Abfrage fehlgeschlagen. Der letzte Standort bleibt sichtbar."
                                 Haptics.warning()
+                            case "responded":
+                                self.locateMessages[tracker.ref] = "Apple hat geantwortet. Weitere Standortdaten erscheinen automatisch."
+                                Haptics.success()
                             case "pin_required":
                                 self.locateMessages[tracker.ref] = "Samsung hat geantwortet. Zum Entschlüsseln ist die Samsung-PIN erforderlich."
                                 Haptics.warning()
