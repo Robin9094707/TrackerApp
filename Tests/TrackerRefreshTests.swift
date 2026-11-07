@@ -23,7 +23,8 @@ final class TrackerRefreshTests: XCTestCase {
         let trackerJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(tracker))
         let responseBody: [String: Any]
         if lightweight {
-            responseBody = ["refresh": ["completion": 11, "status": status, "available": true]]
+            let refresh: [String: Any] = ["completion": 11, "status": status, "available": true]
+            responseBody = ["refresh": refresh]
         } else {
             responseBody = ["tracker": trackerJSON]
         }
@@ -32,12 +33,9 @@ final class TrackerRefreshTests: XCTestCase {
         APIStubProtocol.handler = { request in
             if request.httpMethod == "POST" {
                 if legacy { return (200, Data(#"{"trackers":[{"ref":"apple:demo-keys"}]}"#.utf8)) }
-                let response = try JSONSerialization.data(withJSONObject: [
-                    "lightweight_refresh": lightweight,
-                    "trackers": [["ref": "apple:demo-keys",
-                                  "refresh": ["completion": 10, "status": "success", "available": true]]],
-                ])
-                return (200, response)
+                let lightweightFlag = lightweight ? "true" : "false"
+                let response = #"{"lightweight_refresh":\#(lightweightFlag),"trackers":[{"ref":"apple:demo-keys","refresh":{"completion":10,"status":"success","available":true}}]}"#
+                return (200, Data(response.utf8))
             }
             gets += 1
             XCTAssertEqual(request.url?.path, lightweight ? "/api/mobile/v1/tracker-refresh" : "/api/mobile/v1/tracker")
