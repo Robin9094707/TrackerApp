@@ -1,3 +1,10 @@
+# 7.2.0 (Build 32) · Kompass · Backend 21.2.0
+
+- Fund- und Bewegungsalarm speichern direkt. Beim Scharfstellen des Bewegungsalarms gilt der zuletzt gespeicherte Standort. Eine Ortung läuft danach im Hintergrund.
+- Apple und Samsung melden die Anbieterantwort auch bei leeren oder unveränderten Daten. Samsung zeigt die aktuelle Ortung vor dem separaten Verlaufsabruf.
+- Manuelle Abfragen werden pro Tracker zusammengefasst und pro Anbieter begrenzt. Standort- und Verlaufsspeicherung verwenden die bestehenden Formate.
+- Zeitangabe im Tracker-Detail erscheint einmal. Die Karte behält die Genauigkeitsangabe, und die Vollbildkarte zeigt die Zeit weiterhin.
+
 # 7.1.0 (Build 31) · Backend 21.1.0
 
 - Zoombare Karte über den scrollbaren Details für Apple, Google, Samsung und Fusion, mit Zentrieren, Satellitenansicht und Vollbild.

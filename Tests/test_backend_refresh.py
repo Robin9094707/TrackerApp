@@ -2,6 +2,9 @@
 import copy
 from pathlib import Path
 import sys
+import time
+from queue import Queue
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -10,11 +13,12 @@ G = M['fetch_from_apple'].__globals__
 
 class RefreshTests(unittest.TestCase):
     def setUp(self):
-        self.original = {key: STATE.get(key) for key in ('account', 'accessories', 'apple_inflight', 'report_stats', 'polling_runtime', 'apple_next_fetch', 'sync_failures', 'sync_backoff_until')}
+        self.original = {key: STATE.get(key) for key in ('account', 'accessories', 'apple_inflight', 'report_stats', 'polling_runtime', 'apple_next_fetch', 'sync_failures', 'sync_backoff_until', 'locations', 'since_ts', 'notification_settings', 'notification_runtime')}
         self.a, self.b = object(), object()
         self.account = Mock()
         STATE.update(account=self.account, accessories={'first': self.a, 'second': self.b},
-                     apple_inflight=set(), report_stats={'devices': {}}, polling_runtime={'providers': {}}, apple_next_fetch={})
+                     apple_inflight=set(), report_stats={'devices': {}}, polling_runtime={'providers': {}}, apple_next_fetch={},
+                     locations={}, since_ts={}, notification_settings=M['default_notification_settings'](), notification_runtime={})
         self.patches = patch.dict(G, save_account_state=Mock(), save_accessory_state=Mock(),
                                   append_notification_console=Mock(), apple_active_reasons=lambda _: [],
                                   apple_schedule_next=lambda *a, **k: 0)
@@ -90,6 +94,74 @@ class RefreshTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.json)
         self.assertEqual(response.json['trackers'][0]['refresh']['completion'], before)
         self.assertGreater(self.refresh()['completion'], before)
+
+    def test_lightweight_status_returns_reply_before_apple_history_write(self):
+        client = APP.test_client()
+        self.assertEqual(client.get('/api/mobile/v1/tracker-refresh?ref=apple:first').status_code, 401)
+        client.post('/api/mobile/v1/pair', json={'pw': 'Regression-Test-Password'})
+        current = SimpleNamespace(latitude=51.43, longitude=6.76, horizontal_accuracy=10, timestamp=time.time())
+        self.account.fetch_location_history.return_value = {self.a: [current]}
+        baseline = self.refresh()['completion']
+        path = f'/api/mobile/v1/tracker-refresh?ref=apple:first&after={baseline}'
+
+        def store(*args, **kwargs):
+            reply = client.get(path).json
+            self.assertEqual(reply['refresh']['status'], 'success')
+            self.assertTrue(reply['refresh']['reply_ready'])
+            self.assertGreater(reply['refresh']['completion'], baseline)
+            self.assertEqual(reply['location']['latitude'], 51.43)
+            return 0
+
+        with patch.dict(G, add_persistent_history_points=store, add_recording_points=Mock(return_value=0),
+                        add_shared_history_points=Mock(return_value=0), add_points_to_apple_tests=Mock(),
+                        recovery_capture_points=Mock(), process_tracker_location_reports=Mock()):
+            self.assertTrue(M['fetch_from_apple'](['first']))
+
+    def test_samsung_reports_current_reply_before_history_call_and_keeps_current_on_history_error(self):
+        keys = ('samsung_devices', 'samsung_locations', 'samsung_stats', 'samsung_inflight',
+                'samsung_failures', 'samsung_next_fetch')
+        saved = {key: STATE.get(key) for key in keys}
+        point = {'ts': time.time(), 'lat': 51.44, 'lon': 6.76, 'acc': 12, 'report_id': 'fresh'}
+        try:
+            STATE.update(samsung_devices={'tag': {'name': 'Tag'}}, samsung_locations={}, samsung_stats={},
+                         samsung_inflight=set(), samsung_failures={}, samsung_next_fetch={})
+            def execute(method, path, **kwargs):
+                if path == '/trackers/geolocation':
+                    return {'items': [{'deviceId': 'tag', 'geolocations': [point]}]}
+                refresh = M['mobile_tracker_refresh_state']({'provider': 'samsung', 'id': 'tag'})
+                self.assertEqual(refresh['status'], 'success')
+                self.assertTrue(refresh['reply_ready'])
+                self.assertEqual(STATE['samsung_locations']['tag'], point)
+                raise RuntimeError('history timed out')
+
+            with patch.dict(G, samsung_execute=execute, normalize_samsung_location=lambda raw, *_: (raw, False),
+                            samsung_active_reasons=lambda _: ['history'], samsung_store_points=Mock(return_value=(1, 0)),
+                            samsung_register_sync=Mock(), add_points_to_samsung_tests=Mock(),
+                            process_tracker_location_reports=Mock(), save_json=Mock()):
+                self.assertTrue(M['fetch_from_samsung']('tag'))
+                G['samsung_store_points'].assert_called_once_with('tag', [point])
+        finally:
+            STATE.update(saved)
+
+    def test_manual_queue_deduplicates_and_bounds_pending_requests(self):
+        jobs = Queue(maxsize=1)
+        with patch.dict(G, manual_locate_queues={'apple': jobs}, manual_locate_started={'apple'},
+                        manual_locate_pending={}):
+            schedule = M['schedule_manual_locate']
+            self.assertTrue(schedule('apple:first', 'test'))
+            self.assertTrue(schedule('apple:first', 'other'))
+            self.assertFalse(schedule('apple:second', 'test'))
+            self.assertEqual(jobs.get_nowait()[1:], ('first', 'test'))
+
+    def test_compact_departure_skips_provider_wait_and_uses_saved_anchor(self):
+        model = {'ref': 'apple:first', 'id': 'first', 'provider': 'apple',
+                 'location': {'lat': 51.43, 'lon': 6.76, 'acc': 12, 'ts': time.time()}}
+        with patch.dict(G, schedule_manual_locate=Mock(), mcp_live_models=Mock(side_effect=AssertionError('live wait')),
+                        mcp_departure_notifications_status=Mock(side_effect=AssertionError('full status'))):
+            result = M['mcp_set_departure_notification'](model, {'enabled': True}, compact=True)
+            self.assertTrue(result['notification']['enabled'])
+            self.assertEqual(result['notification']['sources'][0]['anchor']['latitude'], 51.43)
+            G['schedule_manual_locate'].assert_called_once_with('apple:first', 'mobile_departure_armed')
 
     def test_logged_out_account_rejected_without_dispatch_and_history_unchanged(self):
         client = APP.test_client()

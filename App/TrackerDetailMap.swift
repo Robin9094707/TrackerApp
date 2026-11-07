@@ -26,9 +26,7 @@ struct TrackerDetailMap: View {
             if tracker.validLocation != nil {
                 TrackerLocationMapCanvas(tracker: tracker) { expanded = true }
                     .overlay(alignment: .bottomLeading) {
-                        locationCaption
-                            .padding(10)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                        accuracy
                             .padding(10)
                             .allowsHitTesting(false)
                     }

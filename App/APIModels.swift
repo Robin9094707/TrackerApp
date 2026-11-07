@@ -82,6 +82,15 @@ struct TrackerRefresh: Codable, Hashable {
     var available: Bool
 }
 
+struct TrackerRefreshResponse: Decodable {
+    var refresh: TrackerRefresh
+    var location: TrackerLocation?
+}
+
+struct TrackerAlarmActionResponse: Decodable {
+    var notification: ToggleSummary?
+}
+
 struct Tracker: Codable, Identifiable, Hashable {
     var ref: String
     var name: String

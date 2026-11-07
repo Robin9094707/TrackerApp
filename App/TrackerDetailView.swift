@@ -45,6 +45,9 @@ struct TrackerDetailView: View {
                 actions
                 if model.isLocating(current) {
                     ProgressView("Standort wird abgefragt …").font(.footnote)
+                } else if let message = model.locateMessages[current.ref] {
+                    Text(message).font(.footnote).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if model.bootstrap?.session?.user?.isMainAdmin == true {
                     NavigationLink {
@@ -387,7 +390,7 @@ struct TrackerAutomationView: View {
                         .disabled(current.validLocation == nil)
                 }
             } header: { Text("Bewegungsalarm") } footer: {
-                Text("Der Server verwendet den Standort beim Scharfstellen als Ausgangspunkt. Zwei oder drei neue, ausreichend genaue Meldungen außerhalb des Radius bestätigen die Wegbewegung.")
+                Text("Der zuletzt gemeldete Standort ist der Ausgangspunkt. Zwei oder drei neue, ausreichend genaue Meldungen außerhalb des Radius bestätigen die Wegbewegung.")
             }
             Section {
                 Button("Laufende Bark-Alarme stoppen", role: .destructive) {
@@ -415,7 +418,7 @@ struct TrackerAutomationView: View {
             }
             if let error { Section { Text(error).foregroundStyle(.red) } }
         }
-        .disabled(busy || !model.serverActionsAvailable)
+        .disabled(busy || model.connectionState != .connected)
         .onAppear(perform: loadAlarmSettings)
         .navigationTitle("Mitteilungen & Verlauf").navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() }.disabled(busy) } }
@@ -457,8 +460,13 @@ struct TrackerAutomationView: View {
         busy = true; error = nil
         Task {
             defer { busy = false }
-            do { try await model.runAction(action, payload: payload.merging(["tracker": tracker.ref]) { _, new in new }) }
-            catch { self.error = error.localizedDescription }
+            do {
+                if action == "set_found_notification" || action == "set_departure_notification" {
+                    try await model.setTrackerAlarm(action, tracker: tracker.ref, payload: payload)
+                } else {
+                    try await model.runAction(action, payload: payload.merging(["tracker": tracker.ref]) { _, new in new })
+                }
+            } catch { self.error = error.localizedDescription }
         }
     }
 }
@@ -505,7 +513,7 @@ struct TrackerBarkConfirmation: View {
                         } catch { self.error = error.localizedDescription }
                     }
                 }
-                .disabled(busy || !model.serverActionsAvailable)
+                .disabled(busy || model.connectionState != .connected)
                 .accessibilityIdentifier("tracker-bark-confirm")
             }
             if let error { Text(error).font(.footnote).foregroundStyle(.red) }
