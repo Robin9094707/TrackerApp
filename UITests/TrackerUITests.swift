@@ -224,12 +224,7 @@ final class TrackerUITests: XCTestCase {
         tag.tap()
         expandInspector(app)
         let lab = app.buttons["google-uwb-lab"]
-        for _ in 0..<8 {
-            if lab.exists && lab.isHittable { break }
-            if app.collectionViews.firstMatch.exists { app.collectionViews.firstMatch.swipeUp() }
-            else { app.swipeUp() }
-        }
-        XCTAssertTrue(lab.exists)
+        reveal(lab, in: app)
         lab.tap()
         XCTAssertTrue(app.staticTexts["uwb-compatibility-status"].waitForExistence(timeout: 10))
         let probe = app.buttons["Fähigkeiten des Trackers prüfen"]
@@ -372,9 +367,9 @@ final class TrackerUITests: XCTestCase {
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         for _ in 0..<8 {
             if element.exists && element.isHittable { break }
-            // Drag in the outer gutter so the map cannot consume a scroll gesture.
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.78))
-                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.35)))
+            // Begin inside the detail pane below the fixed interactive map.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.23, dy: 0.80))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.23, dy: 0.55)))
         }
         XCTAssertTrue(element.waitForExistence(timeout: 10))
         XCTAssertTrue(element.isHittable)
@@ -386,15 +381,19 @@ final class TrackerUITests: XCTestCase {
         XCTAssertTrue(expand.waitForExistence(timeout: 10))
         XCTAssertTrue(app.maps.firstMatch.exists)
         XCTAssertTrue(expand.isHittable)
+        XCTAssertTrue(app.buttons["tracker-detail-map-inline-center"].isHittable)
+        app.maps.firstMatch.pinch(withScale: 1.5, velocity: 1)
+        XCTAssertTrue(expand.isHittable)
         capture(screenshot)
         expand.tap()
+        let close = app.buttons["tracker-detail-map-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
         let center = app.buttons["tracker-detail-map-center"]
         XCTAssertTrue(center.waitForExistence(timeout: 10))
         XCTAssertTrue(app.maps.firstMatch.exists)
         center.tap()
         app.buttons["tracker-detail-map-style"].tap()
         capture(screenshot + "-Fullscreen")
-        let close = app.buttons["tracker-detail-map-close"]
         XCTAssertTrue(close.isHittable)
         close.tap()
         XCTAssertTrue(expand.waitForExistence(timeout: 10))

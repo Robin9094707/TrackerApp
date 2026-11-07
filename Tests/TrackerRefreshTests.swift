@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class TrackerRefreshTests: XCTestCase {
-    private func checkCompletion(status: String, legacy: Bool = false) async throws {
+    private func checkCompletion(status: String, legacy: Bool = false, lightweight: Bool = false) async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [APIStubProtocol.self]
         let api = APIClient(transport: URLSession(configuration: config), baseURL: URL(string: "https://example.test"))
@@ -21,15 +21,24 @@ final class TrackerRefreshTests: XCTestCase {
             tracker.refresh = TrackerRefresh(completion: 11, status: status, available: true)
         }
         let trackerJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(tracker))
-        let bytes = try JSONSerialization.data(withJSONObject: ["tracker": trackerJSON])
+        let responseBody: [String: Any]
+        if lightweight {
+            let refresh: [String: Any] = ["completion": 11, "status": status, "available": true]
+            responseBody = ["refresh": refresh]
+        } else {
+            responseBody = ["tracker": trackerJSON]
+        }
+        let bytes = try JSONSerialization.data(withJSONObject: responseBody)
         var gets = 0
         APIStubProtocol.handler = { request in
             if request.httpMethod == "POST" {
-                let response = legacy ? #"{"trackers":[{"ref":"apple:demo-keys"}]}"#
-                    : #"{"trackers":[{"ref":"apple:demo-keys","refresh":{"completion":10,"status":"success","available":true}}]}"#
+                if legacy { return (200, Data(#"{"trackers":[{"ref":"apple:demo-keys"}]}"#.utf8)) }
+                let lightweightFlag = lightweight ? "true" : "false"
+                let response = #"{"lightweight_refresh":\#(lightweightFlag),"trackers":[{"ref":"apple:demo-keys","refresh":{"completion":10,"status":"success","available":true}}]}"#
                 return (200, Data(response.utf8))
             }
             gets += 1
+            XCTAssertEqual(request.url?.path, lightweight ? "/api/mobile/v1/tracker-refresh" : "/api/mobile/v1/tracker")
             return (200, bytes)
         }
         defer { APIStubProtocol.handler = nil }
@@ -43,7 +52,11 @@ final class TrackerRefreshTests: XCTestCase {
         XCTAssertFalse(model.isLocating(tracker))
         XCTAssertEqual(gets, 1)
         if !legacy { XCTAssertEqual(model.trackers.first { $0.ref == tracker.ref }?.reportTimestamp, oldTimestamp) }
-        if status == "error" { XCTAssertTrue(model.statusMessage?.contains("fehlgeschlagen") == true) }
+        if status == "error" {
+            XCTAssertTrue(model.statusMessage?.contains("fehlgeschlagen") == true)
+            XCTAssertTrue(model.locateMessages[tracker.ref]?.contains("fehlgeschlagen") == true)
+        }
+        if status == "responded" { XCTAssertTrue(model.locateMessages[tracker.ref]?.contains("Apple hat geantwortet") == true) }
     }
 
     func testUnchangedReportReleasesButtonOnFirstCompletedResponse() async throws {
@@ -51,6 +64,9 @@ final class TrackerRefreshTests: XCTestCase {
     }
     func testEmptyResponseReleasesButton() async throws {
         try await checkCompletion(status: "empty")
+    }
+    func testEarlyAppleReplyReleasesButtonViaLightweightStatus() async throws {
+        try await checkCompletion(status: "responded", lightweight: true)
     }
     func testProviderErrorReleasesButtonAndShowsFailure() async throws {
         try await checkCompletion(status: "error")
