@@ -120,10 +120,10 @@ private struct TrackerLocationMapCanvas: View {
         .overlay(alignment: .topTrailing) {
             RJMapControlStack {
                 RJMapControlButton(symbol: "scope", label: "Tracker auf Karte zentrieren", action: focus)
-                    .accessibilityIdentifier("tracker-detail-map-center")
+                    .accessibilityIdentifier(expand == nil ? "tracker-detail-map-center" : "tracker-detail-map-inline-center")
                 RJMapControlDivider()
                 RJMapControlButton(symbol: satellite ? "map" : "globe.europe.africa", label: satellite ? "Standardkarte" : "Satellitenkarte") { satellite.toggle() }
-                    .accessibilityIdentifier("tracker-detail-map-style")
+                    .accessibilityIdentifier(expand == nil ? "tracker-detail-map-style" : "tracker-detail-map-inline-style")
                 if let expand {
                     RJMapControlDivider()
                     RJMapControlButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Trackerkarte vergrößern", action: expand)
