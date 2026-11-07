@@ -1,4 +1,4 @@
-# Universal Tag Studio 20.7.1 · SCHOOL BAG MODE AND NATIVE ANDROID LINKS
+# Universal Tag Studio 21.0.0 · SCHOOL BAG MODE AND NATIVE ANDROID LINKS
 # Backward-compatible single-file upgrade. Existing data/ directory layout,
 # tracker IDs, histories, shares and provider sessions are intentionally
 # preserved. Google integration: leonboe1/GoogleFindMyTools (GPL-3.0).
@@ -2060,6 +2060,7 @@ def default_notification_settings():
         },
         "channels": {
             "webpush": {"enabled": True},
+            "bark": {"enabled": False, "server": "https://api.day.app", "keys_enc": "", "batch": False, "group": "RJ Tracker"},
             "ntfy": {
                 "enabled": False,
                 "server": "https://ntfy.sh",
@@ -2929,6 +2930,11 @@ class TenantContextThread(_OriginalThread):
         return self._tenant_context_snapshot.run(super().run)
 
 
+# Keep the standard library module intact: threading.Timer inherits the
+# original class and calls Thread.__init__ through its module globals. Replacing
+# that global with a subclass broke Timer and third-party thread subclasses.
+from types import SimpleNamespace as _ThreadingNamespace
+threading = _ThreadingNamespace(**vars(threading))
 threading.Thread = TenantContextThread
 
 
@@ -3984,6 +3990,50 @@ def install_fcm_android_header_guard():
 
 install_fcm_android_header_guard()
 
+def install_fcm_message_guard():
+    """Backport the reviewed transport fixes from GoogleFindMyTools PR #114.
+
+    Parse named Web Push parameters, accept unpadded base64url and isolate
+    malformed/foreign packets so one notification cannot kill the listener.
+    Only modifies the short-lived bridge; never rewrites installed upstream.
+    """
+    from Auth.firebase_messaging.fcmpushclient import FcmPushClient
+    original = FcmPushClient._decrypt_raw_data
+    def decode(credentials, crypto_key_str, salt_str, raw_data):
+        def padded(value):
+            return value + '=' * (-len(value) % 4)
+        return original(credentials, padded(crypto_key_str), padded(salt_str), raw_data)
+    FcmPushClient._decrypt_raw_data = staticmethod(decode)
+    def parameter(header, name):
+        for part in header.split(';'):
+            key, separator, value = part.strip().partition('=')
+            if separator and key == name:
+                return value.strip().strip('"')
+        return ''
+    def handle(self, msg):
+        try:
+            fields = {item.key: item.value for item in msg.app_data}
+            if fields.get('message_type') == 'deleted_messages' or not self.credentials:
+                return
+            if fields.get('subtype') != self.credentials.get('gcm', {}).get('app_id'):
+                return
+            key = parameter(fields.get('crypto-key', ''), 'dh')
+            salt = parameter(fields.get('encryption', ''), 'salt')
+            if not key or not salt:
+                return
+            decrypted = self._decrypt_raw_data(self.credentials, key, salt, msg.raw_data)
+            try:
+                value = json.loads(decrypted.decode('utf-8'))
+            except (ValueError, UnicodeError):
+                value = decrypted
+            self.callback(value, msg.persistent_id, self.callback_context)
+        except Exception:
+            # No packet contents, keys or tokens in diagnostics.
+            self._uts_invalid_messages = getattr(self, '_uts_invalid_messages', 0) + 1
+    FcmPushClient._handle_data_message = handle
+
+install_fcm_message_guard()
+
 def emit(value):
     print(MARKER+json.dumps(value,ensure_ascii=False,separators=(",",":")))
 
@@ -4178,74 +4228,130 @@ def stop_fcm_listener(receiver):
             except Exception:
                 pass
 
+def decrypt_update_reports(update, registration=None):
+    """Read protobuf values directly; one corrupt report cannot discard a batch."""
+    import hashlib
+    from NovaApi.ExecuteAction.LocateTracker import decrypt_locations as decryptor
+    from ProtoDecoders import DeviceUpdate_pb2, Common_pb2
+    locations = update.deviceMetadata.information.locationInformation.reports.recentLocationAndNetworkLocations
+    pairs = list(zip(locations.networkLocations, locations.networkLocationTimestamps))
+    if locations.HasField('recentLocation'):
+        pairs.append((locations.recentLocation, locations.recentLocationTimestamp))
+    pairs = [(loc, stamp) for loc, stamp in pairs if loc.status != Common_pb2.Status.SEMANTIC]
+    if not pairs:
+        return [], 0
+    registration = registration or update.deviceMetadata.information.deviceRegistration
+    identity_key = decryptor.retrieve_identity_key(registration)
+    is_mcu = decryptor.is_mcu_tracker(registration)
+    reports, failed = [], 0
+    for location, stamp in pairs:
+        try:
+            encrypted = location.geoLocation.encryptedReport
+            if not encrypted.publicKeyRandom:
+                raw = decryptor.decrypt_aes_gcm(hashlib.sha256(identity_key).digest(), encrypted.encryptedLocation)
+            else:
+                offset = 0 if is_mcu else location.geoLocation.deviceTimeOffset
+                raw = decryptor.decrypt(identity_key, encrypted.encryptedLocation, encrypted.publicKeyRandom, offset)
+            decoded = DeviceUpdate_pb2.Location()
+            decoded.ParseFromString(raw)
+            reports.append({'lat': decoded.latitude / 1e7, 'lon': decoded.longitude / 1e7,
+                            'alt': decoded.altitude, 'ts': int(stamp.seconds),
+                            'acc': float(location.geoLocation.accuracy), 'status': int(location.status),
+                            'is_own_report': bool(encrypted.isOwnReport)})
+        except Exception:
+            failed += 1
+    return reports, failed
+
+
+class GoogleResponseWindow:
+    """Thread-safe, bounded collection of all correlated FCM response packets."""
+    def __init__(self, request_uuid):
+        self.request_uuid = request_uuid
+        self.condition = threading.Condition()
+        self.packets = []
+        self.seen = set()
+        self.last_location_packet = None
+
+    def add(self, parsed):
+        if parsed.fcmMetadata.requestUuid != self.request_uuid:
+            return
+        key = parsed.SerializeToString()
+        with self.condition:
+            if key in self.seen or len(self.packets) >= 256:
+                return
+            self.seen.add(key)
+            self.packets.append(parsed)
+            locations = parsed.deviceMetadata.information.locationInformation.reports.recentLocationAndNetworkLocations
+            if locations.networkLocations or locations.HasField('recentLocation'):
+                self.last_location_packet = time.monotonic()
+            self.condition.notify_all()
+
+    def collect(self, timeout, settle=4):
+        deadline = time.monotonic() + timeout
+        with self.condition:
+            while True:
+                now = time.monotonic()
+                finish = min(deadline, self.last_location_packet + settle) if self.last_location_packet is not None else deadline
+                if now >= finish:
+                    return list(self.packets)
+                self.condition.wait(finish - now)
+
+
 def locate(payload):
-    from NovaApi.ExecuteAction.LocateTracker import location_request
-    from NovaApi.ExecuteAction.LocateTracker import decrypt_locations
     from Auth.fcm_receiver import FcmReceiver
     from NovaApi.ExecuteAction.LocateTracker.location_request import create_location_request
     from NovaApi.nova_request import nova_request
     from NovaApi.scopes import NOVA_ACTION_API_SCOPE
     from NovaApi.util import generate_random_uuid
     from ProtoDecoders.decoder import parse_device_update_protobuf
-    original=location_request.decrypt_location_response_locations
-    original_wrapped=decrypt_locations.WrappedLocation
-    captured={"text":"","metadata":[],"battery_probe":[],"callback_error":""}
-    response_ready=threading.Event()
-    result_holder={}
-    class CapturingWrappedLocation(original_wrapped):
-        def __init__(self,decrypted_location,time,accuracy,status,is_own_report,name):
-            super().__init__(decrypted_location,time,accuracy,status,is_own_report,name)
-            captured["metadata"].append({"ts":int(time),"accuracy":float(accuracy or 0),"status":int(status),"is_own_report":bool(is_own_report)})
-    def capture_decrypted(update):
-        output=io.StringIO()
-        captured["battery_probe"]=probe_battery_fields(update)
-        decrypt_locations.WrappedLocation=CapturingWrappedLocation
-        try:
-            with contextlib.redirect_stdout(output),contextlib.redirect_stderr(output):
-                original(update)
-        finally:
-            decrypt_locations.WrappedLocation=original_wrapped
-        captured["text"]=output.getvalue()
-    request_uuid=generate_random_uuid()
+    request_uuid = generate_random_uuid()
+    window = GoogleResponseWindow(request_uuid)
     def handle_location_response(response):
         try:
-            parsed=parse_device_update_protobuf(response)
-            if parsed.fcmMetadata.requestUuid==request_uuid:
-                result_holder["value"]=parsed
-                response_ready.set()
-        except BaseException as exc:
-            captured["callback_error"]=str(exc)[:300]
-    receiver=FcmReceiver()
+            window.add(parse_device_update_protobuf(response))
+        except Exception:
+            pass  # A malformed packet must not terminate the stream.
+    receiver = FcmReceiver()
     try:
-        fcm_token=start_fcm_listener(
-            receiver,handle_location_response,
-            payload.get("fcm_registration_timeout",22),
-            payload.get("fcm_ready_timeout",24),
-        )
-        hex_payload=create_location_request(payload["device_id"],fcm_token,request_uuid)
-        # Upstream does not set an HTTP timeout for the Nova action. Keep its
-        # implementation intact while bounding only this isolated call.
+        fcm_token = start_fcm_listener(receiver, handle_location_response,
+                                      payload.get('fcm_registration_timeout', 22), payload.get('fcm_ready_timeout', 24))
+        hex_payload = create_location_request(payload['device_id'], fcm_token, request_uuid)
         import importlib
-        nova_module=importlib.import_module("NovaApi.nova_request")
-        original_post=nova_module.requests.post
-        def bounded_post(*args,**kwargs):
-            kwargs.setdefault("timeout",(10,20))
-            return original_post(*args,**kwargs)
-        nova_module.requests.post=bounded_post
+        nova_module = importlib.import_module('NovaApi.nova_request')
+        original_post = nova_module.requests.post
+        def bounded_post(*args, **kwargs):
+            kwargs.setdefault('timeout', (10, 20))
+            return original_post(*args, **kwargs)
+        nova_module.requests.post = bounded_post
         try:
-            action_result=nova_request(NOVA_ACTION_API_SCOPE,hex_payload)
+            action_result = nova_request(NOVA_ACTION_API_SCOPE, hex_payload)
         finally:
-            nova_module.requests.post=original_post
+            nova_module.requests.post = original_post
         if action_result is None:
-            raise RuntimeError("nova_action_failed")
-        if not response_ready.wait(max(10,float(payload.get("fcm_response_timeout",48)))):
-            extra=(":"+captured["callback_error"]) if captured.get("callback_error") else ""
-            raise RuntimeError("fcm_response_timeout"+extra)
-        update=result_holder.get("value")
-        if update is None:
-            raise RuntimeError("fcm_empty_callback")
-        capture_decrypted(update)
-        return {"reports":parse_locations(captured["text"],captured["metadata"]),"battery_probe":captured.get("battery_probe",[]),"transport":"fcm_ready"}
+            raise RuntimeError('nova_action_failed')
+        updates = window.collect(max(10, float(payload.get('fcm_response_timeout', 48))))
+        if not updates:
+            if not receiver.pc.is_started():
+                raise RuntimeError('fcm_listener_disconnected')
+            raise RuntimeError('fcm_response_timeout')
+        # A later packet can omit key metadata supplied by an earlier packet.
+        registration = next((item.deviceMetadata.information.deviceRegistration for item in reversed(updates)
+                             if item.deviceMetadata.information.deviceRegistration.encryptedUserSecrets.encryptedIdentityKey), None)
+        reports, errors, battery = [], 0, []
+        for update in updates:
+            battery.extend(probe_battery_fields(update))
+            try:
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    batch, failed = decrypt_update_reports(update, registration)
+                reports.extend(batch)
+                errors += failed
+            except (Exception, SystemExit):
+                errors += 1
+        if errors and not reports:
+            raise RuntimeError('google_decryption_failed:encrypted_reports_received')
+        unique = {(r['ts'], r['lat'], r['lon'], r['acc'], r['is_own_report']): r for r in reports}
+        return {'reports': sorted(unique.values(), key=lambda r: r['ts']), 'battery_probe': battery[:24],
+                'transport': 'fcm_ready', 'response_packets': len(updates), 'decryption_failures': errors}
     finally:
         stop_fcm_listener(receiver)
 
@@ -4390,6 +4496,10 @@ def google_secret_summary(data=None):
 
 def google_classify_error(value):
     text = str(value or "").lower()
+    if "google_decryption_failed" in text:
+        return "decryption_failed"
+    if "fcm_listener_disconnected" in text:
+        return "fcm_listener_not_ready"
     if "fcm_listener_not_ready" in text:
         return "fcm_listener_not_ready"
     if "fcm_registration_timeout" in text:
@@ -4915,7 +5025,7 @@ def run_google_bridge(payload, timeout=None):
         )
         stdout, stderr = process.communicate(
             input=json.dumps(payload, ensure_ascii=False),
-            timeout=timeout or GOOGLE_FETCH_TIMEOUT_SECONDS,
+            timeout=timeout or (max(GOOGLE_FETCH_TIMEOUT_SECONDS, GOOGLE_FCM_REGISTRATION_TIMEOUT_SECONDS + GOOGLE_FCM_READY_TIMEOUT_SECONDS + GOOGLE_FCM_RESPONSE_TIMEOUT_SECONDS + 45) if payload.get("operation") == "locate" else GOOGLE_FETCH_TIMEOUT_SECONDS),
         )
         completed = subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
     except subprocess.TimeoutExpired as exc:
@@ -5822,6 +5932,10 @@ def fetch_from_google(device_id, trigger="manual"):
             raise GoogleBridgeError("empty_response", "Keine Google-Antwort empfangen.")
         points = [point for point in (normalize_google_report(raw, batch_id) for raw in result.get("reports", [])) if point]
         points.sort(key=lambda point: point["ts"])
+        state["google_stats"].setdefault("devices", {}).setdefault(device_id, {}).update({
+            "response_packets": int(result.get("response_packets", 0)),
+            "decryption_failures": int(result.get("decryption_failures", 0)),
+        })
         battery_info = google_battery_from_probe(result.get("battery_probe"))
         if battery_info:
             device["battery_info"] = battery_info
@@ -7848,7 +7962,7 @@ def geofence_public(g):
     }
 
 
-ALERT_CHANNELS = ("webpush", "email", "ntfy", "pushover", "gotify", "telegram", "webhook")
+ALERT_CHANNELS = ("bark", "webpush", "email", "ntfy", "pushover", "gotify", "telegram", "webhook")
 
 
 def tracker_ref_parts(tracker_ref):
@@ -8601,6 +8715,8 @@ def notification_channel_configured(channel, config=None):
     config = config or state.get("notification_settings", {}).get("channels", {}).get(channel, {})
     if channel == "webpush":
         return any(bool(item.get("enabled", True)) for item in state.get("push_subscriptions", {}).values() if isinstance(item, dict))
+    if channel == "bark":
+        return bool(config.get("server") and config.get("keys_enc"))
     if channel == "ntfy":
         return bool(config.get("server") and config.get("topic"))
     if channel == "pushover":
@@ -9318,6 +9434,8 @@ def send_external_channel(channel, config, event):
     message = str(event.get("body") or "Neues Tracker-Ereignis")[:900]
     url = notification_navigation_url(event)
     critical = event.get("severity") == "critical"
+    if channel == "bark":
+        return send_bark_channel(config, event)
     if channel == "email":
         return send_email_channel(config, event)
     if channel == "ntfy":
@@ -9361,6 +9479,145 @@ def send_external_channel(channel, config, event):
     raise ValueError("Unbekannter Benachrichtigungskanal.")
 
 
+
+def bark_keys(config):
+    try:
+        value = json.loads(decrypt_notification_secret(config.get("keys_enc", "")) or "[]")
+        return value if isinstance(value, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
+def bark_server(value):
+    url = normalize_channel_url(value or "https://api.day.app")
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "https" or parts.query or parts.fragment or parts.path not in ("", "/"):
+        raise ValueError("Bark: HTTPS-Serveradresse ohne Geräteschlüssel oder Pfad eingeben, z. B. https://api.day.app.")
+    return url.rstrip("/")
+
+
+def send_bark_channel(config, event):
+    """Fan out by default; older public Bark servers do not support device_keys.
+
+    Persist acknowledgements per opaque key fingerprint. Retrying a failed
+    recipient must never send to recipients already accepted by Bark again.
+    A network timeout can still have delivered (at-least-once transport).
+    """
+    keys = bark_keys(config)
+    if not keys:
+        raise ValueError("Keine Bark-Empfänger eingerichtet.")
+    server = bark_server(config.get("server"))
+    payload = {"title": str(event.get("title") or "RJ Tracker")[:100],
+               "body": str(event.get("body") or "Tracker-Meldung")[:900],
+               "group": str(config.get("group") or "RJ Tracker")[:60],
+               "level": "timeSensitive" if event.get("severity") == "critical" else "active",
+               "isArchive": "1"}
+    completed = event.setdefault("bark_accepted", [])
+    def fingerprint(key):
+        return hashlib.sha256((server + "|" + key).encode()).hexdigest()[:24]
+    pending = [key for key in keys if fingerprint(key) not in completed]
+    def send(values, batch):
+        request_body = {**payload, ("device_keys" if batch else "device_key"): values if batch else values[0]}
+        try:
+            status, body = http_request(server + "/push", payload=request_body)
+            result = json.loads(body)
+        except Exception as exc:
+            # A server response can echo device keys. Never log it or its URL.
+            raise RuntimeError("Bark: Verbindung oder Antwort fehlgeschlagen.") from None
+        if status < 200 or status >= 300 or not isinstance(result, dict) or result.get("code") != 200:
+            raise RuntimeError("Bark: Nachricht wurde vom Server nicht angenommen.")
+        completed.extend(fingerprint(key) for key in values)
+        # Persist successful recipients before attempting the next one.
+        with notification_lock:
+            stored = next((row for row in state.get("notification_events", []) if row.get("id") == event.get("id")), None)
+            if stored is not None:
+                stored["bark_accepted"] = list(dict.fromkeys(completed))
+                atomic_write_json(NOTIFICATION_EVENTS_FILE, state["notification_events"])
+    if pending and config.get("batch"):
+        send(pending, True)
+    else:
+        errors = 0
+        for key in pending:
+            try:
+                send([key], False)
+            except RuntimeError:
+                errors += 1
+        if errors:
+            raise RuntimeError(f"Bark: {len(completed)} angenommen, {errors} Empfänger fehlgeschlagen.")
+    return 200, f"Bark hat die Nachricht für {len(keys)} Empfänger angenommen."
+
+
+@app.route("/api/mobile/v1/bark", methods=["GET", "PUT", "DELETE"])
+def bark_settings_api():
+    admin_require_main()
+    if current_tenant_id() != "main" or getattr(g, "api_principal", None):
+        return jsonify({"status": "error", "message": "Persönliche Hauptadmin-Anmeldung erforderlich."}), 403
+    with notification_lock:
+        settings = state.setdefault("notification_settings", default_notification_settings())
+        current = settings.setdefault("channels", {}).get("bark", default_notification_settings()["channels"]["bark"])
+        config = copy.deepcopy(current)
+        if request.method in {"PUT", "POST"}:
+            data = request.get_json(silent=True)
+            if not isinstance(data, dict):
+                return jsonify({"message": "Ungültige Bark-Einstellungen."}), 400
+            try:
+                config["server"] = bark_server(data.get("server", config.get("server")))
+                for key in ("enabled", "batch"):
+                    if key in data:
+                        if type(data[key]) is not bool:
+                            raise ValueError("Ungültiger Schalter.")
+                        config[key] = data[key]
+                if "group" in data:
+                    config["group"] = str(data["group"] or "RJ Tracker")[:60]
+                if "device_keys" in data:
+                    keys = data["device_keys"]
+                    if not isinstance(keys, list) or len(keys) > 50 or any(not isinstance(key, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{5,200}", key) for key in keys):
+                        raise ValueError("Bis zu 50 Bark-Geräteschlüssel eingeben, keine vollständigen URLs.")
+                    config["keys_enc"] = encrypt_notification_secret(json.dumps(list(dict.fromkeys(keys)))) if keys else ""
+                if config.get("enabled") and not bark_keys(config):
+                    raise ValueError("Zum Aktivieren mindestens einen Bark-Geräteschlüssel eintragen.")
+            except ValueError as exc:
+                return jsonify({"message": str(exc)}), 400
+        elif request.method == "DELETE":
+            config = copy.deepcopy(default_notification_settings()["channels"]["bark"])
+        if request.method != "GET":
+            previous_channels = list(settings.get("default_channels") or ["webpush"])
+            settings["channels"]["bark"] = config
+            channels = [value for value in previous_channels if value != "bark"]
+            settings["default_channels"] = channels + (["bark"] if config.get("enabled") else [])
+            try:
+                save_json(NOTIFICATION_SETTINGS_FILE, "notification_settings")
+            except Exception:
+                settings["channels"]["bark"] = current
+                settings["default_channels"] = previous_channels
+                raise
+        return jsonify({"enabled": bool(config.get("enabled")), "server": config.get("server", "https://api.day.app"),
+                        "batch": bool(config.get("batch")), "group": config.get("group", "RJ Tracker"),
+                        "device_count": len(bark_keys(config)), "global_enabled": bool(settings.get("enabled", True))})
+
+
+@app.route("/api/mobile/v1/bark/bulk", methods=["POST"])
+def bark_bulk_api():
+    admin_require_main()
+    if current_tenant_id() != "main" or getattr(g, "api_principal", None):
+        return jsonify({"message": "Persönliche Hauptadmin-Anmeldung erforderlich."}), 403
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get("title"), str) or not isinstance(data.get("body"), str):
+        return jsonify({"message": "Titel und Nachricht eingeben."}), 400
+    title, body = data["title"].strip(), data["body"].strip()
+    if not title or not body or len(title) > 100 or len(body) > 900:
+        return jsonify({"message": "Titel: 1–100 Zeichen, Nachricht: 1–900 Zeichen."}), 400
+    with notification_lock:
+        if "bark" not in notification_channel_names(["bark"]):
+            return jsonify({"message": "Bark und die globalen Benachrichtigungen zuerst aktivieren."}), 409
+        now = time.time()
+        if any(row.get("type") == "bark_bulk" and now - float(row.get("ts", 0)) < 30 for row in state.get("notification_events", [])[:80]):
+            return jsonify({"message": "Bitte 30 Sekunden bis zur nächsten Sammelmeldung warten."}), 429
+        event = append_notification_event({"type": "bark_bulk", "title": title, "body": body,
+                                           "requested_channels": ["bark"], "bark_only": True})
+    return jsonify({"status": "queued", "event_id": event["id"], "message": "Zur Zustellung eingereiht. Den Status findest du unter Meldungen."}), 202
+
+
 def notification_delivery_with_retry(callback, attempts=3, on_retry=None):
     last_error = None
     for attempt in range(max(1, attempts)):
@@ -9389,7 +9646,7 @@ def deliver_notification_event(event):
     # credentials are available, the same event is mirrored to the app.
     apns_ready = globals().get("ios_apns_configured")
     try:
-        if callable(apns_ready) and apns_ready() and "apns" not in channels:
+        if state.get("notification_settings", {}).get("enabled", True) and not event.get("bark_only") and callable(apns_ready) and apns_ready() and "apns" not in channels:
             channels = [*channels, "apns"]
     except Exception:
         pass
@@ -9863,6 +10120,8 @@ def notification_public_state():
         for key in ("server", "priority", "emergency_for_critical", "retry_seconds", "expire_seconds"):
             if key in config:
                 public[key] = config.get(key)
+        if name == "bark":
+            public.update(batch=bool(config.get("batch")), group=config.get("group", "RJ Tracker"), device_count=len(bark_keys(config)))
         if name == "ntfy":
             public["topic_hint"] = (str(config.get("topic") or "")[:3] + "…") if config.get("topic") else ""
         if name == "email":
@@ -11983,7 +12242,7 @@ def tracker_lab_active_job():
     return None
 
 APP_NAME = "Universal Tag Studio"
-APP_VERSION = "20.7.1 API EDITION"
+APP_VERSION = "21.0.0 API EDITION"
 
 
 OPTIMIZED_ROUTE_DEFAULT_POINTS = int(os.environ.get("ULTRA_TRACKER_ROUTE_MAX_DISPLAY_POINTS", "4200"))
@@ -24196,6 +24455,8 @@ def update_alert_settings():
 def update_alert_channel(channel):
     if channel not in ALERT_CHANNELS:
         return jsonify({"status": "error", "message": "Unbekannter Benachrichtigungskanal."}), 404
+    if channel == "bark":
+        return bark_settings_api()
     data = request.json or {}
     settings = state.setdefault("notification_settings", default_notification_settings())
     config = settings.setdefault("channels", {}).setdefault(channel, {})
@@ -28424,7 +28685,7 @@ def normalize_school_place(raw, place_id=None):
 def normalize_school_store(raw):
     store = default_school_store()
     raw = raw if isinstance(raw, dict) else {}
-    for key in ("bags", "links", "presence", "attendance", "attendance_notified"):
+    for key in ("bags", "links", "presence", "attendance", "attendance_notified", "native_notified"):
         if isinstance(raw.get(key), dict):
             store[key] = raw[key]
     places = {}
@@ -28611,11 +28872,13 @@ def school_place_intervals(points, place, now_ts=None):
             intervals.append(current)
         current, inside_state, pending_in, pending_out = None, False, [], []
 
-    for point in points:
+    for point in sorted(points, key=lambda row: float(row.get("ts", 0) or 0)):
         try:
             lat, lon, ts = float(point["lat"]), float(point["lon"]), float(point["ts"])
             acc = float(point.get("acc", 0) or 0)
         except (KeyError, TypeError, ValueError):
+            continue
+        if not all(math.isfinite(v) for v in (lat, lon, ts, acc)) or not -90 <= lat <= 90 or not -180 <= lon <= 180 or ts > now_ts or ts <= 0:
             continue
         if acc <= 0:
             acc = 50.0
@@ -28652,6 +28915,8 @@ def school_place_intervals(points, place, now_ts=None):
             continue
         if pending_in and ts - pending_in[-1]["ts"] > 45 * 60:
             pending_in = []
+        if pending_in and ts == pending_in[-1]["ts"]:
+            continue
         pending_in.append(sample)
         if len(pending_in) >= 2:
             commit_enter(inside_state is None)
@@ -28816,6 +29081,8 @@ def school_evaluate_bag(store, ref, bag, now_ts, emit=True):
     model = school_model(ref)
     if not model:
         return None
+    if bag.get("ios_plan"):
+        return native_school_evaluate_bag(store, ref, bag, model, now_ts, emit)
     places = store.get("places", {})
     day_today = local_day_key(now_ts)
     day_yesterday = local_day_key(now_ts - 86400)
@@ -29033,7 +29300,7 @@ def school_link_bags(link):
 
 def school_bag_public(ref, bag, model, store):
     presence = store.get("presence", {}).get(ref, {})
-    places = store.get("places", {})
+    places = {row["id"]: row for row in bag["ios_plan"].get("places", [])} if bag.get("ios_plan") else store.get("places", {})
     current_place = None
     for place_id, row in (presence.get("places") or {}).items():
         if row.get("inside") and place_id in places:
@@ -29100,7 +29367,8 @@ def school_history_api(token):
     if not model:
         raise SchoolError("Der Tracker ist auf dem Server nicht mehr vorhanden.", 404, "missing_tracker")
     points = school_model_points(model, since_ts, until_ts)
-    places = school_store().get("places", {})
+    bag_plan = bags[ref].get("ios_plan") or {}
+    places = {row["id"]: row for row in bag_plan["places"]} if bag_plan else school_store().get("places", {})
     visits = []
     context_points = school_model_points(model, since_ts - 12 * 3600, until_ts)
     for place_id, place in places.items():
@@ -29136,7 +29404,9 @@ def school_attendance_api(token):
                 "school_days": len(relevant),
                 "on_time": sum(1 for row in relevant if row["status"] == "on_time"),
                 "late": sum(1 for row in relevant if row["status"] == "late"),
-                "absent": sum(1 for row in relevant if row["status"] in {"absent", "no_data"}),
+                "absent": sum(1 for row in relevant if row["status"] == "absent"),
+                "no_data": sum(1 for row in relevant if row["status"] == "no_data" and not row.get("present")),
+                "confirmed": sum(1 for row in relevant if row.get("present") or row["status"] in {"on_time", "late"}),
                 "late_minutes_total": sum(int(row.get("late_minutes") or 0) for row in relevant),
                 "average_arrival": school_average_clock([row.get("arrival_ts") for row in relevant if row.get("arrival_ts")]),
             },
@@ -29676,7 +29946,156 @@ def native_school_plan(raw):
     return list(normalized_places.values()), list(normalized_routines.values())
 
 
-def native_school_day(model, places, routines, day, now):
+
+def native_school_options(raw, previous=None):
+    if not isinstance(raw, dict):
+        raise SchoolError("Ungültige Planeinstellungen.")
+    value = {"notifications_enabled": False, "grace_minutes": 5, "reminder_minutes": 60, "daily_summary": True, "off_days": []}
+    value.update(previous or {})
+    for name in ("notifications_enabled", "daily_summary"):
+        if name in raw:
+            if type(raw[name]) is not bool:
+                raise SchoolError("Ungültige Benachrichtigungseinstellung.")
+            value[name] = raw[name]
+    for name, minimum, maximum in (("grace_minutes", 0, 60), ("reminder_minutes", 15, 180)):
+        if name in raw:
+            if type(raw[name]) is not int or not minimum <= raw[name] <= maximum:
+                raise SchoolError("Toleranz: 0–60 Minuten; Erinnerungsabstand: 15–180 Minuten.")
+            value[name] = raw[name]
+    if "off_days" in raw:
+        dates = raw["off_days"]
+        if not isinstance(dates, list) or len(dates) > 100:
+            raise SchoolError("Höchstens 100 freie Tage festlegen.")
+        try:
+            for day in dates:
+                if not isinstance(day, str) or datetime.strptime(day, "%Y-%m-%d").date().isoformat() != day:
+                    raise ValueError()
+        except ValueError:
+            raise SchoolError("Freie Tage als JJJJ-MM-TT angeben.")
+        value["off_days"] = sorted(set(dates))
+    return value
+
+
+def native_school_week(model, plan, selected_day, now):
+    selected = datetime.strptime(selected_day, "%Y-%m-%d").date()
+    monday = selected - timedelta(days=selected.weekday())
+    days = []
+    options = native_school_options({}, plan.get("options"))
+    for offset in range(7):
+        day = (monday + timedelta(days=offset)).isoformat()
+        result = native_school_day(model, plan.get("places", []), plan.get("routines", []), day, now, options)
+        checks = result["checks"]
+        school_ids = {place["id"] for place in plan.get("places", []) if place.get("kind") == "school"}
+        relevant = [check for check in checks if check["place_id"] in school_ids]
+        seen = [check for check in relevant if check["status"] == "confirmed"]
+        if not relevant:
+            status = "free"
+        elif seen:
+            status = "late" if any(row["attendance_status"] == "late" for row in seen) else "observed_late" if any(row["attendance_status"] == "observed_late" for row in seen) else "on_time"
+        elif all(row["status"] == "upcoming" for row in relevant):
+            status = "upcoming"
+        else:
+            status = "waiting" if any(row["status"] == "waiting" for row in relevant) else "unconfirmed"
+        days.append({"day": day, "status": status, "present": bool(seen), "planned": bool(relevant),
+                     "arrival_ts": min((row["arrival_ts"] for row in seen), default=None),
+                     "delay_minutes": max((row["delay_minutes"] or 0 for row in seen), default=0),
+                     "late_minutes": sum(row["late_minutes"] for row in seen), "checks": checks})
+    return {"start": monday.isoformat(), "days": days,
+            "summary": {"planned_days": sum(row["planned"] for row in days),
+                        "confirmed_days": sum(row["present"] for row in days),
+                        "late_days": sum(row["status"] == "late" for row in days),
+                        "unconfirmed_days": sum(row["status"] == "unconfirmed" for row in days),
+                        "late_minutes": sum(row["late_minutes"] for row in days)}}
+
+
+def native_school_evaluate_bag(store, ref, bag, model, now, emit=True):
+    plan = bag["ios_plan"]
+    options = native_school_options({}, plan.get("options"))
+    places = {place["id"]: place for place in plan.get("places", [])}
+    today = local_day_key(now)
+    yesterday = (local_datetime(now).date() - timedelta(days=1)).isoformat()
+    label = school_bag_label(bag, model)
+    results = {}
+    # The same daily calculation feeds iOS, Android and notification decisions.
+    for day in (yesterday, today):
+        result = native_school_day(model, list(places.values()), plan.get("routines", []), day, now, options)
+        results[day] = result
+        checks = [row for row in result["checks"] if places[row["place_id"]]["kind"] == "school"]
+        confirmed = [row for row in checks if row["status"] == "confirmed"]
+        record = {"day": day, "weekday": datetime.strptime(day, "%Y-%m-%d").isoweekday(),
+                  "start": checks[0]["start"] if checks else "", "end": checks[-1]["end"] if checks else "",
+                  "status": "free" if not checks else "upcoming" if all(row["status"] == "upcoming" for row in checks) else "no_data",
+                  "label": "Keine Anwesenheit bestätigt", "arrival_ts": None, "leave_ts": None, "last_in_ts": None,
+                  "present_minutes": sum(row["observed_minutes"] for row in checks), "late_minutes": 0,
+                  "early_leave": False, "already_there": False, "home_departure_ts": None,
+                  "travel_minutes": None, "report_count": sum(row["report_count"] for row in checks),
+                  "evidence": None, "updated_ts": int(now), "arrival_is_estimate": True}
+        if confirmed:
+            first = min(confirmed, key=lambda row: row["arrival_ts"])
+            record.update(arrival_ts=first["arrival_ts"], last_in_ts=max(row["last_in_ts"] for row in confirmed),
+                          leave_ts=confirmed[-1]["leave_ts"], late_minutes=sum(row["late_minutes"] for row in confirmed),
+                          status="late" if any(row["attendance_status"] == "late" for row in confirmed) else "on_time",
+                          label="Anwesenheit bestätigt", punctuality=first["attendance_status"])
+            if first["attendance_status"] == "observed_late":
+                record.update(status="no_data", label="Anwesenheit bestätigt · Ankunftszeit unklar")
+        record["present"] = bool(confirmed)
+        record["status_text"] = record["label"] if record["status"] == "no_data" else SCHOOL_STATUS_TEXT.get(record["status"], record["status"])
+        store.setdefault("attendance", {}).setdefault(ref, {})[day] = record
+        if day != today or not emit or not options["notifications_enabled"]:
+            continue
+        sent = store.setdefault("native_notified", {}).setdefault(ref, {}).setdefault(day, [])
+        configured = max(bag.get("created_ts", 0), plan.get("updated_ts", 0))
+        def notify(check, kind, threshold, title, body):
+            key = f"{check['id']}|{kind}"
+            if key in sent or not configured <= threshold <= now or now - threshold > SCHOOL_NOTIFY_MAX_AGE_SECONDS:
+                return
+            event_key = f"school-plan|{ref}|{day}|{key}"
+            append_notification_event({"event_key": event_key, "type": "school_" + kind.split(':')[0],
+                                       "tracker_ref": ref, "title": title, "body": body}, dedupe_seconds=86400)
+            school_event_append(store, {"type": "routine_" + kind.split(':')[0], "kind": kind.split(':')[0],
+                                       "ref": ref, "ts": int(threshold), "title": title, "body": body})
+            sent.append(key)
+        for check in result["checks"]:
+            name = places[check["place_id"]]["name"]
+            if check["status"] == "confirmed":
+                detail = f"Erstmals im Zeitfenster um {school_fmt_time(check['arrival_ts'])} geortet."
+                if check["attendance_status"] == "late":
+                    detail += f" Ankunft etwa {check['late_minutes']} Minuten nach Plan."
+                elif check["attendance_status"] == "observed_late":
+                    detail += f" {check['delay_minutes']} Minuten nach Plan; tatsächliche Ankunft kann früher gewesen sein."
+                notify(check, "arrival", check["arrival_ts"], f"{label} · {name} bestätigt", detail)
+                if check["leave_ts"]:
+                    notify(check, "departure", check["leave_ts"], f"{label} · {name} verlassen", f"Außerhalb geortet gegen {school_fmt_time(check['leave_ts'])}.")
+            elif check["expected_ts"] + options["grace_minutes"] * 60 <= now < check["end_ts"]:
+                threshold = check["expected_ts"] + options["grace_minutes"] * 60
+                slot = int((now - threshold) // (options["reminder_minutes"] * 60))
+                threshold += slot * options["reminder_minutes"] * 60
+                notify(check, f"missing:{slot}", threshold, f"{label} · {name} noch nicht bestätigt",
+                       f"Geplant seit {check['start']} Uhr. Bisher keine bestätigte Ortung dort. Fehlende Meldungen belegen keine Abwesenheit.")
+            if options["daily_summary"] and now >= check["end_ts"]:
+                body = f"{name}: Anwesenheit bestätigt." if check["status"] == "confirmed" else f"{name}: Heute keine Anwesenheit bestätigt. Standortdaten können fehlen."
+                notify(check, "summary", check["end_ts"], f"{label} · Tagesrückblick", body)
+    visits = {}
+    for visit in results[today]["visits"]:
+        visits.setdefault(visit["place_id"], []).append(visit)
+    presence = {place_id: {"inside": False, "since_ts": None, "last_in_ts": None} for place_id in places}
+    for row in results[today]["current"]:
+        presence[row["place_id"]] = {"inside": True, "since_ts": row["since_ts"], "last_in_ts": row["last_in_ts"]}
+    points = school_model_points(model, local_day_bounds(yesterday)[0], now)
+    store.setdefault("presence", {})[ref] = {"updated_ts": int(now), "places": presence, "last_point_ts": points[-1]["ts"] if points else None}
+    cutoff = (local_datetime(now).date() - timedelta(days=SCHOOL_ATTENDANCE_KEEP_DAYS)).isoformat()
+    attendance = store["attendance"][ref]
+    for day in list(attendance):
+        if day < cutoff:
+            del attendance[day]
+    for day in list(store.get("native_notified", {}).get(ref, {})):
+        if day < yesterday:
+            del store["native_notified"][ref][day]
+    return {"model": model, "points": points, "visits": visits, "presence": presence}
+
+
+def native_school_day(model, places, routines, day, now, options=None):
+    options = options or {}
     start, end = local_day_bounds(day)
     horizon = min(now, end)
     points = school_model_points(model, start - 6 * 3600, horizon)
@@ -29692,7 +30111,7 @@ def native_school_day(model, places, routines, day, now):
     day_date = local_datetime(start)
     results = []
     for routine in routines:
-        if day_date.isoweekday() not in routine["days"]:
+        if day in options.get("off_days", []) or day_date.isoweekday() not in routine["days"]:
             continue
         begin, finish = [day_date.replace(hour=int(clock[:2]), minute=int(clock[3:])).timestamp()
                          for clock in (routine["start"], routine["end"])]
@@ -29709,8 +30128,35 @@ def native_school_day(model, places, routines, day, now):
             status = "waiting"
         else:
             status = "unconfirmed"
-        results.append({**routine, "status": status, "arrival_ts": observed["enter_ts"] if observed else None,
-                        "last_in_ts": observed["last_in_ts"] if observed else None})
+        first_seen = observed["enter_ts"] if observed else None
+        last_seen = max(row["last_in_ts"] for row in confirmed) if confirmed else None
+        # The earliest inside report is an upper bound on arrival. Only a
+        # preceding, precise outside fix within 15 min supports a late arrival.
+        outside_before = None
+        if first_seen:
+            place = by_place[routine["place_id"]]
+            for point in window:
+                if first_seen - 900 <= point["ts"] < first_seen:
+                    acc = float(point.get("acc", 0) or 0)
+                    distance = haversine_distance(place["lat"], place["lon"], point["lat"], point["lon"])
+                    if 0 < acc <= 100 and distance - acc > place["radius_m"] + max(40, place["radius_m"] * 0.5):
+                        outside_before = point["ts"]
+        delay = max(0, int((first_seen - begin) // 60)) if first_seen else None
+        grace = int(options.get("grace_minutes", 5)) * 60
+        if observed:
+            attendance = "on_time" if first_seen <= begin + grace else "late" if outside_before and outside_before > begin + grace else "observed_late"
+        else:
+            attendance = status
+        last_leave = confirmed[-1].get("leave_ts") if confirmed else None
+        # Duration ends at the last inside report, never at now or an
+        # unsupported departure extrapolated through a long reporting gap.
+        observed_minutes = sum(max(0, row["last_in_ts"] - row["enter_ts"]) for row in confirmed) // 60
+        results.append({**routine, "status": status, "attendance_status": attendance,
+                        "arrival_ts": first_seen, "last_in_ts": last_seen, "leave_ts": last_leave,
+                        "delay_minutes": delay, "late_minutes": delay if attendance == "late" else 0,
+                        "arrival_is_estimate": True, "outside_before_ts": outside_before,
+                        "observed_minutes": int(observed_minutes), "report_count": len(window),
+                        "expected_ts": int(begin), "end_ts": int(finish)})
     return {
         "visits": sorted(visits, key=lambda row: row["enter_ts"]),
         "current": sorted(current, key=lambda row: row["last_in_ts"], reverse=True) if day == local_day_key(now) else [],
@@ -29752,7 +30198,8 @@ def native_school_plan_api():
             places, routines = native_school_plan(data)
             if data["enabled"] and not bag.get("enabled", bool(bag)):
                 school_enable_history(ref)
-            plan = {"revision": revision + 1, "places": places, "routines": routines}
+            options = native_school_options(data.get("options", {}), plan.get("options"))
+            plan = {"revision": revision + 1, "places": places, "routines": routines, "options": options, "updated_ts": int(now)}
             updated = {**bag, "enabled": data["enabled"], "ios_plan": plan, "updated_ts": int(now)}
             updated.setdefault("created_ts", int(now))
             store["bags"][ref] = updated
@@ -29769,10 +30216,11 @@ def native_school_plan_api():
         places = plan.get("places", [])
         routines = plan.get("routines", [])
     result = {"status": "ok", "day": day, "today": today, "timezone": APP_TIMEZONE_NAME, "enabled": enabled,
-              "revision": int(plan.get("revision", 0)), "places": places, "routines": routines, "location": school_location_public(model),
+              "revision": int(plan.get("revision", 0)), "places": places, "routines": routines, "options": native_school_options({}, plan.get("options")), "location": school_location_public(model),
               "current": [], "visits": [], "checks": []}
     if request.method == "GET" and enabled and places:
-        result.update(native_school_day(model, places, routines, day, now))
+        result.update(native_school_day(model, places, routines, day, now, result["options"]))
+        result["week"] = native_school_week(model, plan, day, now)
     response = jsonify(result)
     response.headers["Cache-Control"] = "private, no-store"
     return response

@@ -31,7 +31,7 @@ final class TrackerUITests: XCTestCase {
         XCTAssertTrue(app.otherElements["tracker-detail-header"].waitForExistence(timeout: 10))
         capture("02-Tracker-Details")
         let school = app.buttons["tracker-school-plan"]
-        XCTAssertTrue(school.waitForExistence(timeout: 10))
+        reveal(school, in: app)
         school.tap()
         let edit = app.buttons["Schultaschenmodus einrichten"]
         XCTAssertTrue(edit.waitForExistence(timeout: 10))
@@ -42,7 +42,9 @@ final class TrackerUITests: XCTestCase {
         enabled.coordinate(withNormalizedOffset: CGVector(dx: 0.80, dy: 0.5)).tap()
         let switchedOn = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "1"), object: enabled)
         wait(for: [switchedOn], timeout: 5)
-        XCTAssertTrue(app.buttons["Ort hinzufügen"].exists)
+        let addPlace = app.buttons["Ort hinzufügen"]
+        for _ in 0..<5 where !addPlace.isHittable { app.swipeUp() }
+        XCTAssertTrue(addPlace.exists)
         app.buttons["Abbrechen"].tap()
         app.tabBars.buttons["Orte"].tap()
         XCTAssertTrue(app.staticTexts["Brandenburger Tor"].waitForExistence(timeout: 10))
@@ -56,17 +58,10 @@ final class TrackerUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["tracker-row-fusion:demo-bag"].waitForExistence(timeout: 20))
         capture("04-Dark-Large-Text")
-        let navigation = app.navigationBars["Objekte"]
-        let initialY = navigation.frame.minY
-        let handle = sheetGrabber(in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        handle.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)))
-        XCTAssertLessThan(navigation.frame.minY, initialY - 100)
-        capture("08-Dark-Expanded")
-        let expandedY = navigation.frame.minY
-        let expandedHandle = sheetGrabber(in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        expandedHandle.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)))
-        XCTAssertGreaterThan(navigation.frame.minY, expandedY + 100)
-        capture("09-Dark-Collapsed")
+        XCTAssertTrue(app.staticTexts["Alles im Blick."].exists)
+        app.buttons["tracker-row-fusion:demo-bag"].tap()
+        XCTAssertTrue(app.otherElements["tracker-detail-header"].waitForExistence(timeout: 10))
+        capture("08-Dark-Large-Detail")
     }
 
     @MainActor
@@ -98,6 +93,7 @@ final class TrackerUITests: XCTestCase {
         let bag = app.buttons["tracker-row-fusion:demo-bag"]
         XCTAssertTrue(bag.waitForExistence(timeout: 20))
         bag.tap()
+        reveal(app.buttons["tracker-history-link"], in: app)
         app.buttons["tracker-history-link"].tap()
         let today = app.buttons["history-today"]
         XCTAssertTrue(today.waitForExistence(timeout: 10))
@@ -161,12 +157,24 @@ final class TrackerUITests: XCTestCase {
         for provider in ["apple", "google", "all"] {
             let app = XCUIApplication()
             app.launchArguments = ["--ui-testing", "--ui-testing-local-google", "-native.localMode", "NO",
-                "-tracker.provider", provider, "-serverURL", "https://offline.example.invalid"]
+                "-tracker.provider", provider, "-tracker.scope", "all", "-tracker.sort", "favorites",
+                "-serverURL", "https://offline.example.invalid"]
             app.launch()
             expandInspector(app)
-            let expectedRow = provider == "apple" ? "tracker-row-apple:demo-keys" : "tracker-row-google:demo-local-tag"
-            XCTAssertTrue(app.buttons[expectedRow].waitForExistence(timeout: 20))
             XCTAssertEqual(app.buttons["local-google-launcher"].firstMatch.exists, provider != "apple")
+            let expectedRow = provider == "apple" ? "tracker-row-apple:demo-keys" : "tracker-row-google:demo-local-tag"
+            let row = app.buttons[expectedRow]
+            // The dashboard lazily creates cards. With all networks selected,
+            // favorites push the local Google card below the first viewport.
+            // Waiting alone cannot materialize it; reveal it as a user would.
+            let library = app.scrollViews.firstMatch
+            XCTAssertTrue(library.waitForExistence(timeout: 20))
+            for _ in 0..<6 {
+                if row.exists && row.isHittable { break }
+                library.swipeUp()
+            }
+            XCTAssertTrue(row.waitForExistence(timeout: 10), "Missing tracker for provider: \(provider)")
+            XCTAssertTrue(row.isHittable, "Tracker must be reachable for provider: \(provider)")
             app.tabBars.buttons["Ich"].tap()
             XCTAssertTrue(app.buttons["Mit Tracker-Server verbinden"].waitForExistence(timeout: 10))
             XCTAssertEqual(app.buttons["local-google-launcher"].firstMatch.exists, provider != "apple")
@@ -245,6 +253,8 @@ final class TrackerUITests: XCTestCase {
         XCTAssertTrue(tag.waitForExistence(timeout: 20)); tag.tap()
         expandInspector(app)
         XCTAssertTrue(app.buttons["google-refresh-location"].waitForExistence(timeout: 10))
+        checkDetailMap(app, screenshot: "Google-Detail-Map")
+        reveal(app.buttons["google-locate-tile"], in: app)
         XCTAssertTrue(app.buttons["google-locate-tile"].exists)
         XCTAssertEqual(app.navigationBars.staticTexts.matching(identifier: "Lokaler Test-Tracker").count, 1)
         XCTAssertFalse(app.otherElements["tracker-detail-header"].staticTexts["Lokaler Test-Tracker"].exists)
@@ -278,11 +288,72 @@ final class TrackerUITests: XCTestCase {
         XCTAssertTrue(tag.waitForExistence(timeout: 10))
         tag.tap()
         expandInspector(app)
+        checkDetailMap(app, screenshot: "Google-Saved-Server-Location-Map")
         let route = app.buttons["google-route-tile"]
-        XCTAssertTrue(route.waitForExistence(timeout: 10))
+        reveal(route, in: app)
         XCTAssertTrue(route.isEnabled, "A saved server location must remain routable when Google has no local location yet.")
         XCTAssertTrue(app.buttons["google-locate-tile"].exists)
         capture("Google-Saved-Location-Route")
+    }
+
+    @MainActor
+    func testTrackerDetailsShowMapAndFullscreen() {
+        for provider in ["fusion", "apple", "samsung"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--ui-testing", "-appearance", "light", "-tracker.provider", provider, "-tracker.scope", "all"]
+            app.launch()
+            let ref = ["fusion": "demo-bag", "apple": "demo-keys", "samsung": "demo-bike"][provider]!
+            let row = app.buttons["tracker-row-" + provider + ":" + ref]
+            XCTAssertTrue(row.waitForExistence(timeout: 20))
+            row.tap()
+            checkDetailMap(app, screenshot: provider + "-Detail-Map")
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testTrackerWithoutLocationDoesNotInventMap() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "-tracker.provider", "google", "-tracker.scope", "all"]
+        app.launch()
+        let row = app.buttons["tracker-row-google:demo-case"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20))
+        row.tap()
+        XCTAssertTrue(app.staticTexts["Noch kein Standort"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.maps.firstMatch.exists)
+        XCTAssertFalse(app.buttons["tracker-detail-map-expand"].exists)
+        capture("Detail-Map-No-Location")
+    }
+
+    @MainActor
+    func testPanelDashboardMapAndBarkSettings() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-school-week", "-appearance", "light", "-tracker.provider", "all", "-tracker.scope", "all"]
+        app.launch()
+        XCTAssertTrue(app.buttons["tracker-row-fusion:demo-bag"].waitForExistence(timeout: 20))
+        capture("Panel-Dashboard")
+        app.buttons["Karte"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["dashboard-map-fit"].waitForExistence(timeout: 10))
+        app.buttons["dashboard-map-fit"].tap()
+        capture("Panel-Map")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["Bark"].firstMatch.tap()
+        XCTAssertTrue(app.switches["Bark aktiv"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["Bark-Server"].exists)
+        capture("Panel-Bark")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["Schultaschen"].firstMatch.tap()
+        let bag = app.buttons["school-bag-fusion:demo-bag"]
+        XCTAssertTrue(bag.waitForExistence(timeout: 10))
+        bag.tap()
+        XCTAssertTrue(app.staticTexts["Deine Schulwoche"].waitForExistence(timeout: 10))
+        capture("Panel-School-Week-Overview")
+        let late = app.staticTexts["Etwa 12 Min. verspätet"]
+        for _ in 0..<5 where !late.isHittable { app.swipeUp() }
+        XCTAssertTrue(late.isHittable)
+        XCTAssertTrue(app.staticTexts["Erste Ortung +35 Min."].exists)
+        XCTAssertTrue(app.staticTexts["Anwesenheit nicht bestätigt"].firstMatch.exists)
+        capture("Panel-School-Week-Evidence")
     }
 
     @MainActor
@@ -293,11 +364,40 @@ final class TrackerUITests: XCTestCase {
 
     @MainActor
     private func expandInspector(_ app: XCUIApplication) {
-        let grabber = sheetGrabber(in: app).firstMatch
-        if grabber.waitForExistence(timeout: 10) {
-            grabber.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.10)))
+        // The panel dashboard uses the full navigation area; no sheet expansion required.
+        XCTAssertTrue(app.tabBars.firstMatch.exists)
+    }
+
+    @MainActor
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
+        for _ in 0..<8 {
+            if element.exists && element.isHittable { break }
+            // Drag in the outer gutter so the map cannot consume a scroll gesture.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.78))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.35)))
         }
+        XCTAssertTrue(element.waitForExistence(timeout: 10))
+        XCTAssertTrue(element.isHittable)
+    }
+
+    @MainActor
+    private func checkDetailMap(_ app: XCUIApplication, screenshot: String) {
+        let expand = app.buttons["tracker-detail-map-expand"]
+        XCTAssertTrue(expand.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.maps.firstMatch.exists)
+        XCTAssertTrue(expand.isHittable)
+        capture(screenshot)
+        expand.tap()
+        let center = app.buttons["tracker-detail-map-center"]
+        XCTAssertTrue(center.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.maps.firstMatch.exists)
+        center.tap()
+        app.buttons["tracker-detail-map-style"].tap()
+        capture(screenshot + "-Fullscreen")
+        let close = app.buttons["tracker-detail-map-close"]
+        XCTAssertTrue(close.isHittable)
+        close.tap()
+        XCTAssertTrue(expand.waitForExistence(timeout: 10))
     }
 
     @MainActor

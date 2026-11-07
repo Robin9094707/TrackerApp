@@ -1,3 +1,15 @@
+# 7.0.0 (Build 30) · Backend 21.0.0
+
+- Direkte Standortkarte in allen Tracker-Details, auch bei lokaler Google-Ortung und gespeicherten Serverstandorten: Genauigkeitskreis, Vollbild, Zentrieren und Satellitenansicht. Kein neues Backend für die Kartenanzeige nötig.
+- iPhone-Tests und Release-Kaltstart bleiben verpflichtend; der iPad-Simulatortest entfällt.
+- Vollflächiges Tracker-Panel mit adaptiven Karten und eigenen Einstiegen in Karte, Schultaschen und Bark.
+- Schulwochen, geschätzte Verspätungen, getrennte unbestätigte Ortungen, freie Tage und serverseitige Meldungen.
+- Bark-Einrichtung, verschlüsselte Schlüssel, Sammelversand und sichtbare Zustellergebnisse.
+- Google: mehrteilige FCM-Antworten, Web-Push-Header, fehlerisolierte Protobuf-Entschlüsselung und abgestimmte Prozessfristen.
+- Backend-Threadkontext ohne Änderung des globalen Python-threading-Moduls; alte Android- und Gastlinks bleiben nutzbar.
+
+[Updateanleitung](docs/UPGRADE-7.0.0.md)
+
 # 6.2.0 · Schultasche & Routinen
 
 - Hauptadmins können den Schultaschenmodus direkt am Server-Tracker einschalten und pro Tracker Orte, Radien und wöchentliche Zeitfenster konfigurieren.

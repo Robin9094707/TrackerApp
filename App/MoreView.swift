@@ -26,6 +26,8 @@ struct MoreView: View {
             if model.showsGoogleControls { Section("Google Find Hub") { GoogleLauncherCard() } }
             if model.serverActionsAvailable {
                 Section("Meine Objekte") {
+                    NavigationLink { SchoolBagHub() } label: { Label("Schultaschen & Wochenübersicht", systemImage: "backpack.fill") }
+                    NavigationLink { BarkSettingsView() } label: { Label("Bark & Sammelmeldungen", systemImage: "bell.badge.fill") }
                     NavigationLink { GroupsView() } label: { Label("Gruppen", systemImage: "folder") }
                     NavigationLink { ArchiveView() } label: { Label("Archiv & ausgeblendete Objekte", systemImage: "archivebox") }
                 }

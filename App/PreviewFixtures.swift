@@ -7,6 +7,7 @@ enum PreviewFixtures {
         let json: String
         switch path {
         case "/api/mobile/v1/alerts": json = #"{"events":[],"unread_count":0,"event_count":0}"#
+        case "/api/mobile/v1/bark": json = #"{"enabled":false,"server":"https://api.day.app","batch":false,"group":"RJ Tracker","device_count":0,"global_enabled":true}"#
         case "/api/mobile/v1/push": json = #"{"devices":[{"id":"demo-phone","label":"iPhone","enabled":true,"device_model":"iPhone","app_version":"3.0"}]}"#
         case "/api/account/profile": json = #"{"user":{"id":"main","username":"demo","display_name":"Demo","email":"","is_main_admin":true}}"#
         case "/api/security/2fa": json = #"{"two_factor":{"enabled":false}}"#
@@ -18,6 +19,9 @@ enum PreviewFixtures {
         case "/api/v2/storage": json = #"{"cleanup":[{"id":"logs","label":"Alte Protokolle","description":"Alte Logdateien bereinigen","available":true,"bytes":1000}]}"#
         case "/api/google/guardian/status": json = #"{"runtime":{"ready":true,"tools_installed":true,"secrets_uploaded":true}}"#
         case "/api/mobile/v1/school-plan":
+            if ProcessInfo.processInfo.arguments.contains("--ui-testing-school-week") {
+                return Data(schoolWeek.utf8)
+            }
             let calendar = Calendar.current
             let today = HistoryCalendar.key(Date(), calendar: calendar)
             json = """
@@ -57,6 +61,25 @@ enum PreviewFixtures {
         }
         return Data(json.utf8)
     }
+
+    // Synthetic reports exercise all attendance states without account or device access.
+    private static let schoolWeek = #"""
+    {"enabled":true,"revision":1,"day":"2026-11-06","today":"2026-11-06","timezone":"Europe/Berlin",
+     "places":[{"id":"school","name":"Schule","kind":"school","lat":52.5163,"lon":13.3777,"radius_m":120}],
+     "routines":[{"id":"lesson","place_id":"school","days":[1,2,3,4,5],"start":"08:00","end":"13:00"}],
+     "options":{"notifications_enabled":true,"grace_minutes":5,"reminder_minutes":60,"daily_summary":true,"off_days":[]},
+     "current":[],"visits":[],"checks":[{"id":"lesson","place_id":"school","start":"08:00","end":"13:00","status":"unconfirmed","attendance_status":"unconfirmed"}],
+     "week":{"start":"2026-11-02","summary":{"planned_days":5,"confirmed_days":3,"late_days":1,"unconfirmed_days":2,"late_minutes":12},"days":[
+      {"day":"2026-11-02","status":"on_time","present":true,"planned":true,"delay_minutes":0,"late_minutes":0},
+      {"day":"2026-11-03","status":"late","present":true,"planned":true,"delay_minutes":12,"late_minutes":12},
+      {"day":"2026-11-04","status":"observed_late","present":true,"planned":true,"delay_minutes":35,"late_minutes":0},
+      {"day":"2026-11-05","status":"unconfirmed","present":false,"planned":true,"delay_minutes":0,"late_minutes":0},
+      {"day":"2026-11-06","status":"unconfirmed","present":false,"planned":true,"delay_minutes":0,"late_minutes":0},
+      {"day":"2026-11-07","status":"free","present":false,"planned":false,"delay_minutes":0,"late_minutes":0},
+      {"day":"2026-11-08","status":"free","present":false,"planned":false,"delay_minutes":0,"late_minutes":0}
+     ]}}
+    """#
+
     static var bootstrap: BootstrapResponse {
         let now = Int(Date().timeIntervalSince1970)
         let json = """

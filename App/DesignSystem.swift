@@ -6,7 +6,7 @@ import MapKit
 // MARK: - Visual language
 
 enum RJDesign {
-    static let corner: CGFloat = 26
+    static let corner: CGFloat = 24
     static let compactCorner: CGFloat = 20
     static let sheetCorner: CGFloat = 28
     static let controlSize: CGFloat = 46
@@ -24,9 +24,22 @@ extension EnvironmentValues {
 }
 
 struct RJGlassBackdrop: View {
+    @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
-        Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
+        ZStack {
+            (scheme == .dark ? Color(red: 0.025, green: 0.05, blue: 0.085) : Color(red: 0.94, green: 0.97, blue: 0.97))
+            if !reduceTransparency {
+                GeometryReader { geometry in
+                    Circle().fill(Color.accentColor.opacity(0.10))
+                        .frame(width: geometry.size.width).blur(radius: 90)
+                        .offset(x: geometry.size.width * 0.4, y: -220)
+                    Circle().fill(Color.purple.opacity(0.07))
+                        .frame(width: geometry.size.width).blur(radius: 100)
+                        .offset(x: -geometry.size.width * 0.6, y: geometry.size.height * 0.5)
+                }
+            }
+        }.ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
     }
 }
 
@@ -42,11 +55,7 @@ extension View {
     }
 
     func rjCard() -> some View {
-        padding(RJDesign.contentPadding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: RJDesign.corner, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: RJDesign.corner, style: .continuous).stroke(Color.primary.opacity(0.045), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.035), radius: 12, y: 5)
+        modifier(RJPanelCard())
     }
 
     func rjCompactCard() -> some View {
@@ -76,6 +85,22 @@ extension View {
     func rjGlassControl() -> some View {
         frame(width: RJDesign.controlSize, height: RJDesign.controlSize)
             .modifier(RJInteractiveGlass())
+    }
+}
+
+private struct RJPanelCard: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    func body(content: Content) -> some View {
+        content.padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                if reduceTransparency {
+                    RoundedRectangle(cornerRadius: RJDesign.corner).fill(Color(uiColor: .secondarySystemGroupedBackground))
+                } else {
+                    RoundedRectangle(cornerRadius: RJDesign.corner).fill(.regularMaterial)
+                }
+            }
+            .overlay(RoundedRectangle(cornerRadius: RJDesign.corner).strokeBorder(Color.accentColor.opacity(0.09)))
     }
 }
 

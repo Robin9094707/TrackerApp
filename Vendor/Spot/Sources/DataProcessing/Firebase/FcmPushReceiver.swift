@@ -431,8 +431,8 @@ final class PushReceiver: SharedInstance {
             // The deleted_messages message does not contain data.
             return
         }
-        let cryptoKey = String(appDataByKey(msg: msg, key: "crypto-key").dropFirst(3)) // strip dh=
-        let salt = String(appDataByKey(msg: msg, key: "encryption").dropFirst(5)) // strip salt=
+        let cryptoKey = GooglePushHeader.parameter("dh", in: appDataByKey(msg: msg, key: "crypto-key"))
+        let salt = GooglePushHeader.parameter("salt", in: appDataByKey(msg: msg, key: "encryption"))
         let subtype = appDataByKey(msg: msg, key: "subtype")
 
         guard let credentials else { return }

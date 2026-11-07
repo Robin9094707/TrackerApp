@@ -1,3 +1,13 @@
+# RJ Tracker 7.0.0 · Backend 21.0.0
+
+Tracker-Panel im Stil der Panel-App, Schulwochen mit nachvollziehbaren Ortungsnachweisen, serverseitige Schulmeldungen und Bark mit mehreren Empfängern. Verbesserter Google-FCM-Empfang und direkte Protobuf-Auswertung.
+
+[Update, Einrichtung und Grenzen](docs/UPGRADE-7.0.0.md) · [Google-Quellen](Vendor/Spot/UPSTREAM.md)
+
+Die Pull-Request-Action erzeugt die unsignierte IPA und `Tracker_Backend_AMP.py` nach erfolgreichen Pflichtprüfungen. PANELAPios und die Android-App bleiben unverändert. Bestehende Android-APIs werden weiter unterstützt.
+
+---
+
 # RJ Tracker 6.2.0 · Backend 20.7.1
 
 **Schultasche & Routinen:** Hauptadmins können pro Server-Tracker Orte und wöchentliche Zeitfenster festlegen. Die Tagesübersicht zeigt erkannte Aufenthalte und Standortmeldungen im geplanten Zeitfenster. Der Standortverlauf bietet außerdem eine stabilere Kartensteuerung und die Ansicht „Heute komplett“.

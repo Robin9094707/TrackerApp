@@ -25,7 +25,7 @@ struct SettingsView: View {
                 signOutCard
             }
             .padding(16)
-            .padding(.bottom, 28)
+            .padding(.bottom, 28).frame(maxWidth: 1000).frame(maxWidth: .infinity)
         }
         .rjScreenChrome()
         .navigationTitle("Einstellungen")
@@ -68,8 +68,11 @@ struct SettingsView: View {
 
     private var notificationCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            RJSectionTitle(title: "Benachrichtigungen", subtitle: "APNs und iOS-Berechtigungen", symbol: "bell.badge.fill")
+            RJSectionTitle(title: "Benachrichtigungen", subtitle: "Bark und iOS-Mitteilungen", symbol: "bell.badge.fill")
             Divider()
+            if model.serverActionsAvailable {
+                NavigationLink { BarkSettingsView() } label: { Label("Bark & Sammelmeldungen", systemImage: "bell.badge.fill") }
+            }
             NavigationLink { PushDevicesView() } label: { Label("Registrierte Push-Geräte", systemImage: "iphone.radiowaves.left.and.right") }
             LabeledContent("APNs Backend", value: model.bootstrap?.push?.serverConfigured == true ? "Bereit" : "Nicht vollständig")
             Button {

@@ -170,10 +170,11 @@ struct AlertEvent: Codable, Identifiable, Hashable {
     var body: String?
     var acknowledged: Bool?
     var trackerRef: String?
+    var delivery: [String: JSONValue]?
     var location: JSONValue?
 
     enum CodingKeys: String, CodingKey {
-        case id, ts, type, severity, title, body, acknowledged, location
+        case id, ts, type, severity, title, body, acknowledged, location, delivery
         case trackerRef = "tracker_ref"
     }
 }
