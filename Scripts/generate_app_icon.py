@@ -24,18 +24,18 @@ def pin(x, y):
 
 def color(x, y, pixel):
     glow = max(0, 1 - math.hypot(x - .22, y - .12) / 1.15)
-    rgb = blend((5, 14, 34), (17, 73, 99), glow)
+    rgb = blend((7, 11, 26), (70, 78, 196), glow)
     radius = math.hypot(x - .5, y - .49)
     for ring in (.29, .385, .48):
         alpha = coverage(abs(radius - ring), .0018, pixel) * .22
-        rgb = blend(rgb, (69, 225, 229), alpha)
+        rgb = blend(rgb, (172, 150, 255), alpha)
     rgb = blend(rgb, (0, 4, 18), coverage(pin(x, y - .023), .018, pixel) * .38)
     rgb = blend(rgb, (242, 253, 255), coverage(pin(x, y), 0, pixel))
     hole = math.hypot(x - .5, y - .425)
-    rgb = blend(rgb, (9, 46, 65), coverage(hole, .092, pixel))
-    rgb = blend(rgb, (77, 231, 218), coverage(hole, .047, pixel))
+    rgb = blend(rgb, (30, 36, 96), coverage(hole, .092, pixel))
+    rgb = blend(rgb, (110, 147, 255), coverage(hole, .047, pixel))
     # One small satellite dot gives the otherwise quiet mark an orbit.
-    rgb = blend(rgb, (77, 231, 218), coverage(math.hypot(x - .78, y - .23), .019, pixel))
+    rgb = blend(rgb, (172, 150, 255), coverage(math.hypot(x - .78, y - .23), .019, pixel))
     return bytes(round(max(0, min(255, v))) for v in rgb)
 
 def chunk(kind, data):

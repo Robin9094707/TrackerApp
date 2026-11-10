@@ -28,19 +28,32 @@ struct RJGlassBackdrop: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
         ZStack {
-            (scheme == .dark ? Color(red: 0.025, green: 0.05, blue: 0.085) : Color(red: 0.94, green: 0.97, blue: 0.97))
+            LinearGradient(
+                colors: scheme == .dark
+                    ? [Color(red: 0.027, green: 0.043, blue: 0.086), Color(red: 0.043, green: 0.063, blue: 0.125)]
+                    : [Color(red: 0.957, green: 0.965, blue: 0.992), Color(red: 0.925, green: 0.937, blue: 0.980)],
+                startPoint: .top, endPoint: .bottom)
             if !reduceTransparency {
                 GeometryReader { geometry in
-                    Circle().fill(Color.accentColor.opacity(0.10))
-                        .frame(width: geometry.size.width).blur(radius: 90)
-                        .offset(x: geometry.size.width * 0.4, y: -220)
-                    Circle().fill(Color.purple.opacity(0.07))
-                        .frame(width: geometry.size.width).blur(radius: 100)
-                        .offset(x: -geometry.size.width * 0.6, y: geometry.size.height * 0.5)
+                    Circle().fill(RJBrand.indigo.opacity(scheme == .dark ? 0.22 : 0.14))
+                        .frame(width: geometry.size.width * 1.1).blur(radius: 110)
+                        .offset(x: geometry.size.width * 0.35, y: -260)
+                    Circle().fill(RJBrand.violet.opacity(scheme == .dark ? 0.16 : 0.10))
+                        .frame(width: geometry.size.width).blur(radius: 120)
+                        .offset(x: -geometry.size.width * 0.55, y: geometry.size.height * 0.45)
+                    Circle().fill(Color.cyan.opacity(scheme == .dark ? 0.07 : 0.06))
+                        .frame(width: geometry.size.width * 0.7).blur(radius: 100)
+                        .offset(x: geometry.size.width * 0.5, y: geometry.size.height * 0.8)
                 }
             }
         }.ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
     }
+}
+
+enum RJBrand {
+    static let indigo = Color(red: 0.357, green: 0.549, blue: 1.0)
+    static let violet = Color(red: 0.616, green: 0.482, blue: 1.0)
+    static let gradient = LinearGradient(colors: [indigo, violet], startPoint: .topLeading, endPoint: .bottomTrailing)
 }
 
 extension View {
@@ -62,6 +75,7 @@ extension View {
         padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: RJDesign.compactCorner, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: RJDesign.compactCorner, style: .continuous).strokeBorder(Color.primary.opacity(0.06)))
     }
 
     func rjScreenChrome() -> some View {
@@ -100,7 +114,12 @@ private struct RJPanelCard: ViewModifier {
                     RoundedRectangle(cornerRadius: RJDesign.corner).fill(.regularMaterial)
                 }
             }
-            .overlay(RoundedRectangle(cornerRadius: RJDesign.corner).strokeBorder(Color.accentColor.opacity(0.09)))
+            .overlay(
+                RoundedRectangle(cornerRadius: RJDesign.corner)
+                    .strokeBorder(LinearGradient(colors: [Color.white.opacity(0.22), RJBrand.indigo.opacity(0.10), Color.clear],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.08), radius: 18, x: 0, y: 10)
     }
 }
 
@@ -155,21 +174,98 @@ struct RJLaunchView: View {
     var body: some View {
         ZStack {
             RJGlassBackdrop()
-            VStack(spacing: 22) {
-                Image(systemName: "airtag.radiowaves.forward.fill")
-                    .font(.system(size: 54, weight: .medium))
-                    .foregroundStyle(.blue.gradient)
-                    .frame(width: 120, height: 120)
-                    .rjGlass(in: RoundedRectangle(cornerRadius: 36, style: .continuous))
-                    .scaleEffect(appeared || reduceMotion ? 1 : 0.88)
+            VStack(spacing: 26) {
+                RJRadarMark(size: 132)
                 VStack(spacing: 8) {
                     Text("RJ Tracker").font(.largeTitle.bold())
                     Text("Deine Dinge. Immer im Blick.").font(.subheadline).foregroundStyle(.secondary)
                 }
-                ProgressView("Verbinden …").font(.caption).padding(.top, 8)
-            }.opacity(appeared || reduceMotion ? 1 : 0)
+                ProgressView("Verbinden …").font(.caption).padding(.top, 4)
+            }
+            .opacity(appeared || reduceMotion ? 1 : 0)
+            .offset(y: appeared || reduceMotion ? 0 : 12)
         }.onAppear {
-            withAnimation(reduceMotion ? nil : .spring(duration: 0.45, bounce: 0.15)) { appeared = true }
+            withAnimation(reduceMotion ? nil : .spring(duration: 0.55, bounce: 0.2)) { appeared = true }
+        }
+    }
+}
+
+/// Brand mark: a location pin in a gradient tile with expanding radar rings.
+struct RJRadarMark: View {
+    var size: CGFloat = 120
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+    @State private var popped = false
+
+    var body: some View {
+        ZStack {
+            if !reduceMotion {
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .stroke(RJBrand.indigo.opacity(0.55), lineWidth: 2)
+                        .frame(width: size, height: size)
+                        .scaleEffect(pulse ? 1.6 : 0.4)
+                        .opacity(pulse ? 0 : 0.9)
+                        .animation(.easeOut(duration: 2.1).repeatForever(autoreverses: false).delay(Double(index) * 0.55), value: pulse)
+                }
+            }
+            RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
+                .fill(RJBrand.gradient)
+                .frame(width: size * 0.42, height: size * 0.42)
+                .shadow(color: RJBrand.indigo.opacity(0.7), radius: 24)
+                .overlay {
+                    Image(systemName: "location.fill")
+                        .font(.system(size: size * 0.17, weight: .bold))
+                        .foregroundStyle(.white)
+                        .rotationEffect(.degrees(popped || reduceMotion ? 0 : -30))
+                }
+                .scaleEffect(popped || reduceMotion ? 1 : 0.3)
+                .opacity(popped || reduceMotion ? 1 : 0)
+        }
+        .frame(width: size * 1.6, height: size * 1.6)
+        .accessibilityHidden(true)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.spring(duration: 0.7, bounce: 0.45)) { popped = true }
+            pulse = true
+        }
+    }
+}
+
+/// Animated opening shown once over the first screen of every cold start.
+struct RJLaunchOverlay: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var visible = !ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--ui-testing") })
+    @State private var titleShown = false
+    @State private var leaving = false
+
+    var body: some View {
+        if visible {
+            ZStack {
+                RadialGradient(colors: [Color(red: 0.11, green: 0.16, blue: 0.36), Color(red: 0.027, green: 0.043, blue: 0.086)],
+                               center: .center, startRadius: 20, endRadius: 520)
+                    .ignoresSafeArea()
+                VStack(spacing: 18) {
+                    RJRadarMark(size: 150)
+                    VStack(spacing: 6) {
+                        Text("RJ Tracker").font(.system(size: 30, weight: .heavy, design: .rounded)).foregroundStyle(.white)
+                        Text("Apple · Google · Samsung").font(.footnote.weight(.medium)).foregroundStyle(.white.opacity(0.65))
+                    }
+                    .opacity(titleShown ? 1 : 0)
+                    .offset(y: titleShown ? 0 : 14)
+                }
+                .scaleEffect(leaving ? 1.12 : 1)
+            }
+            .opacity(leaving ? 0 : 1)
+            .allowsHitTesting(!leaving)
+            .accessibilityHidden(true)
+            .task {
+                withAnimation(.spring(duration: 0.6, bounce: 0.2).delay(0.2)) { titleShown = true }
+                try? await Task.sleep(for: .milliseconds(reduceMotion ? 350 : 1350))
+                withAnimation(.easeInOut(duration: reduceMotion ? 0.15 : 0.5)) { leaving = true }
+                try? await Task.sleep(for: .milliseconds(reduceMotion ? 160 : 520))
+                visible = false
+            }
         }
     }
 }

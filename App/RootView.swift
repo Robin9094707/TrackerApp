@@ -14,6 +14,7 @@ struct RootView: View {
             } else if model.connectionState == .restoring { RJLaunchView().transition(.opacity) }
             else { ConnectionView() }
         }
+        .overlay { RJLaunchOverlay() }
         .onOpenURL { url in
             if let link = TrackerPushLink(url: url) { trackerLink = link }
         }

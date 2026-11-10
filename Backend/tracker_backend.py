@@ -1,4 +1,4 @@
-# Universal Tag Studio 21.2.0 · KOMPASS OPTIMIZATION
+# Universal Tag Studio 22.1.0 · OVERHAUL (web app, network priority)
 # Backward-compatible single-file upgrade. Existing data/ directory layout,
 # tracker IDs, histories, shares and provider sessions are intentionally
 # preserved. Google integration: leonboe1/GoogleFindMyTools (GPL-3.0).
@@ -12869,8 +12869,10 @@ def fusion_locations(apple_name, apple_location):
     samsung_link = samsung_link_for_apple(apple_name) or ({"samsung_id": samsung_id} if samsung_id else None)
     google_location = google_public_location(state.get("google_locations", {}).get(google_id)) if google_id else None
     samsung_location = samsung_public_location(state.get("samsung_locations", {}).get(samsung_id)) if samsung_id else None
-    candidates = [location for location in [apple_location, google_location, samsung_location] if location]
-    latest = max(candidates, key=lambda item: float(item.get("ts", 0) or 0)) if candidates else None
+    latest, _selection = fusion_policy_pick(
+        {"apple": apple_location, "google": google_location, "samsung": samsung_location},
+        fusion_network_policy(apple_name),
+    )
     if latest:
         latest = dict(latest)
         latest["fusion"] = bool(google_link or samsung_link)
@@ -12937,6 +12939,86 @@ def fusion_history_points(apple_name, raw_profile=None):
             fusion_history_cache_store.pop(next(iter(fusion_history_cache_store)), None)
         fusion_history_cache_store[apple_name] = {"signature": signature, "points": points}
     return points
+
+
+# --- 22.0 network priority per fusion ---------------------------------------
+# Additive profile field ``network_policy``. Profiles without it keep the
+# previous behaviour exactly ("newest": the most recent report of any network).
+FUSION_NETWORK_MODES = ("newest", "priority", "primary_only")
+FUSION_BACKUP_POLLING_MODES = ("always", "when_stale")
+FUSION_NETWORK_PROVIDERS = ("apple", "google", "samsung")
+
+
+def fusion_network_policy(apple_name, raw_profile=None):
+    profile = raw_profile if isinstance(raw_profile, dict) else state.get("fusion_profiles", {}).get(apple_name, {})
+    profile = profile if isinstance(profile, dict) else {}
+    raw = profile.get("network_policy") if isinstance(profile.get("network_policy"), dict) else {}
+    available = fusion_profile_provider_names(apple_name, profile)
+    mode = str(raw.get("mode") or "newest").lower()
+    if mode not in FUSION_NETWORK_MODES:
+        mode = "newest"
+    order = [str(item).lower() for item in raw.get("order", []) if str(item).lower() in FUSION_NETWORK_PROVIDERS] \
+        if isinstance(raw.get("order"), list) else []
+    order = list(dict.fromkeys([item for item in order if item in available] + available))
+    try:
+        backup_after = int(raw.get("backup_after_minutes", 10))
+    except (TypeError, ValueError):
+        backup_after = 10
+    backup_after = max(1, min(24 * 60, backup_after))
+    backup_polling = str(raw.get("backup_polling") or "always").lower()
+    if backup_polling not in FUSION_BACKUP_POLLING_MODES:
+        backup_polling = "always"
+    return {
+        "mode": mode,
+        "order": order,
+        "primary": order[0] if order else "apple",
+        "backups": order[1:],
+        "backup_after_minutes": backup_after,
+        "backup_polling": backup_polling if mode != "newest" else "always",
+        "configured": bool(raw),
+    }
+
+
+def fusion_policy_pick(source_locations, policy, now_ts=None):
+    """Choose the displayed raw report according to the fusion's network policy.
+
+    Returns ``(location, selection)``. Raw provider reports are never changed.
+    """
+    candidates = {source: location for source, location in (source_locations or {}).items() if location}
+    if not candidates:
+        return None, {"mode": policy.get("mode", "newest"), "source": None, "reason": "no_location"}
+    newest_source = max(candidates, key=lambda key: float(candidates[key].get("ts", 0) or 0))
+    mode = policy.get("mode", "newest")
+    if mode == "newest":
+        return candidates[newest_source], {"mode": mode, "source": newest_source, "reason": "newest"}
+    order = [source for source in policy.get("order", []) if source in candidates] + \
+        [source for source in candidates if source not in policy.get("order", [])]
+    primary = policy.get("primary")
+    if mode == "primary_only":
+        if primary in candidates:
+            return candidates[primary], {"mode": mode, "source": primary, "reason": "primary"}
+        fallback = order[0]
+        return candidates[fallback], {"mode": mode, "source": fallback, "reason": "primary_missing"}
+    window = int(policy.get("backup_after_minutes", 10) or 10) * 60
+    chosen = order[0]
+    reason = "primary" if chosen == primary else "primary_missing"
+    for source in order[1:]:
+        if float(candidates[source].get("ts", 0) or 0) - float(candidates[chosen].get("ts", 0) or 0) > window:
+            chosen, reason = source, "backup_newer"
+    return candidates[chosen], {"mode": mode, "source": chosen, "reason": reason,
+                                "primary": primary, "window_seconds": window}
+
+
+def fusion_primary_fresh(apple_name, raw_profile=None, now_ts=None):
+    policy = fusion_network_policy(apple_name, raw_profile)
+    if policy["mode"] == "newest":
+        return True
+    locations = fusion_profile_source_locations(apple_name, raw_profile)
+    primary = locations.get(policy["primary"])
+    if not primary:
+        return False
+    age = float(now_ts or time.time()) - float(primary.get("ts", 0) or 0)
+    return age <= policy["backup_after_minutes"] * 60
 
 
 FUSION_OPTIMIZATION_WINDOW_SECONDS = 20 * 60
@@ -13021,13 +13103,14 @@ def fusion_profile_display_location(apple_name, enabled=False, history_points=No
     """
     source_locations = fusion_profile_source_locations(apple_name, raw_profile)
     required_sources = fusion_profile_provider_names(apple_name, raw_profile)
-    candidates_now = [location for location in source_locations.values() if location]
-    raw_location = max(candidates_now, key=lambda item: float(item.get("ts", 0) or 0)) if candidates_now else None
+    policy = fusion_network_policy(apple_name, raw_profile)
+    raw_location, selection = fusion_policy_pick(source_locations, policy)
     if raw_location:
         raw_location = dict(raw_location)
         raw_location["fusion"] = True
         raw_location["fusion_level"] = len(required_sources)
-        raw_location["latest_source"] = raw_location.get("source") or "apple"
+        raw_location["latest_source"] = selection.get("source") or raw_location.get("source") or "apple"
+        raw_location["network_selection"] = selection
         raw_location["optimized"] = False
 
     if not enabled:
@@ -13626,6 +13709,8 @@ def fusion_profile_public(apple_name, raw_profile=None, history_points=None):
         "latest_source": raw_location.get("latest_source") if raw_location else None,
         "location_optimization": optimization_enabled,
         "optimization": optimization,
+        "network_policy": fusion_network_policy(apple_name, raw_profile),
+        "network_selection": (raw_location or {}).get("network_selection"),
         "history_count": len(timeline_points),
         "history_days": route_day_index(timeline_points, fill_last_seven=True),
         "history_policy": history_policy_public("fusion", apple_name),
@@ -16189,6 +16274,7 @@ def mcp_tracker_row(model, detailed=False):
         if row["provider"] == "fusion":
             profile = state.get("fusion_profiles", {}).get(model.get("id"), {})
             if isinstance(profile, dict):
+                row["network_policy"] = fusion_network_policy(model.get("id"), profile)
                 row["linked_networks"] = [
                     value for value, available in (
                         ("apple", True), ("google", bool(profile.get("google_id"))),
@@ -30578,6 +30664,807 @@ _install_school_admin_console()
 if not _DISABLE_BACKGROUND:
     threading.Thread(target=school_worker, daemon=True, name="school-bag-presence").start()
 
+
+
+# ---------------------------------------------------------------------------
+# 22.0 OVERHAUL: WEB APP, NETWORK PRIORITY, BAGS FOR EVERY TRACKER, GZIP
+# ---------------------------------------------------------------------------
+# Strictly additive. No existing file, field or route changes meaning:
+# * fusion_profiles.json gains an optional ``network_policy`` per fusion.
+# * school_mode.json keeps its schema; bags are toggled exactly like before.
+# * /app serves a responsive web client that only uses the existing
+#   session-cookie + CSRF protected mobile API.
+APP_VERSION = "22.1.0 OVERHAUL"
+WEB_APP_PATH = "/app"
+_FUSION_BACKUP_REASONS = {"linked_history", "fusion_optimization", "fusion_history", "school_bag", "background", "history"}
+
+
+def fusion_name_for_source(provider, tracker_id):
+    """Return the fusion (apple name) a provider device belongs to, if any."""
+    provider, tracker_id = str(provider), str(tracker_id)
+    profiles = state.get("fusion_profiles", {})
+    if provider == "apple":
+        return tracker_id if tracker_id in profiles else None
+    if provider == "google":
+        link = google_link_for_device(tracker_id)
+    elif provider == "samsung":
+        link = samsung_link_for_device(tracker_id)
+    else:
+        return None
+    if link and link.get("apple_name") in profiles:
+        return link.get("apple_name")
+    key = "google_id" if provider == "google" else "samsung_id"
+    return next((name for name, profile in profiles.items()
+                 if isinstance(profile, dict) and str(profile.get(key) or "") == tracker_id), None)
+
+
+def fusion_backup_paused(provider, tracker_id, now_ts=None):
+    """True when the fusion polls this backup network only while the primary is stale."""
+    try:
+        apple_name = fusion_name_for_source(provider, tracker_id)
+        if not apple_name:
+            return False
+        policy = fusion_network_policy(apple_name)
+        if policy["mode"] == "newest" or policy["backup_polling"] != "when_stale":
+            return False
+        if provider == policy["primary"] or provider not in policy["backups"]:
+            return False
+        return fusion_primary_fresh(apple_name, now_ts=now_ts)
+    except Exception:
+        return False
+
+
+_overhaul_original_reasons = {
+    "apple": apple_active_reasons, "google": google_active_reasons, "samsung": samsung_active_reasons,
+}
+
+
+def _overhaul_reason_wrapper(provider):
+    original = _overhaul_original_reasons[provider]
+
+    def reasons(tracker_id):
+        result = list(original(tracker_id))
+        if result and fusion_backup_paused(provider, tracker_id):
+            result = [reason for reason in result if reason not in _FUSION_BACKUP_REASONS]
+        return result
+    reasons.__name__ = original.__name__
+    reasons.__doc__ = original.__doc__
+    return reasons
+
+
+apple_active_reasons = _overhaul_reason_wrapper("apple")
+google_active_reasons = _overhaul_reason_wrapper("google")
+samsung_active_reasons = _overhaul_reason_wrapper("samsung")
+
+
+def fusion_network_policy_update(apple_name, data):
+    profile = state.get("fusion_profiles", {}).get(apple_name)
+    if not isinstance(profile, dict) or apple_name not in state.get("accessories", {}):
+        raise MCPToolError("Fusion wurde nicht gefunden.", "not_found")
+    if not isinstance(data, dict):
+        raise MCPToolError("Ungültige Einstellungen.", "invalid_request")
+    current = fusion_network_policy(apple_name, profile)
+    mode = str(data.get("mode", current["mode"]) or "newest").lower()
+    if mode not in FUSION_NETWORK_MODES:
+        raise MCPToolError("Unbekannter Modus.", "invalid_request")
+    order = data.get("order", current["order"])
+    if not isinstance(order, list) or any(str(item).lower() not in FUSION_NETWORK_PROVIDERS for item in order):
+        raise MCPToolError("Die Reihenfolge enthält ein unbekanntes Netz.", "invalid_request")
+    try:
+        backup_after = int(data.get("backup_after_minutes", current["backup_after_minutes"]))
+    except (TypeError, ValueError):
+        raise MCPToolError("Die Wartezeit muss eine Zahl sein.", "invalid_request")
+    backup_polling = str(data.get("backup_polling", current["backup_polling"]) or "always").lower()
+    if backup_polling not in FUSION_BACKUP_POLLING_MODES:
+        raise MCPToolError("Unbekannte Backup-Abfrage.", "invalid_request")
+    profile["network_policy"] = {
+        "mode": mode,
+        "order": [str(item).lower() for item in order][:3],
+        "backup_after_minutes": max(1, min(24 * 60, backup_after)),
+        "backup_polling": backup_polling,
+        "updated_ts": int(time.time()),
+    }
+    profile["updated_ts"] = int(time.time())
+    save_json(FUSION_PROFILES_FILE, "fusion_profiles")
+    for provider_name, device_id in (("google", profile.get("google_id")), ("samsung", profile.get("samsung_id"))):
+        if device_id and provider_name == "google" and not google_active_reasons(device_id):
+            state.get("google_next_fetch", {}).pop(device_id, None)
+        if device_id and provider_name == "samsung" and not samsung_active_reasons(device_id):
+            state.get("samsung_next_fetch", {}).pop(device_id, None)
+    try:
+        audit_event("fusion_network_policy", f"fusion:{apple_name}", f"{mode} · {'/'.join(profile['network_policy']['order'])}")
+    except Exception:
+        pass
+    return fusion_network_policy(apple_name, profile)
+
+
+def fusion_network_payload(apple_name):
+    profile = state.get("fusion_profiles", {}).get(apple_name, {})
+    public = fusion_profile_public(apple_name, profile) or {}
+    return {
+        "status": "ok",
+        "ref": f"fusion:{apple_name}",
+        "policy": fusion_network_policy(apple_name, profile),
+        "selection": public.get("network_selection"),
+        "source_locations": public.get("source_locations") or {},
+        "networks": public.get("providers") or fusion_profile_provider_names(apple_name, profile),
+        "modes": [
+            {"id": "newest", "label": "Neuester Report", "detail": "Zeigt immer die jüngste Meldung aller Netze."},
+            {"id": "priority", "label": "Priorität mit Backup", "detail": "Bevorzugt das erste Netz; Backups springen ein, wenn sie deutlich neuer sind."},
+            {"id": "primary_only", "label": "Nur Hauptnetz", "detail": "Zeigt nur das Hauptnetz; andere Netze nur, wenn es nie gemeldet hat."},
+        ],
+    }
+
+
+@app.route(f"{MOBILE_API_PREFIX}/fusion-networks", methods=["GET", "PUT"])
+def mobile_fusion_networks_api():
+    ref = str(request.args.get("ref") or (request.get_json(silent=True) or {}).get("ref") or "")
+    provider, _, apple_name = ref.partition(":")
+    if provider != "fusion" or not apple_name:
+        return mobile_json_error("Eine Fusions-Referenz ist erforderlich.")
+    try:
+        if request.method == "PUT":
+            fusion_network_policy_update(apple_name, request.get_json(silent=True) or {})
+        elif not isinstance(state.get("fusion_profiles", {}).get(apple_name), dict):
+            raise MCPToolError("Fusion wurde nicht gefunden.", "not_found")
+        return jsonify(fusion_network_payload(apple_name))
+    except MCPToolError as exc:
+        return mobile_json_error(str(exc), 404 if exc.code == "not_found" else 400, exc.code)
+
+
+@app.route("/api/fusion/profiles/<path:apple_name>/networks", methods=["GET", "POST"])
+def fusion_profile_networks_api(apple_name):
+    try:
+        if request.method == "POST":
+            fusion_network_policy_update(apple_name, request.get_json(silent=True) or {})
+        elif not isinstance(state.get("fusion_profiles", {}).get(apple_name), dict):
+            raise MCPToolError("Fusion wurde nicht gefunden.", "not_found")
+        return jsonify(fusion_network_payload(apple_name))
+    except MCPToolError as exc:
+        return mobile_json_error(str(exc), 404 if exc.code == "not_found" else 400, exc.code)
+
+
+# --- bags (Taschen) for every tracker, fusions included ----------------------
+
+def school_bag_row(ref):
+    store = state.get("school_mode") if isinstance(state.get("school_mode"), dict) else None
+    if store is None:
+        try:
+            store = school_store()
+        except Exception:
+            return None
+    bag = store.get("bags", {}).get(ref)
+    return bag if isinstance(bag, dict) else None
+
+
+_overhaul_original_tracker_row = mcp_tracker_row
+
+
+def mcp_tracker_row(model, detailed=False):
+    row = _overhaul_original_tracker_row(model, detailed)
+    try:
+        bag = school_bag_row(row.get("ref"))
+        row["school_bag"] = bool(bag and bag.get("enabled", True))
+        if bag and row["school_bag"]:
+            row["school_bag_label"] = str(bag.get("label") or "")[:60]
+            row["school_bag_child"] = str(bag.get("child_name") or "")[:40]
+    except Exception:
+        row["school_bag"] = False
+    return row
+
+
+def mobile_bags_payload():
+    store = school_store()
+    models = {str(model.get("ref") or ""): model for model in mcp_all_trackers()}
+    rows = []
+    for ref, model in models.items():
+        if not ref or model.get("archived"):
+            continue
+        bag = store.get("bags", {}).get(ref) if isinstance(store.get("bags", {}).get(ref), dict) else None
+        location = mcp_clean_location(model.get("location"))
+        rows.append({
+            "ref": ref,
+            "name": str(model.get("name") or ref)[:160],
+            "provider": str(model.get("provider") or "unknown"),
+            "emoji": str((model.get("details") or {}).get("emoji") or "🎒")[:16] if isinstance(model.get("details"), dict) else "🎒",
+            "is_bag": bool(bag and bag.get("enabled", True)),
+            "has_plan": bool(bag and bag.get("ios_plan")),
+            "label": str((bag or {}).get("label") or "")[:60],
+            "child_name": str((bag or {}).get("child_name") or "")[:40],
+            "location": location,
+            "last_seen_ts": int(float((model.get("location") or {}).get("ts", 0) or 0)),
+        })
+    rows.sort(key=lambda row: (not row["is_bag"], row["provider"] != "fusion", row["name"].lower()))
+    return {"status": "ok", "bags": rows, "count": sum(1 for row in rows if row["is_bag"])}
+
+
+@app.route(f"{MOBILE_API_PREFIX}/bags", methods=["GET", "POST"])
+@school_json
+def mobile_bags_api():
+    admin_require_main()
+    if current_tenant_id() != "main" or getattr(g, "api_principal", None):
+        raise SchoolError("Eine persönliche Hauptadmin-Anmeldung ist erforderlich.", 403, "forbidden")
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        ref = str(data.get("ref") or "")
+        if not school_model(ref):
+            raise SchoolError("Tracker nicht gefunden.", 404, "missing_tracker")
+        with school_lock:
+            store = school_store()
+            previous = store["bags"].get(ref)
+            bag = dict(previous) if isinstance(previous, dict) else {"created_ts": int(time.time())}
+            enabled = settings_bool(data.get("enabled"), True)
+            bag.update(enabled=enabled, updated_ts=int(time.time()))
+            if "label" in data:
+                bag["label"] = str(data.get("label") or "")[:60]
+            if "child_name" in data:
+                bag["child_name"] = str(data.get("child_name") or "")[:40]
+            store["bags"][ref] = bag
+            if not enabled:
+                store.get("presence", {}).pop(ref, None)
+            try:
+                school_save()
+            except Exception:
+                if previous is None:
+                    store["bags"].pop(ref, None)
+                else:
+                    store["bags"][ref] = previous
+                raise
+        if enabled:
+            school_enable_history(ref)
+        audit_event("school_bag_enabled" if enabled else "school_bag_disabled", ref, "Tasche")
+    response = jsonify(mobile_bags_payload())
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+# --- transport: gzip large JSON/HTML responses -------------------------------
+
+_GZIP_MIN_BYTES = 1400
+_GZIP_TYPES = ("application/json", "text/html", "application/javascript", "text/css", "image/svg+xml")
+
+
+@app.after_request
+def overhaul_gzip_response(response):
+    try:
+        if (response.direct_passthrough or response.status_code < 200 or response.status_code >= 300
+                or "gzip" not in str(request.headers.get("Accept-Encoding", "")).lower()
+                or response.headers.get("Content-Encoding")
+                or not str(response.mimetype or "").startswith(_GZIP_TYPES)
+                or response.is_streamed):
+            return response
+        data = response.get_data()
+        if len(data) < _GZIP_MIN_BYTES:
+            return response
+        import gzip as _gzip
+        compressed = _gzip.compress(data, compresslevel=5)
+        if len(compressed) >= len(data):
+            return response
+        response.set_data(compressed)
+        response.headers["Content-Encoding"] = "gzip"
+        response.headers["Content-Length"] = str(len(compressed))
+        vary = response.headers.get("Vary")
+        response.headers["Vary"] = "Accept-Encoding" if not vary else (vary if "accept-encoding" in vary.lower() else vary + ", Accept-Encoding")
+    except Exception:
+        pass
+    return response
+
+
+# --- web app -----------------------------------------------------------------
+
+_overhaul_previous_check_auth = api_edition_check_auth
+
+
+def overhaul_check_auth():
+    if request.path == WEB_APP_PATH or request.path.startswith(WEB_APP_PATH + "/"):
+        return None
+    return _overhaul_previous_check_auth()
+
+
+app.before_request_funcs[None] = [overhaul_check_auth if f is api_edition_check_auth else f for f in app.before_request_funcs[None]]
+
+
+_WEB_APP_MANIFEST = {
+    "name": "RJ Tracker Web",
+    "short_name": "RJ Tracker",
+    "start_url": WEB_APP_PATH,
+    "scope": WEB_APP_PATH,
+    "display": "standalone",
+    "background_color": "#0b1020",
+    "theme_color": "#0b1020",
+    "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}],
+}
+
+
+@app.route(WEB_APP_PATH, strict_slashes=False)
+@app.route(WEB_APP_PATH + "/<path:_subpath>")
+def web_app(_subpath=""):
+    if _subpath == "manifest.webmanifest":
+        return Response(json.dumps(_WEB_APP_MANIFEST), mimetype="application/manifest+json",
+                        headers={"Cache-Control": "public, max-age=3600"})
+    response = Response(_WEB_APP_HTML.replace("__APP_VERSION__", html.escape(APP_VERSION)), mimetype="text/html")
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
+        "font-src https://fonts.gstatic.com; img-src 'self' data: blob: "
+        "https://tile.openstreetmap.org https://server.arcgisonline.com; connect-src 'self'; "
+        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    )
+    return response
+
+
+_WEB_APP_HTML = r'''<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>RJ Tracker Web</title>
+<link rel="manifest" href="/app/manifest.webmanifest">
+<link rel="icon" href="/icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{
+  --bg:#f3f5fb;--bg2:#e9edf7;--panel:rgba(255,255,255,.78);--panel-solid:#fff;--line:rgba(15,23,42,.09);
+  --text:#0f172a;--muted:#64748b;--soft:#94a3b8;--accent:#3b6cff;--accent2:#7c4dff;--ok:#16a34a;--warn:#f59e0b;--bad:#ef4444;
+  --apple:#64748b;--google:#2f7df6;--samsung:#1428a0;--fusion:#8b5cf6;
+  --shadow:0 18px 50px -20px rgba(15,23,42,.35);--radius:22px;--blur:saturate(180%) blur(22px);
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#070b16;--bg2:#0c1324;--panel:rgba(17,24,43,.72);--panel-solid:#111a2e;--line:rgba(255,255,255,.08);
+  --text:#e8edf8;--muted:#93a1bd;--soft:#62708c;--accent:#5b8cff;--accent2:#9d7bff;--apple:#c7cfdd;--samsung:#6f8bff;
+  --shadow:0 24px 60px -24px rgba(0,0,0,.8);color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#070b16;--bg2:#0c1324;--panel:rgba(17,24,43,.72);--panel-solid:#111a2e;--line:rgba(255,255,255,.08);
+  --text:#e8edf8;--muted:#93a1bd;--soft:#62708c;--accent:#5b8cff;--accent2:#9d7bff;--apple:#c7cfdd;--samsung:#6f8bff;
+  --shadow:0 24px 60px -24px rgba(0,0,0,.8);color-scheme:dark;}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:15px/1.45 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none}
+.hidden{display:none!important}
+/* splash */
+#splash{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:radial-gradient(1200px 600px at 50% 40%,#1b2a5c 0%,#070b16 60%);transition:opacity .6s ease,visibility .6s}
+#splash.done{opacity:0;visibility:hidden}
+.radar{position:relative;width:140px;height:140px}
+.radar i{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(124,152,255,.55);animation:ping 2.2s cubic-bezier(.2,.7,.3,1) infinite}
+.radar i:nth-child(2){animation-delay:.55s}.radar i:nth-child(3){animation-delay:1.1s}
+.radar b{position:absolute;inset:42px;border-radius:30px;background:linear-gradient(135deg,#5b8cff,#9d7bff);box-shadow:0 0 60px rgba(124,120,255,.8);display:grid;place-items:center;animation:pop .9s cubic-bezier(.2,1.4,.4,1) both}
+.radar b svg{width:30px;height:30px}
+.splash-title{margin-top:26px;text-align:center;color:#fff;font-weight:800;letter-spacing:.3px;font-size:22px;animation:rise .9s .25s both}
+.splash-title small{display:block;font-weight:500;font-size:13px;color:#9fb0d6;margin-top:4px;letter-spacing:.2px}
+@keyframes ping{0%{transform:scale(.35);opacity:1}100%{transform:scale(1.6);opacity:0}}
+@keyframes pop{0%{transform:scale(.2) rotate(-25deg);opacity:0}100%{transform:none;opacity:1}}
+@keyframes rise{0%{transform:translateY(14px);opacity:0}100%{transform:none;opacity:1}}
+@keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+/* login */
+#login{position:fixed;inset:0;display:grid;place-items:center;padding:16px;background:radial-gradient(900px 500px at 15% 10%,rgba(91,140,255,.35),transparent 60%),radial-gradient(800px 500px at 90% 90%,rgba(157,123,255,.3),transparent 60%),var(--bg)}
+.login-card{width:min(420px,100%);padding:30px;border-radius:28px;background:var(--panel);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--line);box-shadow:var(--shadow);animation:fade .5s both}
+.brand{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+.logo{width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;box-shadow:0 10px 30px -8px var(--accent)}
+.logo svg{width:22px;height:22px}
+.brand h1{margin:0;font-size:20px;letter-spacing:-.2px}.brand p{margin:0;color:var(--muted);font-size:13px}
+label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:14px 0 6px;text-transform:uppercase;letter-spacing:.6px}
+input[type=text],input[type=password],input[type=number],input[type=date],select{width:100%;padding:12px 14px;border-radius:14px;border:1px solid var(--line);background:var(--panel-solid);outline:none;transition:border .2s,box-shadow .2s}
+input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 20%,transparent)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 16px;border-radius:14px;font-weight:600;background:var(--bg2);border:1px solid var(--line);transition:transform .15s,background .2s,opacity .2s;white-space:nowrap}
+.btn:active{transform:scale(.97)}.btn:disabled{opacity:.5;cursor:default}
+.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;border:0;box-shadow:0 10px 24px -10px var(--accent)}
+.btn.wide{width:100%;margin-top:20px;padding:13px}
+.btn.small{padding:7px 11px;border-radius:11px;font-size:13px}
+.btn.danger{color:var(--bad)}
+.error{color:var(--bad);font-size:13px;margin-top:12px;min-height:18px}
+/* shell */
+#shell{position:fixed;inset:0;display:grid;grid-template-columns:420px 1fr}
+#map{position:relative;z-index:1;height:100%;width:100%;background:var(--bg2)}
+.side{position:relative;z-index:5;display:flex;flex-direction:column;min-height:0;background:var(--panel);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border-right:1px solid var(--line)}
+.topbar{display:flex;align-items:center;gap:10px;padding:16px 16px 10px;padding-top:max(16px,env(safe-area-inset-top))}
+.topbar .brand{margin:0;flex:1;min-width:0}.topbar .brand h1{font-size:17px}
+.iconbtn{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:var(--bg2);border:1px solid var(--line);flex:none}
+.iconbtn svg{width:18px;height:18px}
+.tabs{display:flex;gap:4px;margin:0 16px 8px;padding:4px;border-radius:14px;background:var(--bg2);border:1px solid var(--line)}
+.tabs button{flex:1;padding:8px 4px;border-radius:10px;font-weight:600;font-size:13px;color:var(--muted);transition:background .2s,color .2s;position:relative}
+.tabs button.on{background:var(--panel-solid);color:var(--text);box-shadow:0 4px 12px -6px rgba(0,0,0,.3)}
+.tabs .dot{position:absolute;top:5px;right:10px;width:7px;height:7px;border-radius:50%;background:var(--bad)}
+.content{flex:1;overflow:auto;padding:4px 16px calc(24px + env(safe-area-inset-bottom));scrollbar-width:thin}
+.search{position:relative;margin:4px 0 12px}.search input{padding-left:38px}
+.search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--soft)}
+.chips{display:flex;gap:6px;overflow-x:auto;margin-bottom:10px;scrollbar-width:none}
+.chip{padding:6px 11px;border-radius:999px;border:1px solid var(--line);background:var(--panel-solid);font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap}
+.chip.on{background:var(--text);color:var(--bg);border-color:transparent}
+.card{background:var(--panel-solid);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:10px;box-shadow:0 1px 0 rgba(0,0,0,.02);animation:fade .35s both}
+.row{display:flex;align-items:center;gap:12px;padding:12px;border-radius:18px;transition:background .15s,transform .15s;cursor:pointer;animation:fade .35s both}
+.row:hover{background:color-mix(in srgb,var(--accent) 8%,transparent)}.row.sel{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+.avatar{width:46px;height:46px;border-radius:16px;display:grid;place-items:center;font-size:22px;flex:none;position:relative;background:var(--bg2)}
+.avatar .net{position:absolute;right:-3px;bottom:-3px;width:18px;height:18px;border-radius:7px;border:2px solid var(--panel-solid);display:grid;place-items:center;font-size:9px;font-weight:800;color:#fff}
+.grow{flex:1;min-width:0}
+.title{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub{color:var(--muted);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.age{font-size:12px;color:var(--muted);text-align:right;white-space:nowrap}
+.fresh{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:1px}
+.section-h{display:flex;align-items:center;justify-content:space-between;margin:16px 4px 8px;font-size:12px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted)}
+.empty{text-align:center;color:var(--muted);padding:40px 10px}
+.empty b{display:block;font-size:34px;margin-bottom:8px}
+/* detail */
+.detail-head{display:flex;gap:14px;align-items:center;margin:6px 0 14px}
+.detail-head .avatar{width:58px;height:58px;font-size:28px;border-radius:20px}
+.detail-head h2{margin:0;font-size:21px;letter-spacing:-.3px}
+.back{display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-weight:600;margin:4px 0 6px;padding:4px 0}
+.actions{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.action{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px;border-radius:18px;background:var(--panel-solid);border:1px solid var(--line);font-weight:600;font-size:12.5px;transition:transform .15s}
+.action:active{transform:scale(.96)}
+.action svg{width:22px;height:22px;color:var(--accent)}
+.action.busy svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:14px}.kv dt{color:var(--muted)}.kv dd{margin:0;text-align:right;font-weight:600;overflow-wrap:anywhere}
+.netrow{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.netrow:first-of-type{border-top:0}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:700;background:var(--bg2);color:var(--muted)}
+.badge.ok{background:color-mix(in srgb,var(--ok) 15%,transparent);color:var(--ok)}
+.badge.acc{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+.badge.fu{background:color-mix(in srgb,var(--fusion) 16%,transparent);color:var(--fusion)}
+.seg{display:flex;flex-direction:column;gap:6px}
+.seg button{display:flex;gap:10px;text-align:left;padding:11px 12px;border-radius:14px;border:1px solid var(--line);background:var(--bg2)}
+.seg button.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.seg small{display:block;color:var(--muted);font-size:12px}
+.order{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+.order div{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:14px;background:var(--bg2);border:1px solid var(--line)}
+.order .n{width:22px;height:22px;border-radius:8px;display:grid;place-items:center;font-size:12px;font-weight:800;color:#fff}
+.switch{position:relative;width:46px;height:28px;flex:none}
+.switch input{opacity:0;width:0;height:0}
+.switch span{position:absolute;inset:0;border-radius:999px;background:var(--soft);transition:.2s}
+.switch span:before{content:"";position:absolute;width:22px;height:22px;left:3px;top:3px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.switch input:checked+span{background:var(--ok)}.switch input:checked+span:before{transform:translateX(18px)}
+.timeline{position:relative;margin-left:8px;padding-left:18px;border-left:2px solid var(--line)}
+.tl{position:relative;padding:8px 0 10px;cursor:pointer}
+.tl:before{content:"";position:absolute;left:-25px;top:13px;width:10px;height:10px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 20%,transparent)}
+.tl.stay:before{background:var(--ok)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
+.stat{padding:12px;border-radius:16px;background:var(--panel-solid);border:1px solid var(--line)}
+.stat b{display:block;font-size:19px;letter-spacing:-.3px}.stat span{font-size:11.5px;color:var(--muted);font-weight:600}
+.dayrow{display:flex;gap:6px;align-items:center;margin-bottom:10px}
+.week{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-top:8px}
+.week div{text-align:center;padding:8px 2px;border-radius:12px;background:var(--bg2);font-size:11px;font-weight:700}
+.week div i{display:block;margin:5px auto 0;width:8px;height:8px;border-radius:50%;background:var(--soft)}
+/* map overlay */
+.mapctl{position:absolute;z-index:500;right:14px;top:max(14px,env(safe-area-inset-top));display:flex;flex-direction:column;gap:8px}
+.mapctl .iconbtn{background:var(--panel);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);box-shadow:var(--shadow);width:42px;height:42px}
+.toast{position:fixed;z-index:200;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translate(-50%,20px);opacity:0;padding:11px 16px;border-radius:14px;background:var(--text);color:var(--bg);font-weight:600;font-size:14px;transition:.3s;pointer-events:none;max-width:calc(100% - 32px)}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.pin{width:44px;height:44px;border-radius:50% 50% 50% 4px;transform:rotate(-45deg);display:grid;place-items:center;box-shadow:0 10px 20px -6px rgba(0,0,0,.5);border:3px solid #fff;transition:transform .2s}
+.pin span{transform:rotate(45deg);font-size:20px}
+.pin.sel{transform:rotate(-45deg) scale(1.18)}
+.leaflet-container{font:inherit;background:var(--bg2)}
+:root[data-theme="dark"] .osm-tiles{filter:invert(1) hue-rotate(200deg) brightness(.95) contrast(.9) saturate(.6)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .osm-tiles{filter:invert(1) hue-rotate(200deg) brightness(.95) contrast(.9) saturate(.6)}}
+.leaflet-control-attribution{background:var(--panel)!important;color:var(--muted)!important;border-radius:8px 0 0 0;font-size:10px}
+.leaflet-control-attribution a{color:var(--muted)!important}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel-solid);color:var(--text);border-radius:14px}
+.hero{display:flex;align-items:center;gap:14px;padding:16px;border-radius:var(--radius);margin:2px 0 12px;background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 16%,var(--panel-solid)),color-mix(in srgb,var(--accent2) 14%,var(--panel-solid)));border:1px solid var(--line);animation:fade .4s both}
+.hero .eyebrow{font-size:11px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero h2{margin:2px 0 2px;font-size:22px;letter-spacing:-.4px}
+.ring{position:relative;width:72px;height:72px;flex:none}.ring svg{width:72px;height:72px;transform:rotate(-90deg)}
+.ring circle{fill:none;stroke-width:8;stroke-linecap:round}.ring .bgc{stroke:var(--line)}.ring .fg{stroke:url(#rg);transition:stroke-dashoffset .8s cubic-bezier(.2,.8,.2,1)}
+.ring div{position:absolute;inset:0;display:grid;place-content:center;text-align:center;line-height:1.05}.ring b{font-size:19px}.ring small{font-size:10px;color:var(--muted);font-weight:600}
+.hint{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line);cursor:pointer}.hint:first-of-type{border-top:0}
+.hint i{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;font-style:normal;color:#fff;flex:none;font-size:14px}
+.skel{height:70px;border-radius:18px;margin-bottom:8px;background:linear-gradient(90deg,var(--bg2) 25%,color-mix(in srgb,var(--bg2) 60%,var(--panel-solid)) 50%,var(--bg2) 75%);background-size:200% 100%;animation:shimmer 1.3s linear infinite}
+@keyframes shimmer{to{background-position:-200% 0}}
+.scrub{display:flex;align-items:center;gap:10px}.scrub input[type=range]{flex:1;accent-color:var(--accent);height:28px;padding:0;border:0;background:none;box-shadow:none!important}
+.star{font-size:22px;line-height:1;color:var(--warn);padding:6px}
+.pin.live:after{content:"";position:absolute;inset:-7px;border-radius:50%;border:2px solid currentColor;opacity:0;animation:ping 2.4s ease-out infinite}
+.handle{display:none}
+/* mobile: bottom sheet */
+@media (max-width:860px){
+  #shell{grid-template-columns:1fr}
+  #map{position:fixed;inset:0}
+  .side{position:fixed;left:0;right:0;bottom:0;height:58%;border-right:0;border-top:1px solid var(--line);border-radius:26px 26px 0 0;box-shadow:0 -20px 50px -20px rgba(0,0,0,.45);transition:height .35s cubic-bezier(.2,.9,.3,1)}
+  .side.min{height:150px}.side.max{height:calc(100% - 70px)}
+  .handle{display:block;width:44px;height:5px;border-radius:5px;background:var(--soft);margin:9px auto 0;opacity:.6;cursor:grab}
+  .topbar{padding-top:8px}
+  .mapctl{top:max(12px,env(safe-area-inset-top))}
+  .leaflet-control-zoom{display:none}
+  .topbar .brand p{display:none}.topbar{padding-bottom:8px}.topbar .logo{width:32px!important;height:32px!important}
+  .tabs button{font-size:12.5px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="splash"><div><div class="radar"><i></i><i></i><i></i><b><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg></b></div><div class="splash-title">RJ Tracker<small>Web · __APP_VERSION__</small></div></div></div>
+
+<div id="login" class="hidden">
+  <form class="login-card" id="loginform" autocomplete="on">
+    <div class="brand"><div class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg></div><div><h1>RJ Tracker Web</h1><p>Alle Ortungsfunktionen im Browser</p></div></div>
+    <div id="pwstep">
+      <label for="username">Benutzername <span style="text-transform:none;font-weight:500">(leer = Hauptadmin)</span></label>
+      <input id="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false">
+      <label for="password">Passwort</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+    </div>
+    <div id="tfstep" class="hidden">
+      <label for="code">Zwei-Faktor-Code</label>
+      <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code">
+    </div>
+    <button class="btn primary wide" id="loginbtn" type="submit">Anmelden</button>
+    <div class="error" id="loginerr" role="alert"></div>
+  </form>
+</div>
+
+<div id="shell" class="hidden">
+  <aside class="side" id="side">
+    <div class="handle" id="handle"></div>
+    <div class="topbar">
+      <div class="brand"><div class="logo" style="width:36px;height:36px;border-radius:12px"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg></div><div style="min-width:0"><h1>RJ Tracker</h1><p id="statusline">Verbinde …</p></div></div>
+      <button class="iconbtn" id="locateall" title="Alle orten" aria-label="Alle orten"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg></button>
+      <button class="iconbtn" id="themebtn" title="Darstellung" aria-label="Darstellung wechseln"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+      <button class="iconbtn" id="logoutbtn" title="Abmelden" aria-label="Abmelden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg></button>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button data-tab="objects" class="on">Objekte</button>
+      <button data-tab="history">Verlauf</button>
+      <button data-tab="bags">Taschen</button>
+      <button data-tab="alerts">Mitteilungen<span class="dot hidden" id="alertdot"></span></button>
+    </nav>
+    <div class="content" id="content"></div>
+  </aside>
+  <main style="position:relative;min-width:0">
+    <div id="map"></div>
+    <div class="mapctl">
+      <button class="iconbtn" id="fitbtn" title="Alle zeigen" aria-label="Alle Objekte zeigen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+      <button class="iconbtn" id="layerbtn" title="Kartenstil" aria-label="Kartenstil wechseln"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/></svg></button>
+    </div>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const NET={apple:{name:"Apple",full:"Apple Find My",c:"var(--apple)",hex:"#8b95a7",l:"A"},google:{name:"Google",full:"Google Find Hub",c:"var(--google)",hex:"#2f7df6",l:"G"},samsung:{name:"Samsung",full:"Samsung SmartThings Find",c:"var(--samsung)",hex:"#3b5bdb",l:"S"},fusion:{name:"Fusion",full:"Fusion",c:"var(--fusion)",hex:"#8b5cf6",l:"F"}};
+const S={csrf:"",user:null,boot:null,trackers:[],sel:null,tab:"objects",filter:"all",q:"",markers:new Map(),layer:0,historyLayer:null,history:null,historyDay:null,locating:new Set(),bags:null,bagPlan:{},fusion:{},timer:null};
+function h(tag,attrs,...kids){const e=document.createElement(tag);if(attrs)for(const[k,v]of Object.entries(attrs)){if(v==null||v===false)continue;if(k==="class")e.className=v;else if(k==="style")e.style.cssText=v;else if(k.startsWith("on"))e.addEventListener(k.slice(2),v);else if(k==="html")e.innerHTML=v;else e.setAttribute(k,v===true?"":v)}for(const k of kids.flat(Infinity)){if(k==null||k===false)continue;e.append(k.nodeType?k:document.createTextNode(String(k)))}return e}
+const ICON={
+ locate:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7"/></svg>',
+ route:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h7a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h7"/></svg>',
+ nav:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 11l18-8-8 18-2-8-8-2z"/></svg>',
+ search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
+ back:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>',
+ up:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 15l6-6 6 6"/></svg>',
+ down:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>'};
+const svg=k=>h("span",{html:ICON[k],style:"display:inline-flex"});
+function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove("show"),2800)}
+async function api(path,method="GET",body){
+  const opt={method,credentials:"same-origin",headers:{"Accept":"application/json","X-RJ-Device-Label":"Web-App - "+(navigator.userAgent.includes("Mobile")?"Mobil":"Desktop")}};
+  if(method!=="GET"){opt.headers["Content-Type"]="application/json";opt.headers["X-CSRF-Token"]=S.csrf;opt.body=JSON.stringify(body||{})}
+  const r=await fetch(path,opt);let j={};try{j=await r.json()}catch(e){}
+  if(r.status===401&&!path.includes("/pair")){showLogin();throw new Error(j.message||"Bitte anmelden.")}
+  if(!r.ok&&r.status!==202)throw Object.assign(new Error(j.message||("Fehler "+r.status)),{status:r.status,data:j});
+  return j}
+/* time */
+function ago(ts){if(!ts)return"keine Meldung";const s=Math.max(0,Date.now()/1000-ts);if(s<45)return"gerade eben";if(s<3600)return"vor "+Math.round(s/60)+" Min.";if(s<86400)return"vor "+Math.floor(s/3600)+" Std.";const d=Math.floor(s/86400);return d===1?"gestern":"vor "+d+" Tagen"}
+const fmtTime=ts=>new Date(ts*1000).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"});
+const fmtDate=ts=>new Date(ts*1000).toLocaleString("de-DE",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+function freshColor(ts){if(!ts)return"var(--soft)";const s=Date.now()/1000-ts;return s<900?"var(--ok)":s<3*3600?"var(--warn)":"var(--bad)"}
+const meters=m=>m==null?"–":m<1000?Math.round(m)+" m":(m/1000).toFixed(1)+" km";
+const loc=t=>t&&t.location&&t.location.latitude!=null?t.location:null;
+function addr(l){if(!l)return"";const a=l.address;if(!a)return"";if(typeof a==="string")return a;return a.short||a.label||a.display_name||[a.road,a.city].filter(Boolean).join(", ")}
+/* theme */
+function applyTheme(){const t=localStore("theme");if(t)document.documentElement.dataset.theme=t;else delete document.documentElement.dataset.theme;setTiles()}
+function isDark(){const t=document.documentElement.dataset.theme;return t?t==="dark":matchMedia("(prefers-color-scheme: dark)").matches}
+function localStore(k,v){try{if(v===undefined)return localStorage.getItem("rjt."+k);if(v===null)localStorage.removeItem("rjt."+k);else localStorage.setItem("rjt."+k,v)}catch(e){return null}}
+/* map */
+let map,tiles;
+function initMap(){
+  map=L.map("map",{zoomControl:false,attributionControl:false,worldCopyJump:true}).setView([51.2,10.4],6);
+  L.control.attribution({position:matchMedia("(max-width:860px)").matches?"topleft":"bottomright",prefix:false}).addTo(map);
+  L.control.zoom({position:"bottomright"}).addTo(map);
+  S.layer=Number(localStore("layer")||0);setTiles()}
+function setTiles(){if(!map)return;if(tiles)map.removeLayer(tiles);
+  if(S.layer===1){tiles=L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:19,attribution:"Tiles © Esri"})}
+  else{tiles=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,className:"osm-tiles",attribution:"© OpenStreetMap-Mitwirkende"})}
+  tiles.addTo(map)}
+function pinIcon(t,sel){const n=NET[t.provider]||NET.apple;const live=t.last_seen_ts&&Date.now()/1000-t.last_seen_ts<900;return L.divIcon({className:"",iconSize:[44,44],iconAnchor:[22,44],html:'<div class="pin'+(sel?" sel":"")+(live?" live":"")+'" style="background:'+n.hex+";color:"+n.hex+'"><span></span></div>'})}
+function renderMarkers(){
+  const seen=new Set();
+  for(const t of S.trackers){const l=loc(t);if(!l)continue;seen.add(t.ref);let m=S.markers.get(t.ref);const ll=[l.latitude,l.longitude];
+    if(!m){m={marker:L.marker(ll,{icon:pinIcon(t,false),riseOnHover:true}).addTo(map),circle:L.circle(ll,{radius:l.accuracy_m||0,weight:1,color:(NET[t.provider]||NET.apple).hex,fillOpacity:.08,interactive:false}).addTo(map)};m.marker.on("click",()=>select(t.ref,true));S.markers.set(t.ref,m)}
+    m.marker.setLatLng(ll);m.circle.setLatLng(ll);m.circle.setRadius(Math.min(l.accuracy_m||0,3000));m.marker.setIcon(pinIcon(t,S.sel===t.ref));
+    const el=m.marker.getElement();if(el){const sp=el.querySelector(".pin span");if(sp)sp.textContent=t.emoji||"📍"}
+    m.marker.setZIndexOffset(S.sel===t.ref?1000:0)}
+  for(const[ref,m]of S.markers)if(!seen.has(ref)){map.removeLayer(m.marker);map.removeLayer(m.circle);S.markers.delete(ref)}}
+function fitAll(){const pts=S.trackers.map(loc).filter(Boolean).map(l=>[l.latitude,l.longitude]);if(pts.length===1)map.setView(pts[0],15);else if(pts.length)map.fitBounds(pts,{padding:[60,60],maxZoom:16})}
+/* data */
+async function loadBoot(first){
+  const b=await api("/api/mobile/v1/bootstrap");S.boot=b;S.trackers=(b.trackers||[]).slice().sort((a,b)=>(b.favorite-a.favorite)||a.name.localeCompare(b.name,"de"));
+  if(b.session&&b.session.csrf_token)S.csrf=b.session.csrf_token;S.user=b.session&&b.session.user;
+  $("#statusline").textContent=S.trackers.length+" Objekte · Server "+String((b.api&&b.api.server_version)||"").split(" ")[0];
+  $("#alertdot").classList.toggle("hidden",!(b.alerts&&b.alerts.unread_count));
+  renderMarkers();if(first){const ref=decodeURIComponent(location.hash.slice(1));if(ref&&S.trackers.some(t=>t.ref===ref)){render();select(ref)}else fitAll()}render()}
+function current(){return S.trackers.find(t=>t.ref===S.sel)}
+function select(ref,fromMap){S.sel=ref;try{history.replaceState(null,"","#"+encodeURIComponent(ref))}catch(e){}if(S.tab!=="objects"&&S.tab!=="history")S.tab="objects";setTabs();renderMarkers();const t=current();const l=loc(t);if(l)map.flyTo([l.latitude,l.longitude],Math.max(map.getZoom(),15),{duration:.8});if(S.tab==="history")loadHistory();render();if(fromMap)sheet("mid")}
+/* locate */
+async function locate(ref){if(S.locating.has(ref))return;S.locating.add(ref);render();
+  const started=Date.now()/1000;try{await api("/api/mobile/v1/locate","POST",{tracker:ref});
+    const sources=ref.startsWith("fusion:")?null:ref;let done=false;
+    for(let i=0;i<40&&!done;i++){await new Promise(r=>setTimeout(r,i<5?1200:2500));
+      if(sources){const r=await api("/api/mobile/v1/tracker-refresh?ref="+encodeURIComponent(ref)+"&after="+started);if(r.refresh&&r.refresh.completion>started){done=true}}
+      else if(i>=6)done=true}
+    await loadBoot();toast("Ortung abgeschlossen")}
+  catch(e){toast(e.message)}finally{S.locating.delete(ref);render()}}
+async function locateAll(){try{const r=await api("/api/mobile/v1/locate","POST",{all:true});toast((r.count||0)+" Objekte werden geortet …");setTimeout(()=>loadBoot().catch(()=>{}),8000);setTimeout(()=>loadBoot().catch(()=>{}),20000)}catch(e){toast(e.message)}}
+/* render */
+function setTabs(){document.querySelectorAll(".tabs button").forEach(b=>b.classList.toggle("on",b.dataset.tab===S.tab))}
+function render(){const c=$("#content");const keep=c.scrollTop;c.replaceChildren(...[({objects:renderObjects,history:renderHistory,bags:renderBags,alerts:renderAlerts}[S.tab])()].flat(Infinity).filter(x=>x!=null&&x!==false));if(S.renderKeep)c.scrollTop=keep;S.renderKeep=true}
+function avatar(t,big){const n=NET[t.provider]||NET.apple;return h("div",{class:"avatar",style:"background:color-mix(in srgb,"+n.c+" 14%,var(--bg2))"},t.emoji||"📍",h("span",{class:"net",style:"background:"+n.hex},n.l))}
+function trackerRow(t){const l=loc(t);return h("div",{class:"row"+(S.sel===t.ref?" sel":""),onclick:()=>select(t.ref)},avatar(t),
+  h("div",{class:"grow"},h("div",{class:"title"},t.name,t.school_bag?" 🎒":""),h("div",{class:"sub"},l?(addr(l)||((NET[l.network]||{}).name||l.provider||"")+" · ±"+meters(l.accuracy_m)):"Noch kein Standort")),
+  h("div",{class:"age"},h("span",{class:"fresh",style:"background:"+freshColor(t.last_seen_ts)}),S.locating.has(t.ref)?"ortet …":ago(t.last_seen_ts)))}
+function batteryLow(b){const m=/(\d{1,3})\s*%/.exec(b||"");if(m)return Number(m[1])<=20;return/niedrig|kritisch|schwach|low|critical/i.test(b||"")}
+function insights(){const now=Date.now()/1000,bat=[],stale=[],miss=[];
+  for(const t of S.trackers){if(batteryLow(t.battery))bat.push({t,c:"var(--bad)",i:"🔋",d:"Batterie schwach ("+t.battery+")"});
+    if(!t.last_seen_ts)miss.push({t,c:"var(--soft)",i:"∅",d:"Noch kein Standort gemeldet"});
+    else if(now-t.last_seen_ts>12*3600){const hrs=Math.floor((now-t.last_seen_ts)/3600);stale.push({t,a:now-t.last_seen_ts,c:"var(--warn)",i:"⏱",d:"Keine neue Meldung seit "+(hrs<48?hrs+" Std.":Math.floor(hrs/24)+" Tagen")})}}
+  stale.sort((a,b)=>b.a-a.a);return[...bat,...stale,...miss].slice(0,4)}
+function hero(){const now=Date.now()/1000,total=S.trackers.length,fresh=S.trackers.filter(t=>t.last_seen_ts&&now-t.last_seen_ts<=7200).length;
+  const hr=new Date().getHours(),greet=hr>=5&&hr<11?"Guten Morgen":hr<18&&hr>=11?"Guten Tag":hr<23&&hr>=18?"Guten Abend":"Gute Nacht";
+  const C=2*Math.PI*30,frac=total?fresh/total:0;
+  const sum=!total?"Noch keine Objekte verbunden":fresh===total?(total===1?"Dein Objekt ist aktuell":"Alle "+total+" Objekte sind aktuell"):fresh+" von "+total+" aktuell · "+(total-fresh)+" älter als 2 Std.";
+  const ring=h("div",{class:"ring",role:"img","aria-label":fresh+" von "+total+" Objekten aktuell",html:'<svg viewBox="0 0 72 72"><defs><linearGradient id="rg" x1="0" x2="1"><stop offset="0" stop-color="#5b8cff"/><stop offset="1" stop-color="#9d7bff"/></linearGradient></defs><circle class="bgc" cx="36" cy="36" r="30"/><circle class="fg" cx="36" cy="36" r="30" stroke-dasharray="'+C+'" stroke-dashoffset="'+(C*(1-frac))+'"/></svg><div><b>'+fresh+'</b><small>von '+total+'</small></div>'});
+  const out=[h("div",{class:"hero"},h("div",{class:"grow"},h("div",{class:"eyebrow"},greet),h("h2",null,"Alles im Blick."),h("div",{class:"sub",style:"white-space:normal"},sum)),total?ring:null)];
+  if(total){const rows=insights();out.push(h("div",{class:"card"},h("div",{class:"section-h",style:"margin:0 0 6px"},"✨ Hinweise",rows.length?h("span",{class:"badge",style:"background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)"},rows.length):null),
+    rows.length?rows.map(r=>h("div",{class:"hint",onclick:()=>select(r.t.ref)},h("i",{style:"background:"+r.c},r.i),h("div",{class:"grow"},h("div",{class:"title",style:"font-size:14px"},r.t.name),h("div",{class:"sub"},r.d)))):
+    h("div",{class:"hint",style:"cursor:default"},h("i",{style:"background:var(--ok)"},"✓"),h("div",{class:"grow"},h("div",{class:"title",style:"font-size:14px"},"Alles in Ordnung"),h("div",{class:"sub",style:"white-space:normal"},"Keine schwache Batterie, keine überfälligen Meldungen.")))))}
+  return out}
+function renderObjects(){const t=current();if(t)return renderDetail(t);
+  if(!S.boot)return[h("div",{class:"skel",style:"height:104px"}),h("div",{class:"skel"}),h("div",{class:"skel"}),h("div",{class:"skel"})];
+  const filters=[["all","Alle"],["fusion","Fusionen"],["apple","Apple"],["google","Google"],["samsung","Samsung"],["bags","Taschen"],["fav","Favoriten"]];
+  const q=S.q.toLowerCase();const list=S.trackers.filter(t=>(S.filter==="all"||t.provider===S.filter||(S.filter==="bags"&&t.school_bag)||(S.filter==="fav"&&t.favorite))&&(!q||t.name.toLowerCase().includes(q)));
+  const search=h("input",{type:"text",placeholder:"Objekte suchen  ( / )",value:S.q,oninput:e=>{S.q=e.target.value;const pos=e.target.selectionStart;render();const i=$("#content input");if(i){i.focus();i.setSelectionRange(pos,pos)}}});
+  return[(!S.q&&S.filter==="all")?hero():null,h("div",{class:"search"},svg("search"),search),h("div",{class:"chips"},filters.map(([k,v])=>h("button",{class:"chip"+(S.filter===k?" on":""),onclick:()=>{S.filter=k;render()}},v))),
+    list.length?list.map(trackerRow):h("div",{class:"empty"},h("b",null,"🛰️"),S.trackers.length?"Keine Treffer.":"Noch keine Objekte auf dem Server.")]}
+function renderDetail(t){const l=loc(t);const busy=S.locating.has(t.ref);
+  const out=[h("button",{class:"back",onclick:()=>{S.sel=null;renderMarkers();render()}},svg("back"),"Alle Objekte"),
+    h("div",{class:"detail-head"},avatar(t,true),h("div",{class:"grow"},h("h2",null,t.name),h("div",{class:"sub"},l?ago(l.timestamp)+" · "+((NET[l.network]||{}).full||l.provider||""):"Kein Standort"),
+      h("div",{style:"margin-top:6px;display:flex;gap:6px;flex-wrap:wrap"},h("span",{class:"badge "+(t.provider==="fusion"?"fu":"acc")},(NET[t.provider]||{}).name||t.provider),t.school_bag?h("span",{class:"badge ok"},"🎒 Tasche"):null,t.history_active?h("span",{class:"badge"},"Verlauf aktiv"):null)),h("button",{class:"star",title:"Favorit","aria-label":"Favorit umschalten",onclick:()=>toggleFav(t)},t.favorite?"★":"☆")),
+    h("div",{class:"actions"},
+      h("button",{class:"action"+(busy?" busy":""),onclick:()=>locate(t.ref),disabled:busy},svg("locate"),busy?"Ortet …":"Orten"),
+      h("button",{class:"action",onclick:()=>{S.tab="history";setTabs();loadHistory();render()}},svg("route"),"Verlauf"),
+      h("a",{class:"action",href:l?"https://www.google.com/maps/dir/?api=1&destination="+l.latitude+","+l.longitude:"#",target:"_blank",rel:"noopener",style:"color:inherit;text-decoration:none"+(l?"":";opacity:.5;pointer-events:none")},svg("nav"),"Route"))];
+  if(l)out.push(h("div",{class:"card"},h("dl",{class:"kv"},h("dt",null,"Adresse"),h("dd",null,addr(l)||"–"),h("dt",null,"Genauigkeit"),h("dd",null,"±"+meters(l.accuracy_m)),h("dt",null,"Gemeldet"),h("dd",null,fmtDate(l.timestamp)),h("dt",null,"Netz"),h("dd",null,(NET[l.network]||{}).full||l.provider||"–"),h("dt",null,"Batterie"),h("dd",null,t.battery||"–"),h("dt",null,"Koordinaten"),h("dd",null,h("button",{style:"font-weight:600;color:var(--accent)",title:"Kopieren",onclick:()=>copyText(l.latitude.toFixed(6)+", "+l.longitude.toFixed(6))},l.latitude.toFixed(5)+", "+l.longitude.toFixed(5)+" ⧉")))));
+  if(t.status)out.push(h("div",{class:"card sub",style:"white-space:normal"},t.status));
+  if(t.provider==="fusion")out.push(renderFusion(t));
+  if(S.user&&S.user.is_main_admin)out.push(h("div",{class:"card",style:"display:flex;align-items:center;gap:12px"},h("div",{class:"grow"},h("div",{class:"title"},"🎒 Als Tasche verwenden"),h("div",{class:"sub",style:"white-space:normal"},"Verlauf wird dauerhaft gesammelt; Orte & Zeiten im Tab Taschen.")),
+    h("label",{class:"switch"},h("input",{type:"checkbox",checked:!!t.school_bag,onchange:e=>toggleBag(t.ref,e.target.checked)}),h("span"))));
+  return out}
+async function toggleFav(t){const id=t.id||t.ref.split(":").slice(1).join(":");try{await api("/api/v2/trackers/"+t.provider+"/"+encodeURIComponent(id)+"/preferences","POST",{favorite:!t.favorite});t.favorite=!t.favorite;toast(t.favorite?"Als Favorit gesichert":"Favorit entfernt");render();loadBoot().catch(()=>{})}catch(e){toast(e.message)}}
+async function copyText(v){try{await navigator.clipboard.writeText(v);toast("Kopiert")}catch(e){toast(v)}}
+/* fusion priority */
+function renderFusion(t){const box=h("div",{class:"card"});const f=S.fusion[t.ref];
+  if(!f){api("/api/mobile/v1/fusion-networks?ref="+encodeURIComponent(t.ref)).then(r=>{S.fusion[t.ref]=r;render()}).catch(e=>{box.replaceChildren(h("div",{class:"sub"},e.message))});box.append(h("div",{class:"sub"},"Netzwerke werden geladen …"));return box}
+  const p=f.policy;const sel=f.selection||{};
+  box.append(h("div",{class:"section-h",style:"margin-top:0"},"Ortungsnetze & Priorität",h("span",{class:"badge fu"},(f.networks||[]).length+" Netze")));
+  for(const n of p.order){const sl=(f.source_locations||{})[n];box.append(h("div",{class:"netrow"},h("span",{class:"n",style:"width:26px;height:26px;border-radius:9px;display:grid;place-items:center;color:#fff;font-weight:800;font-size:12px;background:"+NET[n].hex},NET[n].l),
+    h("div",{class:"grow"},h("div",{class:"title",style:"font-size:14px"},NET[n].full,sel.source===n?h("span",{class:"badge ok",style:"margin-left:6px"},"angezeigt"):null),h("div",{class:"sub"},sl?ago(sl.ts||sl.timestamp)+" · ±"+meters(sl.acc||sl.accuracy_m):"keine Meldung"))))}
+  const modes=h("div",{class:"seg",style:"margin-top:10px"},f.modes.map(m=>h("button",{class:p.mode===m.id?"on":"",onclick:()=>saveFusion(t.ref,{mode:m.id})},h("div",null,h("b",null,m.label),h("small",null,m.detail)))));
+  box.append(h("label",null,"Modus"),modes);
+  if(p.mode!=="newest"){
+    box.append(h("label",null,"Reihenfolge (oben = Hauptnetz)"),h("div",{class:"order"},p.order.map((n,i)=>h("div",null,h("span",{class:"n",style:"background:"+NET[n].hex},i+1),h("span",{class:"grow"},NET[n].full,i===0?h("small",{style:"color:var(--muted)"}," · Hauptnetz"):h("small",{style:"color:var(--muted)"}," · Backup")),
+      h("button",{class:"btn small",disabled:i===0,"aria-label":"nach oben",onclick:()=>{const o=p.order.slice();[o[i-1],o[i]]=[o[i],o[i-1]];saveFusion(t.ref,{order:o})}},svg("up")),
+      h("button",{class:"btn small",disabled:i===p.order.length-1,"aria-label":"nach unten",onclick:()=>{const o=p.order.slice();[o[i+1],o[i]]=[o[i],o[i+1]];saveFusion(t.ref,{order:o})}},svg("down"))))));
+    if(p.mode==="priority"){const inp=h("input",{type:"number",min:1,max:1440,value:p.backup_after_minutes,onchange:e=>saveFusion(t.ref,{backup_after_minutes:Number(e.target.value)})});
+      box.append(h("label",null,"Backup springt ein, wenn es so viele Minuten neuer ist"),inp)}
+    box.append(h("label",null,"Backup-Netze abfragen"),h("div",{class:"seg"},
+      h("button",{class:p.backup_polling==="always"?"on":"",onclick:()=>saveFusion(t.ref,{backup_polling:"always"})},h("div",null,h("b",null,"Immer (max. Reports)"),h("small",null,"Alle Netze sammeln parallel – meiste Meldungen."))),
+      h("button",{class:p.backup_polling==="when_stale"?"on":"",onclick:()=>saveFusion(t.ref,{backup_polling:"when_stale"})},h("div",null,h("b",null,"Nur wenn Hauptnetz veraltet"),h("small",null,"Schont Konten & Akku; Backups starten nach der Wartezeit.")))))}
+  return box}
+async function saveFusion(ref,patch){try{const r=await api("/api/mobile/v1/fusion-networks?ref="+encodeURIComponent(ref),"PUT",patch);S.fusion[ref]=r;toast("Priorität gespeichert");await loadBoot()}catch(e){toast(e.message)}}
+/* bags */
+async function toggleBag(ref,on){try{const r=await api("/api/mobile/v1/bags","POST",{ref,enabled:on});S.bags=r.bags;toast(on?"Als Tasche festgelegt":"Tasche entfernt");await loadBoot()}catch(e){toast(e.message);render()}}
+function renderBags(){
+  if(!(S.user&&S.user.is_main_admin))return[h("div",{class:"empty"},h("b",null,"🔒"),"Taschen verwaltet der Hauptadmin.")];
+  if(!S.bags){api("/api/mobile/v1/bags").then(r=>{S.bags=r.bags;render()}).catch(e=>toast(e.message));return[h("div",{class:"empty"},h("b",null,"🎒"),"Lade Taschen …")]}
+  const bags=S.bags.filter(b=>b.is_bag),others=S.bags.filter(b=>!b.is_bag);
+  const out=[h("div",{class:"section-h"},"Aktive Taschen",h("span",null,bags.length))];
+  if(!bags.length)out.push(h("div",{class:"card sub",style:"white-space:normal"},"Noch keine Tasche. Wähle unten ein Objekt – auch Fusionen aus Apple, Google und Samsung."));
+  for(const b of bags)out.push(bagCard(b));
+  out.push(h("div",{class:"section-h"},"Als Tasche festlegen"));
+  for(const b of others)out.push(h("div",{class:"row"},h("div",{class:"avatar"},b.emoji||"🎒",h("span",{class:"net",style:"background:"+(NET[b.provider]||NET.apple).hex},(NET[b.provider]||NET.apple).l)),h("div",{class:"grow"},h("div",{class:"title"},b.name),h("div",{class:"sub"},(NET[b.provider]||{}).full||b.provider)),h("button",{class:"btn small primary",onclick:()=>toggleBag(b.ref,true)},"Festlegen")));
+  return out}
+function bagCard(b){const card=h("div",{class:"card"});const plan=S.bagPlan[b.ref];
+  card.append(h("div",{style:"display:flex;gap:12px;align-items:center"},h("div",{class:"avatar"},b.emoji||"🎒",h("span",{class:"net",style:"background:"+(NET[b.provider]||NET.apple).hex},(NET[b.provider]||NET.apple).l)),
+    h("div",{class:"grow"},h("div",{class:"title"},b.label||b.name),h("div",{class:"sub"},(b.child_name?b.child_name+" · ":"")+((NET[b.provider]||{}).name||b.provider)+" · "+ago(b.last_seen_ts))),
+    h("button",{class:"btn small",onclick:()=>select(b.ref)},"Karte"),h("button",{class:"btn small danger",onclick:()=>toggleBag(b.ref,false)},"Entfernen")));
+  if(plan===undefined){S.bagPlan[b.ref]=null;api("/api/mobile/v1/school-plan?ref="+encodeURIComponent(b.ref)).then(r=>{S.bagPlan[b.ref]=r;render()}).catch(()=>{S.bagPlan[b.ref]={error:true};render()})}
+  else if(plan&&!plan.error){
+    if(!(plan.places||[]).length)card.append(h("div",{class:"sub",style:"margin-top:10px;white-space:normal"},"Orte & Zeiten legst du in der iPhone-App unter „Schultasche & Routinen“ fest."));
+    const checks=plan.checks||[];if(checks.length){card.append(h("div",{class:"section-h"},"Heute"));for(const c of checks){const place=(plan.places||[]).find(p=>p.id===c.place_id)||{};
+      const st={confirmed:["Angekommen","ok"],late:["Verspätet","acc"],observed_late:["Später gesehen","acc"],missing:["Nicht gesehen",""],upcoming:["Geplant",""],unconfirmed:["Noch offen",""]}[c.attendance_status||c.status]||[c.status,""];
+      card.append(h("div",{class:"netrow"},h("div",{class:"grow"},h("div",{class:"title",style:"font-size:14px"},place.name||"Ort"),h("div",{class:"sub"},c.start+(c.end?"–"+c.end:"")+(c.arrival_ts?" · da um "+fmtTime(c.arrival_ts):""))),h("span",{class:"badge "+st[1]},st[0])))}}
+    const days=plan.week&&plan.week.days;if(days&&days.length){const col={confirmed:"var(--ok)",late:"var(--warn)",missing:"var(--bad)",unconfirmed:"var(--warn)"};
+      card.append(h("div",{class:"week"},days.map(d=>h("div",{title:d.status},new Date(d.day+"T12:00").toLocaleDateString("de-DE",{weekday:"short"}),h("i",{style:"background:"+(col[d.status]||"var(--soft)")})))))}}
+  return card}
+/* history */
+function todayKey(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
+async function loadHistory(){const t=current();if(!t)return;S.history=null;clearHistory();render();const day=S.historyDay||todayKey();
+  try{const r=await api("/api/mobile/v1/history?ref="+encodeURIComponent(t.ref)+"&date="+day+"&limit=3000&resolve_addresses=1");if(current()!==t)return;S.history=r;drawHistory();render()}catch(e){S.history={error:e.message};render()}}
+function clearHistory(){if(S.playing){clearInterval(S.playing);S.playing=null}S.scrubPts=null;S.scrubMarker=null;if(S.historyLayer){map.removeLayer(S.historyLayer);S.historyLayer=null}}
+function drawHistory(){clearHistory();const pts=(S.history&&S.history.points||[]).slice().sort((a,b)=>a.timestamp-b.timestamp);if(!pts.length)return;
+  const g=L.layerGroup();const ll=pts.map(p=>[p.latitude,p.longitude]);
+  L.polyline(ll,{color:"#7c8cff",weight:5,opacity:.85,lineJoin:"round"}).addTo(g);
+  pts.forEach((p,i)=>{L.circleMarker([p.latitude,p.longitude],{radius:i===pts.length-1?7:4,color:"#fff",weight:2,fillColor:(NET[p.network]||NET.fusion).hex,fillOpacity:1}).bindPopup(fmtDate(p.timestamp)+"<br>"+((NET[p.network]||{}).full||p.network)+" · ±"+meters(p.accuracy_m)).addTo(g)});
+  for(const s of(S.history.stays||[]))if(s.confirmed_stay)L.circle([s.latitude,s.longitude],{radius:Math.max(30,s.radius_m||40),color:"#16a34a",weight:1.5,fillOpacity:.12}).addTo(g);
+  S.scrubMarker=L.circleMarker(ll[ll.length-1],{radius:10,color:"#fff",weight:3,fillColor:"#5b8cff",fillOpacity:1}).addTo(g);S.scrubPts=pts;S.scrub=pts.length-1;
+  S.historyLayer=g.addTo(map);map.fitBounds(ll,{padding:[60,60],maxZoom:17})}
+function scrubTo(i,pan){const p=S.scrubPts&&S.scrubPts[i];if(!p)return;S.scrub=i;if(S.scrubMarker)S.scrubMarker.setLatLng([p.latitude,p.longitude]);if(pan&&!map.getBounds().pad(-.15).contains([p.latitude,p.longitude]))map.panTo([p.latitude,p.longitude]);const el=$("#scrublabel");if(el)el.textContent=fmtTime(p.timestamp)+" · "+((NET[p.network]||{}).name||p.network)+" · ±"+meters(p.accuracy_m);const r=$("#scrubrange");if(r&&Number(r.value)!==i)r.value=i}
+function playHistory(){if(S.playing){clearInterval(S.playing);S.playing=null;render();return}const n=(S.scrubPts||[]).length;if(n<2)return;if(S.scrub>=n-1)scrubTo(0,true);S.playing=setInterval(()=>{if(S.scrub>=n-1||S.tab!=="history"){clearInterval(S.playing);S.playing=null;if(S.tab==="history")render();return}scrubTo(S.scrub+1,true)},Math.max(60,Math.min(450,9000/n)));render()}
+function renderHistory(){const t=current();
+  if(!t)return[h("div",{class:"section-h"},"Objekt wählen"),...S.trackers.map(x=>h("div",{class:"row",onclick:()=>{S.sel=x.ref;renderMarkers();loadHistory()}},avatar(x),h("div",{class:"grow"},h("div",{class:"title"},x.name),h("div",{class:"sub"},x.history_active?"Verlauf aktiv":"Gespeicherte Meldungen")),h("div",{class:"age"},ago(x.last_seen_ts))))];
+  const day=S.historyDay||todayKey();
+  const out=[h("button",{class:"back",onclick:()=>{S.sel=null;clearHistory();renderMarkers();render()}},svg("back"),"Objekt wechseln"),
+    h("div",{class:"detail-head"},avatar(t),h("div",{class:"grow"},h("h2",{style:"font-size:18px"},t.name),h("div",{class:"sub"},"Standortverlauf"))),
+    h("div",{class:"dayrow"},h("button",{class:"btn small",onclick:()=>shiftDay(-1)},svg("back")),h("input",{type:"date",value:day,max:todayKey(),onchange:e=>{S.historyDay=e.target.value;loadHistory()}}),h("button",{class:"btn small",disabled:day>=todayKey(),onclick:()=>shiftDay(1),style:"transform:rotate(180deg)"},svg("back")))];
+  const r=S.history;if(!r){out.push(h("div",{class:"skel",style:"height:64px"}),h("div",{class:"skel"}),h("div",{class:"skel"}));return out}
+  if(r.error){out.push(h("div",{class:"empty"},h("b",null,"⚠️"),r.error));return out}
+  const sm=r.summary||{};const pts=r.points||[];
+  out.push(h("div",{class:"stats"},h("div",{class:"stat"},h("b",null,sm.matching_reports??pts.length),h("span",null,"Reports")),h("div",{class:"stat"},h("b",null,meters(sm.distance_m)),h("span",null,"Strecke")),h("div",{class:"stat"},h("b",null,sm.confirmed_stays??0),h("span",null,"Aufenthalte"))));
+  if(sm.network_counts)out.push(h("div",{class:"chips"},Object.entries(sm.network_counts).map(([n,c])=>h("span",{class:"chip"},((NET[n]||{}).name||n)+" · "+c))));
+  if(!pts.length){out.push(h("div",{class:"empty"},h("b",null,"🗺️"),"Keine Meldungen an diesem Tag."));return out}
+  if(pts.length>1){const cur=S.scrubPts&&S.scrubPts[S.scrub];out.push(h("div",{class:"card"},h("div",{class:"section-h",style:"margin:0 0 6px"},"Zeitreise",h("span",{id:"scrublabel",style:"text-transform:none;letter-spacing:0"},cur?fmtTime(cur.timestamp)+" · "+((NET[cur.network]||{}).name||cur.network)+" · ±"+meters(cur.accuracy_m):"")),
+    h("div",{class:"scrub"},h("button",{class:"btn small primary","aria-label":S.playing?"Pause":"Abspielen",onclick:playHistory},S.playing?"❚❚":"▶"),h("input",{id:"scrubrange",type:"range",min:0,max:pts.length-1,value:S.scrub??pts.length-1,"aria-label":"Zeitpunkt im Verlauf",oninput:e=>scrubTo(Number(e.target.value),true)}))))}
+  const items=[...(r.stays||[]).filter(s=>s.confirmed_stay).map(s=>({ts:s.start_ts,stay:s})),...pts.map(p=>({ts:p.timestamp,p}))].sort((a,b)=>b.ts-a.ts).slice(0,400);
+  out.push(h("div",{class:"section-h"},"Zeitachse",h("span",null,pts.length+" Punkte")),h("div",{class:"timeline"},items.map(it=>it.stay?
+    h("div",{class:"tl stay",onclick:()=>map.flyTo([it.stay.latitude,it.stay.longitude],17)},h("div",{class:"title",style:"font-size:14px"},"Aufenthalt · "+it.stay.duration_text),h("div",{class:"sub"},fmtTime(it.stay.start_ts)+"–"+fmtTime(it.stay.end_ts)+" · "+it.stay.report_count+" Reports")):
+    h("div",{class:"tl",onclick:()=>map.flyTo([it.p.latitude,it.p.longitude],17)},h("div",{class:"title",style:"font-size:14px"},fmtTime(it.p.timestamp)+" · "+((NET[it.p.network]||{}).name||it.p.network)),h("div",{class:"sub"},(it.p.address?addr({address:it.p.address})+" · ":"")+"±"+meters(it.p.accuracy_m))))));
+  return out}
+function shiftDay(n){const d=new Date((S.historyDay||todayKey())+"T12:00");d.setDate(d.getDate()+n);const k=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");if(k>todayKey())return;S.historyDay=k;loadHistory()}
+/* alerts */
+function renderAlerts(){const ev=(S.boot&&S.boot.alerts&&S.boot.alerts.events)||[];
+  if(!ev.length)return[h("div",{class:"empty"},h("b",null,"🔔"),"Keine Mitteilungen.")];
+  return[h("div",{class:"section-h"},"Neueste Mitteilungen",h("span",null,ev.length)),...ev.map(e=>h("div",{class:"card",style:"cursor:"+(e.tracker_ref?"pointer":"default"),onclick:()=>{if(e.tracker_ref&&S.trackers.some(t=>t.ref===e.tracker_ref))select(e.tracker_ref)}},
+    h("div",{style:"display:flex;gap:10px;align-items:baseline"},h("div",{class:"grow title"},e.title||"Mitteilung"),h("span",{class:"age"},ago(e.ts))),h("div",{class:"sub",style:"white-space:normal"},e.body||"")))]}
+/* sheet (mobile) */
+function sheet(state){const s=$("#side");s.classList.remove("min","max");if(state==="min")s.classList.add("min");if(state==="max")s.classList.add("max")}
+function initSheet(){const hd=$("#handle");let y0=null;hd.addEventListener("pointerdown",e=>{y0=e.clientY;hd.setPointerCapture(e.pointerId)});hd.addEventListener("pointerup",e=>{if(y0==null)return;const dy=e.clientY-y0;y0=null;const s=$("#side");const cur=s.classList.contains("min")?"min":s.classList.contains("max")?"max":"mid";if(Math.abs(dy)<8){sheet(cur==="min"?"mid":cur==="mid"?"max":"mid");return}sheet(dy<0?(cur==="min"?"mid":"max"):(cur==="max"?"mid":"min"))})}
+/* auth */
+function showLogin(){clearInterval(S.timer);$("#shell").classList.add("hidden");$("#login").classList.remove("hidden");splashDone();setTimeout(()=>$("#password").focus(),50)}
+async function showApp(){$("#login").classList.add("hidden");$("#shell").classList.remove("hidden");if(!map)initMap();setTimeout(()=>map.invalidateSize(),50);await loadBoot(true);clearInterval(S.timer);S.timer=setInterval(()=>{if(!document.hidden)loadBoot().catch(()=>{})},20000);splashDone()}
+function splashDone(){setTimeout(()=>$("#splash").classList.add("done"),350)}
+let pending2fa=false;
+$("#loginform").addEventListener("submit",async e=>{e.preventDefault();const err=$("#loginerr");err.textContent="";$("#loginbtn").disabled=true;
+  try{let r;if(!pending2fa){r=await api("/api/mobile/v1/pair","POST",{username:$("#username").value.trim(),pw:$("#password").value});
+      if(r.status==="two_factor_required"){pending2fa=true;$("#pwstep").classList.add("hidden");$("#tfstep").classList.remove("hidden");$("#loginbtn").textContent="Bestätigen";$("#code").focus();return}}
+    else r=await api("/api/mobile/v1/pair/2fa","POST",{code:$("#code").value.trim()});
+    S.csrf=r.csrf_token||S.csrf;pending2fa=false;$("#password").value="";await showApp()}
+  catch(x){err.textContent=x.message;if(x.data&&x.data.code==="two_factor_expired"){pending2fa=false;$("#pwstep").classList.remove("hidden");$("#tfstep").classList.add("hidden");$("#loginbtn").textContent="Anmelden"}}
+  finally{$("#loginbtn").disabled=false}});
+document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{S.tab=b.dataset.tab;setTabs();S.renderKeep=false;if(S.tab==="history"&&current())loadHistory();if(S.tab!=="history")clearHistory();if(S.tab==="bags")S.bags=null,S.bagPlan={};render()}));
+$("#logoutbtn").onclick=async()=>{try{await api("/api/logout","POST",{})}catch(e){}S.csrf="";showLogin()};
+$("#locateall").onclick=locateAll;
+$("#fitbtn").onclick=fitAll;
+$("#layerbtn").onclick=()=>{S.layer=S.layer?0:1;localStore("layer",String(S.layer));setTiles()};
+$("#themebtn").onclick=()=>{const next=isDark()?"light":"dark";localStore("theme",next);applyTheme()};
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>{if(!localStore("theme"))setTiles()});
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&S.csrf)loadBoot().catch(()=>{})});
+document.addEventListener("keydown",e=>{const tag=(e.target.tagName||"").toLowerCase();if(tag==="input"||tag==="select"||tag==="textarea"){if(e.key==="Escape")e.target.blur();return}
+  if(e.key==="/"&&!$("#shell").classList.contains("hidden")){e.preventDefault();S.tab="objects";S.sel=null;setTabs();clearHistory();renderMarkers();render();const i=$("#content .search input");if(i)i.focus()}
+  else if(e.key==="Escape"&&S.sel){S.sel=null;clearHistory();renderMarkers();render()}});
+window.addEventListener("hashchange",()=>{const ref=decodeURIComponent(location.hash.slice(1));if(ref&&S.trackers.some(t=>t.ref===ref)&&S.sel!==ref)select(ref)});
+initSheet();applyTheme();
+(async()=>{try{const s=await api("/api/mobile/v1/session");if(s.authenticated){S.csrf=s.csrf_token;S.user=s.user;await showApp()}else showLogin()}catch(e){showLogin()}})();
+</script>
+</body>
+</html>
+'''
 
 
 if __name__ == "__main__":

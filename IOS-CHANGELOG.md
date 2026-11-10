@@ -1,3 +1,21 @@
+# 8.1.0 (Build 34) · Backend 22.1.0
+
+- Startseite mit Begrüßung nach Tageszeit, Status-Ring („x von y aktuell“) und automatischen Hinweisen: schwache Batterie, lange keine Meldung, noch kein Standort. Ein Tipp öffnet das Objekt.
+- Hochwertigere Kacheln mit Farbverlauf-Symbolen, Druck-Feedback auf Karten und Kacheln, Zähler als Kapsel, Batterie-Warnsymbol in der Objektliste.
+- Web-App: gleiche Übersicht mit Ring und Hinweisen, „Zeitreise“ im Verlauf (Regler und Abspielen), Favoriten-Stern, Koordinaten kopieren, Lade-Skelette, pulsierende Pins für frische Standorte, Tastenkürzel `/` und `Esc`, direkte Links pro Objekt.
+- Alle Daten und Schnittstellen bleiben unverändert.
+
+# 8.0.0 (Build 33) · Overhaul · Backend 22.0.0
+
+- Neues Design: Indigo/Violett-Akzent, ruhiger Verlaufshintergrund, Karten mit Glanzkante, neues App-Icon und Objekt-Avatare in Netzfarbe.
+- Animierte Startanimation (Radar-Pin) bei jedem Kaltstart; respektiert „Bewegung reduzieren“.
+- Fusionen: Netz-Priorität mit Hauptnetz und Backups (neuester Report, Priorität mit Backup, nur Hauptnetz) und Backup-Abfrage immer oder nur bei veraltetem Hauptnetz.
+- Jedes Objekt, auch eine Fusion, per Schalter als Tasche festlegen; Taschen-Übersicht mit aktiven Taschen zuerst.
+- Neue responsive Web-App unter `/app` mit Karte, Ortung, Verlauf, Taschen, Mitteilungen und Netz-Priorität.
+- Server: gzip-Kompression großer Antworten, alle Daten unverändert kompatibel.
+
+[Updateanleitung](docs/UPGRADE-8.0.0.md)
+
 # 7.2.0 (Build 32) · Kompass · Backend 21.2.0
 
 - Fund- und Bewegungsalarm speichern direkt. Beim Scharfstellen des Bewegungsalarms gilt der zuletzt gespeicherte Standort. Eine Ortung läuft danach im Hintergrund.
