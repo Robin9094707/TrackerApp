@@ -5,6 +5,7 @@ import SpotIntegration
 struct NativeGoogleTrackerView: View {
     @Environment(AppModel.self) private var model
     let deviceID: String
+    var barkEventID: String? = nil
     @ObservedObject private var google = GoogleTrackerStore.shared
     @State private var busy = false
     @State private var message: String?
@@ -14,11 +15,20 @@ struct NativeGoogleTrackerView: View {
     @State private var showNearby = false
     private var tracker: GoogleTrackerSnapshot? { google.trackers.first { $0.id == deviceID } }
     var body: some View {
+        Group {
+            if let tracker {
+                TrackerDetailLayout(tracker: mapTracker(tracker)) { details }
+            } else { details }
+        }
+        .navigationTitle(tracker?.name ?? "Google-Tracker").navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var details: some View {
         Form {
             if let tracker {
-                Section {
-                    TrackerDetailMap(tracker: mapTracker(tracker))
-                }.listRowBackground(Color.clear).listRowInsets(EdgeInsets()).listRowSeparator(.hidden)
+                if let barkEventID {
+                    TrackerBarkConfirmation(tracker: mapTracker(tracker), eventID: barkEventID)
+                }
                 Section {
                     HStack(alignment: .top, spacing: 8) {
                         TrackerLocationSummary(symbol: model.trackers.first(where: { $0.provider == "google" && $0.apiID == deviceID })?.emoji ?? "📡",
@@ -62,9 +72,15 @@ struct NativeGoogleTrackerView: View {
                             }
                             .accessibilityIdentifier("tracker-school-plan")
                         }
+                        NavigationLink { TrackerAutomationView(tracker: serverTracker) } label: {
+                            Label("Fund- und Bewegungsalarm", systemImage: "bell.badge.fill")
+                        }.accessibilityIdentifier("tracker-notification-settings")
                         NavigationLink { TrackerDetailView(tracker: serverTracker, preferNativeGoogle: false) } label: {
-                            Label("Bisheriger Serververlauf & Automationen", systemImage: "externaldrive.badge.icloud")
+                            Label("Serverdetails & Verlauf", systemImage: "externaldrive.badge.icloud")
                         }
+                    } else {
+                        Text("Für Server-Pushs muss dieser Google-Tracker mit dem Tracker-Server verbunden sein.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                     if !tracker.unlocked {
                         NavigationLink { GoogleAccountView() } label: { Label("Google-Schlüssel entsperren", systemImage: "lock.open") }
@@ -103,7 +119,7 @@ struct NativeGoogleTrackerView: View {
             if let message { Text(message).font(.footnote).foregroundStyle(.secondary).textSelection(.enabled) }
             if let error = google.errorMessage { Text(error).font(.footnote).foregroundStyle(.orange) }
         }
-        .rjListChrome().navigationTitle(tracker?.name ?? "Google-Tracker").navigationBarTitleDisplayMode(.inline)
+        .rjListChrome()
         .listSectionSpacing(14)
         .contentMargins(.top, 8, for: .scrollContent)
         .refreshable { await model.locateGoogle(deviceID) }

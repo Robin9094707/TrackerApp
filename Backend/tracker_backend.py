@@ -1,4 +1,4 @@
-# Universal Tag Studio 21.0.0 · SCHOOL BAG MODE AND NATIVE ANDROID LINKS
+# Universal Tag Studio 21.2.0 · KOMPASS OPTIMIZATION
 # Backward-compatible single-file upgrade. Existing data/ directory layout,
 # tracker IDs, histories, shares and provider sessions are intentionally
 # preserved. Google integration: leonboe1/GoogleFindMyTools (GPL-3.0).
@@ -76,17 +76,35 @@ from findmy import (
 from findmy.util.http import HttpSession as FindMyHttpSession
 
 
+apple_reply_tracker = contextvars.ContextVar("apple_reply_tracker", default=None)
+
+
 class AppleIdentityHttpSession(FindMyHttpSession):
     def __init__(self, provider):
         super().__init__()
         self.provider = provider
 
     async def request(self, method, url, **kwargs):
-        if urllib.parse.urlsplit(url).hostname == "gsa.apple.com":
+        endpoint = urllib.parse.urlsplit(url)
+        if endpoint.hostname == "gsa.apple.com":
             headers = dict(kwargs.get("headers") or {})
             headers["User-Agent"] = self.provider.user_agent
             kwargs["headers"] = headers
-        return await super().request(method, url, **kwargs)
+        response = await super().request(method, url, **kwargs)
+        tracker = apple_reply_tracker.get()
+        if tracker is not None and endpoint.hostname == "gateway.icloud.com" and endpoint.path == "/findmyservice/v2/fetch":
+            # FindMy.py can retry an empty HTTP 200 or request another rolling
+            # key batch. Let the iPhone release its spinner during that work.
+            has_reports = False
+            if response.status_code == 200 and response.text().strip():
+                try:
+                    rows = response.json().get("acsnLocations", {}).get("locationPayload", [])
+                    has_reports = any(isinstance(row, dict) and row.get("locationInfo") for row in rows)
+                except (AttributeError, TypeError, ValueError):
+                    pass
+            if not has_reports:
+                publish_provider_reply("apple", tracker, "responded", first_only=True)
+        return response
 
 
 class AppleAccount(UpstreamAppleAccount):
@@ -7154,27 +7172,18 @@ def fetch_from_samsung(device_id, trigger="manual"):
     try:
         with samsung_fetch_lock:
             current = samsung_execute("GET", "/trackers/geolocation", extra_parameters={"stDids": device_id})
-            raw_locations = []
-            key_pair = next((item for item in current.get("keyPairs", []) if isinstance(item, dict) and item.get("privateKey")), None)
-            private_key = None
-            if key_pair and state.get("samsung_find_pin"):
-                try:
-                    private_key = samsung_private_key_from_pair(key_pair, state.get("samsung_find_pin"))
-                except Exception:
-                    private_key = None
-            for item in current.get("items", []):
-                if str(item.get("deviceId")) == device_id:
-                    raw_locations.extend(item.get("geolocations", []))
-            if samsung_active_reasons(device_id):
-                end_ms = int(time.time() * 1000)
-                retention_seconds = history_storage_policy("samsung", device_id).get("retention_seconds")
-                # Samsung's cloud history endpoint is intentionally bounded;
-                # permanent local retention means "never delete locally", not
-                # an unbounded provider backfill request.
-                provider_window = min(int(retention_seconds or 90 * 86400), 90 * 86400)
-                start_ms = end_ms - provider_window * 1000
-                history = samsung_execute("GET", "/trackerapi", extra_uri=f"/trackers/{urllib.parse.quote(device_id, safe='')}/geolocations?order=asc&isSummary=false&startTime={start_ms}&endTime={end_ms}&limit=500")
-                raw_locations.extend(history.get("geolocations", []))
+        raw_locations = []
+        key_pair = next((item for item in current.get("keyPairs", []) if isinstance(item, dict) and item.get("privateKey")), None)
+        private_key = None
+        if key_pair and state.get("samsung_find_pin"):
+            try:
+                private_key = samsung_private_key_from_pair(key_pair, state.get("samsung_find_pin"))
+            except Exception:
+                private_key = None
+        for item in current.get("items", []):
+            if str(item.get("deviceId")) == device_id:
+                raw_locations.extend(item.get("geolocations", []))
+
         points = []
         pin_required = False
         for raw in raw_locations:
@@ -7182,6 +7191,29 @@ def fetch_from_samsung(device_id, trigger="manual"):
             pin_required = pin_required or encrypted
             if point:
                 points.append(point)
+        if points:
+            current_point = max(points, key=lambda point: point["ts"])
+            previous = state["samsung_locations"].get(device_id) or {}
+            if current_point["ts"] >= float(previous.get("ts", 0) or 0):
+                state["samsung_locations"][device_id] = current_point
+        publish_provider_reply("samsung", device_id, "success" if points else ("pin_required" if pin_required else "empty"))
+
+        if samsung_active_reasons(device_id):
+            end_ms = int(time.time() * 1000)
+            retention_seconds = history_storage_policy("samsung", device_id).get("retention_seconds")
+            provider_window = min(int(retention_seconds or 90 * 86400), 90 * 86400)
+            start_ms = end_ms - provider_window * 1000
+            try:
+                with samsung_fetch_lock:
+                    history = samsung_execute("GET", "/trackerapi", extra_uri=f"/trackers/{urllib.parse.quote(device_id, safe='')}/geolocations?order=asc&isSummary=false&startTime={start_ms}&endTime={end_ms}&limit=500")
+            except Exception as exc:
+                logger.warning("Samsung-Verlaufsabruf für %s fehlgeschlagen: %s", device_id, exc)
+            else:
+                for raw in history.get("geolocations", []):
+                    point, encrypted = normalize_samsung_location(raw, device_id, batch_id, private_key)
+                    pin_required = pin_required or encrypted
+                    if point:
+                        points.append(point)
         unique = {}
         for point in points:
             unique[point["report_id"]] = point
@@ -7191,7 +7223,9 @@ def fetch_from_samsung(device_id, trigger="manual"):
         if points:
             latest = points[-1]
             latest_ts = int(latest["ts"])
-            state["samsung_locations"][device_id] = latest
+            previous = state["samsung_locations"].get(device_id) or {}
+            if latest_ts >= float(previous.get("ts", 0) or 0):
+                state["samsung_locations"][device_id] = latest
             save_json(SAMSUNG_LOCATIONS_FILE, "samsung_locations")
             history_added, recording_added = samsung_store_points(device_id, points)
             add_points_to_samsung_tests(device_id, points)
@@ -8177,6 +8211,15 @@ def delete_geofence_record(gid):
     return fence
 
 
+BARK_ALARM_MODES = {"standard", "critical_once", "critical_repeat"}
+BARK_ALARM_REPEAT_SECONDS = 60
+DEPARTURE_CONFIRMATION_WINDOW = 10 * 60
+
+
+def bark_alarm_mode(value):
+    return value if isinstance(value, str) and value in BARK_ALARM_MODES else "standard"
+
+
 def default_tracker_notification_config():
     return {
         "found": {
@@ -8249,6 +8292,7 @@ def normalize_tracker_notification_config(raw):
             "enabled": bool_from_any(found_raw.get("enabled"), False),
             "mode": mode,
             "armed_ts": int(float(found_raw.get("armed_ts", 0) or 0)),
+            "bark_alarm": bark_alarm_mode(found_raw.get("bark_alarm")),
             "cooldown_seconds": int_range(found_raw.get("cooldown_seconds"), 60, 0, 24 * 60 * 60),
             "min_distance_m": float_range(found_raw.get("min_distance_m"), 0, 0, 50000),
             "last_notified_ts": int(float(found_raw.get("last_notified_ts", 0) or 0)),
@@ -8274,6 +8318,8 @@ def normalize_tracker_notification_config(raw):
             "min_confirmations": int_range(movement_raw.get("min_confirmations"), 2, 1, 8),
             "max_accuracy_m": float_range(movement_raw.get("max_accuracy_m"), 500, 25, 10000),
             "repeat": bool_from_any(movement_raw.get("repeat"), False),
+            "bark_alarm": bark_alarm_mode(movement_raw.get("bark_alarm")),
+            "strict_reports": bool_from_any(movement_raw.get("strict_reports"), False),
         },
         "inactivity": {
             "enabled": bool_from_any(inactivity_raw.get("enabled"), False),
@@ -8311,9 +8357,19 @@ def normalize_channel_url(value, default=""):
 
 def prune_notification_events(events):
     cutoff = time.time() - NOTIFICATION_EVENT_RETENTION_SECONDS
-    clean = [event for event in (events or []) if isinstance(event, dict) and float(event.get("ts", 0) or 0) >= cutoff]
-    clean.sort(key=lambda event: float(event.get("ts", 0) or 0), reverse=True)
-    return clean[:NOTIFICATION_EVENT_LIMIT]
+    active = []
+    recent = []
+    for event in events or []:
+        if not isinstance(event, dict):
+            continue
+        if (event.get("bark_alarm") == "critical_repeat" and event.get("bark_next_ts")
+                and not event.get("acknowledged") and not event.get("bark_alarm_stopped")):
+            active.append(event)
+        elif float(event.get("ts", 0) or 0) >= cutoff:
+            recent.append(event)
+    recent.sort(key=lambda event: float(event.get("ts", 0) or 0), reverse=True)
+    return sorted(active + recent[:max(0, NOTIFICATION_EVENT_LIMIT - len(active))],
+                  key=lambda event: float(event.get("ts", 0) or 0), reverse=True)
 
 
 def sanitize_console_text(value, limit=900):
@@ -9496,6 +9552,22 @@ def bark_server(value):
     return url.rstrip("/")
 
 
+def bark_tracker_url(event):
+    tracker_ref = normalize_tracker_ref(event.get("tracker_ref"))
+    if not tracker_ref:
+        return ""
+    query = {"ref": tracker_ref}
+    if bark_alarm_mode(event.get("bark_alarm")) != "standard":
+        query.update(alarm="1", event=event.get("id") or "")
+    return "rjtracker://tracker?" + urllib.parse.urlencode(query, quote_via=urllib.parse.quote)
+
+
+def bark_alarm_pending(event_id):
+    with notification_lock:
+        return any(row.get("id") == event_id and not row.get("acknowledged")
+                   and not row.get("bark_alarm_stopped") for row in state.get("notification_events", []))
+
+
 def send_bark_channel(config, event):
     """Fan out by default; older public Bark servers do not support device_keys.
 
@@ -9512,11 +9584,19 @@ def send_bark_channel(config, event):
                "group": str(config.get("group") or "RJ Tracker")[:60],
                "level": "timeSensitive" if event.get("severity") == "critical" else "active",
                "isArchive": "1"}
+    critical = bark_alarm_mode(event.get("bark_alarm")) != "standard"
+    if critical:
+        payload["level"] = "critical"
+    url = bark_tracker_url(event)
+    if url:
+        payload["url"] = url
     completed = event.setdefault("bark_accepted", [])
     def fingerprint(key):
         return hashlib.sha256((server + "|" + key).encode()).hexdigest()[:24]
     pending = [key for key in keys if fingerprint(key) not in completed]
     def send(values, batch):
+        if critical and not bark_alarm_pending(event.get("id")):
+            return
         request_body = {**payload, ("device_keys" if batch else "device_key"): values if batch else values[0]}
         try:
             status, body = http_request(server + "/push", payload=request_body)
@@ -9530,7 +9610,7 @@ def send_bark_channel(config, event):
         # Persist successful recipients before attempting the next one.
         with notification_lock:
             stored = next((row for row in state.get("notification_events", []) if row.get("id") == event.get("id")), None)
-            if stored is not None:
+            if stored is not None and not event.get("bark_reminder"):
                 stored["bark_accepted"] = list(dict.fromkeys(completed))
                 atomic_write_json(NOTIFICATION_EVENTS_FILE, state["notification_events"])
     if pending and config.get("batch"):
@@ -9544,7 +9624,7 @@ def send_bark_channel(config, event):
                 errors += 1
         if errors:
             raise RuntimeError(f"Bark: {len(completed)} angenommen, {errors} Empfänger fehlgeschlagen.")
-    return 200, f"Bark hat die Nachricht für {len(keys)} Empfänger angenommen."
+    return 200, f"Bark hat die Nachricht für {len(completed)} Empfänger angenommen."
 
 
 @app.route("/api/mobile/v1/bark", methods=["GET", "PUT", "DELETE"])
@@ -9807,17 +9887,82 @@ def deliver_notification_event(event):
             )
 
 
+def alarm_delivery_fields(rule, channels, event_type, tracker_ref):
+    mode = rule.get("bark_alarm", "standard")
+    if mode == "critical_repeat" and any(
+        row.get("tracker_ref") == tracker_ref and row.get("type") == event_type
+        and row.get("bark_alarm") == mode and not row.get("acknowledged")
+        and not row.get("bark_alarm_stopped")
+        for row in state.get("notification_events", [])
+    ):
+        # A second location report must not create a second repeating alarm.
+        mode = "standard"
+    if mode == "standard":
+        return {"requested_channels": channels}
+    return {
+        "severity": "critical", "requested_channels": ["bark"], "bark_only": True,
+        "bark_alarm": mode,
+        "bark_next_ts": int(time.time()) + BARK_ALARM_REPEAT_SECONDS if mode == "critical_repeat" else 0,
+    }
+
+
+def queue_bark_alarm_reminders(now=None):
+    now = int(time.time() if now is None else now)
+    with notification_lock:
+        changed = False
+        for event in state.get("notification_events", []):
+            due = event.get("bark_next_ts") or 0
+            if (event.get("bark_alarm") != "critical_repeat" or event.get("acknowledged")
+                    or event.get("bark_alarm_stopped") or not 0 < due <= now):
+                continue
+            next_ts = now + BARK_ALARM_REPEAT_SECONDS
+            try:
+                notification_queue.put_nowait((current_tenant_id(), event["id"], next_ts))
+            except queue.Full:
+                break
+            event["bark_next_ts"] = next_ts
+            changed = True
+        if changed:
+            atomic_write_json(NOTIFICATION_EVENTS_FILE, state["notification_events"])
+
+
+def stop_tracker_bark_alarms(refs, event_type=None):
+    with notification_lock:
+        count = 0
+        for event in state.get("notification_events", []):
+            if (event.get("tracker_ref") in refs and event.get("bark_alarm") in {"critical_once", "critical_repeat"}
+                    and not event.get("acknowledged") and not event.get("bark_alarm_stopped")
+                    and (event_type is None or event.get("type") == event_type)):
+                event["bark_alarm_stopped"] = True
+                event["bark_next_ts"] = 0
+                count += 1
+        if count:
+            atomic_write_json(NOTIFICATION_EVENTS_FILE, state["notification_events"])
+        return count
+
+
+def acknowledge_notification_event(event, acknowledged):
+    event["acknowledged"] = acknowledged
+    if acknowledged and event.get("bark_alarm") in {"critical_once", "critical_repeat"}:
+        event["bark_alarm_stopped"] = True
+        event["bark_next_ts"] = 0
+
+
 def notification_worker():
     while True:
         queued = notification_queue.get()
-        tenant_id, event_id = queued if isinstance(queued, tuple) and len(queued) == 2 else ("main", queued)
+        tenant_id, event_id, *reminder = queued if isinstance(queued, tuple) else ("main", queued)
         try:
             with tenant_context(tenant_id):
                 ensure_tenant_state(tenant_id, start_workers=False)
                 with notification_lock:
                     event = next((dict(item) for item in state.get("notification_events", []) if item.get("id") == event_id), None)
-                if event:
-                    deliver_notification_event(event)
+                if event and reminder:
+                    if event.get("bark_next_ts") == reminder[0] and bark_alarm_pending(event_id):
+                        deliver_notification_event({**event, "bark_reminder": True, "bark_accepted": []})
+                elif event:
+                    if bark_alarm_mode(event.get("bark_alarm")) == "standard" or bark_alarm_pending(event_id):
+                        deliver_notification_event(event)
                 else:
                     append_notification_console(
                         "warning", "queue", "Eingereihtes Ereignis wurde nicht mehr gefunden",
@@ -9891,6 +10036,41 @@ def departure_radius_candidate(runtime, distance_m, radius, hysteresis_m):
     return "inside" if distance_m <= radius else "outside"
 
 
+def confirmed_departure(movement, runtime, points):
+    first_exit = None
+    for point in points:
+        ts = point["ts"]
+        report_id = str(point.get("report_id") or point_identity(point))
+        last_ts = float(runtime.get("last_report_ts", runtime.get("baseline_report_ts", 0)) or 0)
+        if ts <= last_ts or ts < float(movement.get("armed_ts", 0)) - 300 or ts > time.time() + 300:
+            continue
+        if report_id == runtime.get("last_report_id") or report_id == runtime.get("baseline_report_id"):
+            continue
+        accuracy = point.get("acc", 0)
+        if movement["strict_reports"] and (accuracy <= 0 or accuracy > movement["max_accuracy_m"]
+                                          or time.time() - ts > DEPARTURE_CONFIRMATION_WINDOW):
+            runtime.update(pending=None, pending_count=0)
+            continue
+        if accuracy > movement["max_accuracy_m"]:
+            continue
+        distance = haversine_distance(movement["anchor_lat"], movement["anchor_lon"], point["lat"], point["lon"])
+        candidate = departure_radius_candidate(runtime, distance, movement["radius"], movement["hysteresis_m"])
+        if movement["strict_reports"]:
+            if last_ts and ts - last_ts > DEPARTURE_CONFIRMATION_WINDOW:
+                runtime.update(pending=None, pending_count=0)
+            # Count outside only when the entire reported accuracy circle clears the radius.
+            if runtime.get("stable") != "outside" and distance - accuracy < movement["radius"]:
+                candidate = "inside"
+            elif runtime.get("stable") == "outside" and distance + accuracy > max(5, movement["radius"] - movement["hysteresis_m"]):
+                candidate = "outside"
+        transition = transition_candidate(runtime, candidate, movement["min_confirmations"], report_id, ts)
+        if transition == ("inside", "outside") and first_exit is None:
+            first_exit = point, distance, report_id
+            if not movement["repeat"]:
+                break
+    return first_exit
+
+
 def process_tracker_location_reports(provider, tracker_id, points, trigger="sync"):
     tracker_ref = tracker_ref_for(provider, tracker_id)
     if not tracker_ref:
@@ -9919,6 +10099,8 @@ def process_tracker_location_reports(provider, tracker_id, points, trigger="sync
         ]
         if not new_points:
             return []
+        new_points = list({str(point.get("report_id") or point_identity(point)): point for point in new_points}.values())
+        new_points.sort(key=lambda point: point["ts"])
         point = new_points[-1]
         report_ts = float(point.get("ts", 0) or 0)
         report_id = str(point.get("report_id") or point_identity(point))
@@ -9949,6 +10131,7 @@ def process_tracker_location_reports(provider, tracker_id, points, trigger="sync
             if cooldown_ok and distance_ok:
                 found["last_notified_ts"] = int(time.time())
                 found["last_notified_location"] = event_location_payload(point)
+                settings_changed = True
                 if found.get("mode") == "once":
                     found["enabled"] = False
                     # A Fusion profile represents one physical object. If its
@@ -9975,17 +10158,15 @@ def process_tracker_location_reports(provider, tracker_id, points, trigger="sync
                     "location": event_location_payload(point),
                     "report_id": report_id,
                     "event_key": f"found:{tracker_ref}:{report_id}",
-                    "requested_channels": config.get("channels", []),
+                    **alarm_delivery_fields(found, config.get("channels", []), "location_found", tracker_ref),
                 })
 
         movement = config["movement"]
-        if movement.get("enabled") and float(point.get("acc", 0) or 0) <= movement.get("max_accuracy_m", 500):
-            distance = haversine_distance(movement["anchor_lat"], movement["anchor_lon"], point["lat"], point["lon"])
-            movement_runtime = runtime.setdefault("movement", {})
-            candidate = departure_radius_candidate(movement_runtime, distance, movement["radius"], movement["hysteresis_m"])
-            transition = transition_candidate(movement_runtime, candidate, movement["min_confirmations"], report_id, report_ts)
-            if transition and transition[0] is not None and transition[1] == "outside":
-                exit_location = event_location_payload(point)
+        if movement.get("enabled"):
+            departure = confirmed_departure(movement, runtime.setdefault("movement", {}), new_points)
+            if departure:
+                exit_point, distance, exit_report_id = departure
+                exit_location = event_location_payload(exit_point)
                 movement["last_notified_ts"] = int(time.time())
                 movement["last_exit_location"] = exit_location
                 settings_changed = True
@@ -10022,8 +10203,8 @@ def process_tracker_location_reports(provider, tracker_id, points, trigger="sync
                     "location": exit_location,
                     "distance_m": round(distance, 1),
                     "confirmed_reports": movement["min_confirmations"],
-                    "event_key": f"movement-exit:{tracker_ref}:{report_id}",
-                    "requested_channels": config.get("channels", []),
+                    "event_key": f"movement-exit:{tracker_ref}:{exit_report_id}",
+                    **alarm_delivery_fields(movement, config.get("channels", []), "movement_exit", tracker_ref),
                 })
 
         for gid, fence in state.get("geofences", {}).items():
@@ -10091,6 +10272,7 @@ def process_tracker_location_reports(provider, tracker_id, points, trigger="sync
         save_json(NOTIFICATION_RUNTIME_FILE, "notification_runtime")
         if settings_changed:
             save_json(NOTIFICATION_SETTINGS_FILE, "notification_settings")
+        created = [append_notification_event(event, dispatch=True, dedupe_seconds=5) for event in events]
 
     comparison_hook = globals().get("comparison_capture_reports")
     if callable(comparison_hook):
@@ -10104,7 +10286,6 @@ def process_tracker_location_reports(provider, tracker_id, points, trigger="sync
             guest_hook(provider, tracker_id, point)
         except Exception as exc:
             logger.warning("Gast-Push konnte nicht ausgewertet werden: %s", exc)
-    created = [append_notification_event(event, dispatch=True, dedupe_seconds=5) for event in events]
     return created
 
 
@@ -10463,6 +10644,15 @@ def polling_attempt_begin(provider, tracker_id, trigger, reasons=None):
     return now_ts
 
 
+def publish_provider_reply(provider, tracker_id, status, first_only=False):
+    """Expose an Apple/Samsung reply while history and notifications are processed."""
+    with polling_runtime_lock:
+        tracker = polling_runtime_provider(provider)["trackers"].setdefault(tracker_id, {})
+        if first_only and float(tracker.get("mobile_reply_ts", 0) or 0) >= float(tracker.get("last_start_ts", 0) or 0):
+            return
+        tracker.update(mobile_reply_ts=time.time(), mobile_reply_status=status)
+
+
 def polling_attempt_finish(provider, tracker_id, trigger, status, reports=0, new_points=0, next_due=0, detail=""):
     """Record and visibly log the result and the next real due time."""
     now_ts = time.time()
@@ -10474,14 +10664,18 @@ def polling_attempt_finish(provider, tracker_id, trigger, status, reports=0, new
     with polling_runtime_lock:
         row = polling_runtime_provider(provider)
         tracker = row["trackers"].setdefault(tracker_id, {})
-        started = float(tracker.get("last_start_ts", now_ts) or now_ts)
+        started = float(tracker.get("last_start_ts", 0) or 0)
+        if not tracker.get("mobile_reply_ts") or tracker["mobile_reply_ts"] < started or not started:
+            tracker.update(mobile_reply_ts=now_ts, mobile_reply_status=status)
+        elif tracker.get("mobile_reply_status") == "responded":
+            tracker["mobile_reply_status"] = status
         tracker.update({
             "last_finish_ts": now_ts,
             "last_completion_status": str(status or "unknown")[:40],
             "last_status": str(status or "unknown")[:40],
             "last_reports": max(0, int(reports or 0)),
             "last_new_points": max(0, int(new_points or 0)),
-            "last_duration_ms": max(0, int((now_ts - started) * 1000)),
+            "last_duration_ms": max(0, int((now_ts - (started or now_ts)) * 1000)),
             "next_fetch_ts": int(due),
             "last_detail": str(detail or "")[:500],
         })
@@ -11830,6 +12024,9 @@ def needs_full_report_history(name):
 
 def process_report_results(named_accessories, results, mode):
     if not results:
+        for name, accessory in named_accessories:
+            if state.get("accessories", {}).get(name) is accessory:
+                publish_provider_reply("apple", name, "empty")
         return 0, 0
     if not isinstance(results, dict):
         results = {named_accessories[0][1]: results}
@@ -11840,6 +12037,7 @@ def process_report_results(named_accessories, results, mode):
             continue
         raw = results.get(accessory)
         if raw is None:
+            publish_provider_reply("apple", name, "empty")
             register_report_sync(name, 0, 0, 0, 0, 0, mode)
             continue
         reports = list(raw) if isinstance(raw, (list, tuple, set)) else [raw]
@@ -11849,10 +12047,12 @@ def process_report_results(named_accessories, results, mode):
         batch_id = "a-" + uuid.uuid4().hex
         report_points = [{**point, "batch_id": batch_id} for _, point in valid]
         if not valid:
+            publish_provider_reply("apple", name, "empty")
             register_report_sync(name, 0, 0, 0, 0, 0, mode)
             continue
         latest = valid[-1][0]
         latest_ts = update_location_cache(name, latest)
+        publish_provider_reply("apple", name, "success")
         history_added = add_persistent_history_points(name, report_points, persist=False)
         recording_added = add_recording_points(name, report_points, now_ts)
         shared_added = add_shared_history_points(name, report_points)
@@ -11953,15 +12153,19 @@ def fetch_from_apple(device_names, trigger="manual"):
                 failed = False
                 mode = "history" if needs_full_report_history(name) else "latest_only"
                 try:
-                    if mode == "history":
-                        try:
-                            result = state["account"].fetch_location_history([accessory])
-                        except (AttributeError, NotImplementedError) as exc:
-                            logger.warning("fetch_location_history nicht verfügbar (%s); verwende nur den neuesten Standort.", exc)
-                            mode = "latest_fallback"
+                    reply_context = apple_reply_tracker.set(name)
+                    try:
+                        if mode == "history":
+                            try:
+                                result = state["account"].fetch_location_history([accessory])
+                            except (AttributeError, NotImplementedError) as exc:
+                                logger.warning("fetch_location_history nicht verfügbar (%s); verwende nur den neuesten Standort.", exc)
+                                mode = "latest_fallback"
+                                result = state["account"].fetch_location([accessory])
+                        else:
                             result = state["account"].fetch_location([accessory])
-                    else:
-                        result = state["account"].fetch_location([accessory])
+                    finally:
+                        apple_reply_tracker.reset(reply_context)
                     received, stored = process_report_results([(name, accessory)], result, mode)
                     received_total += received
                     stored_total += stored
@@ -12065,6 +12269,7 @@ def background_poller():
             logger.warning("Recovery-Guard-Watchdog fehlgeschlagen: %s", exc)
         try:
             inactivity_watchdog()
+            queue_bark_alarm_reminders()
         except Exception as exc:
             logger.warning("Ortungspausen-Watchdog fehlgeschlagen: %s", exc)
         time.sleep(POLLING_WORKER_TICK_SECONDS)
@@ -12242,7 +12447,7 @@ def tracker_lab_active_job():
     return None
 
 APP_NAME = "Universal Tag Studio"
-APP_VERSION = "21.0.0 API EDITION"
+APP_VERSION = "21.2.0 API EDITION"
 
 
 OPTIMIZED_ROUTE_DEFAULT_POINTS = int(os.environ.get("ULTRA_TRACKER_ROUTE_MAX_DISPLAY_POINTS", "4200"))
@@ -13730,9 +13935,11 @@ def smart_status_text(provider, location, battery_label="", fusion_sources=None)
     return text
 
 
-def generic_tracker_models(fusion_cache=None):
+def generic_tracker_models(fusion_cache=None, exact_ref=None):
     models = []
-    for name in state.get("accessories", {}):
+    for name in tuple(state.get("accessories", {})):
+        if exact_ref is not None and exact_ref != f"apple:{name}":
+            continue
         loc = location_payload(state.get("locations", {}).get(name)) if state.get("locations", {}).get(name) else None
         if loc:
             cached = address_from_cached(loc.get("lat"), loc.get("lon")); loc = {**loc, **({"address": cached} if cached else {})}
@@ -13743,7 +13950,9 @@ def generic_tracker_models(fusion_cache=None):
                        "battery": battery, "preferences": prefs, "favorite": prefs["favorite"], "groups": prefs["groups"], "archived": prefs["archived"], "hidden": prefs["hidden"],
                        "quality": location_quality_score(loc, "apple"), "smart_status": smart_status_text("apple", loc, battery), "capabilities": PROVIDER_CAPABILITIES["apple"],
                        "shared": tracker_has_active_share("apple", name), "history_active": bool(history_direct_policy("apple", name).get("enabled")), "history_policy": history_policy_public("apple", name), "recovery": recovery_public_summary(name)})
-    for device_id, device_row in state.get("google_devices", {}).items():
+    for device_id, device_row in tuple(state.get("google_devices", {}).items()):
+        if exact_ref is not None and exact_ref != f"google:{device_id}":
+            continue
         loc = google_public_location(state.get("google_locations", {}).get(device_id))
         device_battery = device_row.get("battery_info") if isinstance(device_row.get("battery_info"), dict) else None
         if loc and device_battery and (not loc.get("battery") or loc.get("battery") == "Nicht verfügbar"):
@@ -13758,7 +13967,9 @@ def generic_tracker_models(fusion_cache=None):
                        "battery": google_battery, "preferences": prefs, "favorite": prefs["favorite"], "groups": prefs["groups"], "archived": prefs["archived"], "hidden": prefs["hidden"],
                        "quality": location_quality_score(loc, "google"), "smart_status": smart_status_text("google", loc, google_battery), "capabilities": PROVIDER_CAPABILITIES["google"],
                        "shared": False, "history_active": bool(history_direct_policy("google", device_id).get("enabled")), "history_policy": history_policy_public("google", device_id)})
-    for device_id, device_row in state.get("samsung_devices", {}).items():
+    for device_id, device_row in tuple(state.get("samsung_devices", {}).items()):
+        if exact_ref is not None and exact_ref != f"samsung:{device_id}":
+            continue
         loc = samsung_public_location(state.get("samsung_locations", {}).get(device_id))
         prefs = tracker_preferences("samsung", device_id)
         details = tracker_details_public("samsung", device_id)
@@ -13768,7 +13979,9 @@ def generic_tracker_models(fusion_cache=None):
                        "quality": location_quality_score(loc, "samsung"), "smart_status": smart_status_text("samsung", loc, battery), "capabilities": PROVIDER_CAPABILITIES["samsung"],
                        "shared": False, "history_active": bool(history_direct_policy("samsung", device_id).get("enabled")), "history_policy": history_policy_public("samsung", device_id)})
     fusion_cache = fusion_cache if isinstance(fusion_cache, dict) else {}
-    for apple_name, raw in state.get("fusion_profiles", {}).items():
+    for apple_name, raw in tuple(state.get("fusion_profiles", {}).items()):
+        if exact_ref is not None and exact_ref != f"fusion:{apple_name}":
+            continue
         profile = fusion_profile_public(apple_name, raw, fusion_cache.get(apple_name))
         if not profile: continue
         prefs = tracker_preferences("fusion", apple_name, raw)
@@ -16049,11 +16262,16 @@ def mcp_tracker_candidates(reference, limit=8, models=None):
     return ranked[:max(1, min(25, int(limit or 8)))]
 
 
-def mcp_resolve_tracker(reference):
+def mcp_resolve_tracker(reference, models=None):
     query = str(reference or "").strip()
     if not query:
         raise MCPToolError("Bitte Tracker-Referenz oder Namen angeben.")
-    models = mcp_all_trackers()
+    if models is None:
+        if ":" in query and normalize_tracker_ref(query) == query:
+            exact = generic_tracker_models(exact_ref=query)
+            if exact:
+                return exact[0]
+        models = mcp_all_trackers()
     folded = query.casefold()
     stable = [row for row in models if folded == str(row.get("ref") or "").casefold()]
     if len(stable) == 1:
@@ -18431,20 +18649,59 @@ def mcp_require_action(grant, scope, arguments):
         raise MCPToolError("Diese Aktion benötigt confirmed=true nach ausdrücklicher Bestätigung durch den Besitzer.", "confirmation_required")
 
 
+# Mobile/manual requests share bounded workers across accounts. The provider
+# fetch functions still coalesce with active automatic polling.
+MANUAL_LOCATE_WORKERS = {"apple": 1, "google": 2, "samsung": 2}
+manual_locate_queues = {provider: queue.Queue(maxsize=160) for provider in MANUAL_LOCATE_WORKERS}
+manual_locate_lock = threading.Lock()
+manual_locate_pending = {}
+manual_locate_started = set()
+
+
+def manual_locate_worker(provider):
+    jobs = manual_locate_queues[provider]
+    while True:
+        tenant, tracker_id, trigger = jobs.get()
+        try:
+            with tenant_context(tenant):
+                if provider == "apple":
+                    fetch_from_apple([tracker_id], trigger)
+                elif provider == "google":
+                    fetch_from_google(tracker_id, trigger)
+                else:
+                    fetch_from_samsung(tracker_id, trigger)
+        except Exception:
+            logger.exception("Manueller Trackerabruf fehlgeschlagen (%s)", provider)
+        finally:
+            with manual_locate_lock:
+                manual_locate_pending.pop((tenant, provider, tracker_id), None)
+            jobs.task_done()
+
+
+def schedule_manual_locate(ref, trigger):
+    provider, tracker_id = tracker_ref_parts(ref)
+    if provider not in manual_locate_queues or (provider == "apple" and not state.get("account")):
+        return False
+    key = current_tenant_id(), provider, tracker_id
+    with manual_locate_lock:
+        if key in manual_locate_pending or tracker_id in state.get(provider + "_inflight", ()):
+            return True
+        if provider not in manual_locate_started:
+            for index in range(MANUAL_LOCATE_WORKERS[provider]):
+                threading.Thread(target=manual_locate_worker, args=(provider,), daemon=True,
+                                 name=f"manual-locate-{provider}-{index}").start()
+            manual_locate_started.add(provider)
+        try:
+            manual_locate_queues[provider].put_nowait((key[0], tracker_id, trigger))
+        except queue.Full:
+            return False
+        manual_locate_pending[key] = time.time()
+        return True
+
+
 def mcp_trigger_locate(model):
-    provider, tracker_id = model.get("provider"), model.get("id")
-    if provider == "apple":
-        threading.Thread(target=fetch_from_apple, args=([tracker_id], "mcp"), daemon=True).start()
-        return ["apple"]
-    if provider == "google":
-        state.setdefault("google_next_fetch", {})[tracker_id] = time.time()
-        threading.Thread(target=fetch_from_google, args=(tracker_id, "mcp"), daemon=True).start()
-        return ["google"]
-    if provider == "samsung":
-        state.setdefault("samsung_next_fetch", {})[tracker_id] = time.time()
-        threading.Thread(target=fetch_from_samsung, args=(tracker_id, "mcp"), daemon=True).start()
-        return ["samsung"]
-    return trigger_fusion_profile_round(tracker_id, "mcp")
+    return list(dict.fromkeys(ref.split(":", 1)[0] for ref in mcp_notification_target_refs(model)
+                              if schedule_manual_locate(ref, "mcp")))
 
 
 def mcp_refresh_summary_text(refresh):
@@ -18480,6 +18737,7 @@ def mcp_found_notification_public(tracker_ref, config=None):
         "tracker_name": tracker_display_label(tracker_ref),
         "enabled": bool(found.get("enabled")),
         "mode": str(found.get("mode") or "once"),
+        "bark_alarm": found.get("bark_alarm", "standard"),
         "armed_ts": int(found.get("armed_ts", 0) or 0),
         "armed_local": local_datetime(found.get("armed_ts")).isoformat() if found.get("armed_ts") else None,
         "last_notified_ts": int(found.get("last_notified_ts", 0) or 0),
@@ -18521,7 +18779,7 @@ def mcp_found_notifications_status(active_only=False):
     }
 
 
-def mcp_set_found_notification(model, enabled=True, mode="once", channels=None):
+def mcp_set_found_notification(model, enabled=True, mode="once", channels=None, bark_alarm=None, compact=False):
     target_refs = [ref for ref in mcp_notification_target_refs(model) if normalize_tracker_ref(ref)]
     if not target_refs:
         raise MCPToolError("Für diesen Tracker wurde kein unterstütztes Quellnetz gefunden.", "not_found")
@@ -18537,6 +18795,8 @@ def mcp_set_found_notification(model, enabled=True, mode="once", channels=None):
             current = normalize_tracker_notification_config(tracker_configs.get(tracker_ref, {}))
             current["found"]["enabled"] = bool(enabled)
             current["found"]["mode"] = mode
+            if bark_alarm is not None:
+                current["found"]["bark_alarm"] = bark_alarm_mode(bark_alarm)
             if enabled:
                 current["found"]["armed_ts"] = now_ts
                 current["found"]["last_notified_ts"] = 0
@@ -18556,6 +18816,14 @@ def mcp_set_found_notification(model, enabled=True, mode="once", channels=None):
             updated.append(mcp_found_notification_public(tracker_ref, tracker_configs[tracker_ref]))
         save_json(NOTIFICATION_SETTINGS_FILE, "notification_settings")
         save_json(NOTIFICATION_RUNTIME_FILE, "notification_runtime")
+        if not enabled:
+            stop_tracker_bark_alarms(target_refs, "location_found")
+
+    if compact:
+        if enabled:
+            for ref in target_refs:
+                schedule_manual_locate(ref, "mobile_found_armed")
+        return {"notification": {"enabled": bool(enabled), "sources": updated}}
 
     if enabled:
         apple_ids, google_ids, samsung_ids = [], [], []
@@ -18663,6 +18931,7 @@ def mcp_movement_notification_public(tracker_ref, config=None):
         "tracker_name": tracker_display_label(tracker_ref),
         "enabled": bool(movement.get("enabled")),
         "mode": "always" if movement.get("repeat") else "once",
+        "bark_alarm": movement.get("bark_alarm", "standard"),
         "radius_m": round(float(movement.get("radius", 150) or 150), 1),
         "exit_threshold_m": round(float(movement.get("radius", 150) or 150), 1),
         "reentry_threshold_m": round(max(5, float(movement.get("radius", 150) or 150) - float(movement.get("hysteresis_m", 45) or 45)), 1),
@@ -18729,7 +18998,7 @@ def mcp_validate_alert_channels(arguments, default_webpush=False):
     return list(dict.fromkeys(values))
 
 
-def mcp_set_departure_notification(model, arguments):
+def mcp_set_departure_notification(model, arguments, compact=False):
     enabled = bool_from_any(arguments.get("enabled"), False)
     target_refs = [ref for ref in mcp_notification_target_refs(model) if normalize_tracker_ref(ref)]
     if not target_refs:
@@ -18748,9 +19017,10 @@ def mcp_set_departure_notification(model, arguments):
     anchor_point = None
 
     if enabled:
-        live_arguments = {**arguments, "refresh": bool_from_any(arguments.get("refresh"), True)}
-        current_models, refresh, address_lookup = mcp_live_models([model], live_arguments, "mcp_departure_anchor")
-        current_model = current_models[0] if current_models else model
+        if not compact:
+            live_arguments = {**arguments, "refresh": bool_from_any(arguments.get("refresh"), True)}
+            current_models, refresh, address_lookup = mcp_live_models([model], live_arguments, "mcp_departure_anchor")
+            current_model = current_models[0] if current_models else model
         anchor_point = normalize_point(current_model.get("location")) if isinstance(current_model.get("location"), dict) else None
         if not anchor_point:
             raise MCPToolError(
@@ -18790,6 +19060,8 @@ def mcp_set_departure_notification(model, arguments):
                     "hysteresis_m": hysteresis,
                     "min_confirmations": confirmations,
                     "max_accuracy_m": max_accuracy,
+                    "bark_alarm": bark_alarm_mode(arguments.get("bark_alarm", movement["bark_alarm"])),
+                    "strict_reports": bool_from_any(arguments.get("strict_reports"), movement["strict_reports"]),
                 })
             if channels is not None:
                 current["channels"] = channels
@@ -18821,6 +19093,14 @@ def mcp_set_departure_notification(model, arguments):
             updated.append(mcp_movement_notification_public(tracker_ref, tracker_configs[tracker_ref]))
         save_json(NOTIFICATION_SETTINGS_FILE, "notification_settings")
         save_json(NOTIFICATION_RUNTIME_FILE, "notification_runtime")
+        if not enabled:
+            stop_tracker_bark_alarms(target_refs, "movement_exit")
+
+    if compact:
+        if enabled:
+            for ref in target_refs:
+                schedule_manual_locate(ref, "mobile_departure_armed")
+        return {"notification": {"enabled": enabled, "sources": updated}}
 
     if enabled:
         apple_ids, google_ids, samsung_ids = [], [], []
@@ -24759,7 +25039,8 @@ def alert_event_route(event_id):
         return jsonify({"status": "ok", "deleted": event_id})
     data = request.json or {}
     if "acknowledged" in data:
-        target["acknowledged"] = bool_from_any(data.get("acknowledged"), False)
+        with notification_lock:
+            acknowledge_notification_event(target, bool_from_any(data.get("acknowledged"), False))
     if "note" in data:
         target["note"] = str(data.get("note") or "")[:1000]
     if "title" in data and str(data.get("title") or "").strip():
@@ -27616,34 +27897,74 @@ def mobile_tracker_refresh_state(model):
         return None
     with polling_runtime_lock:
         runtime = state.get("polling_runtime", {}).get("providers", {}).get(provider, {}).get("trackers", {}).get(tracker_id, {})
-        return {"completion": float(runtime.get("last_finish_ts", 0) or 0),
-                "status": str(runtime.get("last_completion_status") or runtime.get("last_status") or "idle"),
-                "available": bool(state.get("account")) if provider == "apple" else True}
+        completion = float(runtime.get("mobile_reply_ts") or runtime.get("last_finish_ts") or 0)
+        inflight = tracker_id in state.get(provider + "_inflight", ())
+        pending_since = manual_locate_pending.get((current_tenant_id(), provider, tracker_id))
+        reply_ready = ((inflight and runtime.get("last_status") == "running"
+                        and completion >= float(runtime.get("last_start_ts") or 0))
+                       or (pending_since is not None and completion >= pending_since))
+        return {"completion": completion,
+                "status": str(runtime.get("mobile_reply_status") or runtime.get("last_completion_status") or "idle"),
+                "available": bool(state.get("account")) if provider == "apple" else True,
+                "reply_ready": completion > 0 and reply_ready}
+
+
+@app.route(f"{MOBILE_API_PREFIX}/tracker-refresh", methods=["GET"])
+def mobile_tracker_refresh_api():
+    ref = request.args.get("ref", "")
+    if ":" not in ref or normalize_tracker_ref(ref) != ref:
+        return mobile_json_error("Eine genaue Tracker-Referenz ist erforderlich.")
+    provider, tracker_id = tracker_ref_parts(ref)
+    catalog = {"apple": "accessories", "google": "google_devices", "samsung": "samsung_devices"}.get(provider)
+    if not catalog or tracker_id not in state.get(catalog, {}):
+        return mobile_json_error("Tracker wurde nicht gefunden.", 404, "not_found")
+    refresh = mobile_tracker_refresh_state({"provider": provider, "id": tracker_id})
+    after = float_range(request.args.get("after"), 0, 0, 10**12)
+    include_location = refresh["completion"] > after or bool_from_any(request.args.get("reuse"), False)
+    location = mcp_clean_location(tracker_current_location(ref)) if include_location else None
+    return jsonify(status="ok", refresh=refresh, location=location)
 
 
 @app.route(f"{MOBILE_API_PREFIX}/locate", methods=["POST"])
 def mobile_locate_api():
     data = request.get_json(silent=True) or {}
     references = data.get("trackers")
+    catalog = None
     if bool_from_any(data.get("all"), False):
-        references = [model.get("ref") for model in mcp_all_trackers() if not model.get("archived") and not model.get("hidden")]
+        catalog = mcp_all_trackers()
+        references = [model.get("ref") for model in catalog if not model.get("archived") and not model.get("hidden")]
     if isinstance(data.get("tracker"), str):
         references = [data.get("tracker")]
     if not isinstance(references, list) or not references:
         return mobile_json_error("Bitte mindestens einen Tracker angeben.")
+    if catalog is None and len(references) > 1:
+        catalog = mcp_all_trackers()
+    exact = {model.get("ref"): model for model in catalog or []}
     scheduled, seen = [], set()
     try:
         for reference in references[:80]:
-            model = mcp_resolve_tracker(reference)
+            if catalog is None:
+                model = mcp_resolve_tracker(reference)
+            else:
+                model = exact.get(str(reference)) or mcp_resolve_tracker(reference, catalog)
             ref = str(model.get("ref") or "")
             if not ref or ref in seen:
                 continue
             seen.add(ref)
             refresh = mobile_tracker_refresh_state(model)
             if refresh is not None and not refresh["available"]:
+                if len(references) > 1:
+                    continue
                 raise MCPToolError("Apple ist nicht angemeldet. Bitte die Apple-Verbindung prüfen.", "provider_unavailable")
-            scheduled.append({"ref": ref, "name": model.get("name"), "refresh": refresh, "networks": mcp_trigger_locate(model)})
-        return jsonify({"status": "scheduled", "trackers": scheduled, "count": len(scheduled), "check_again_after_seconds": 1})
+            reuse = bool(refresh and refresh["reply_ready"])
+            networks = [model["provider"]] if reuse else mcp_trigger_locate(model)
+            if networks:
+                scheduled.append({"ref": ref, "name": model.get("name"), "refresh": refresh,
+                                  "networks": networks, "reused_reply": reuse})
+        if not scheduled:
+            return mobile_json_error("Ortung ist gerade nicht verfügbar. Bitte später erneut versuchen.", 429, "locate_busy")
+        return jsonify({"status": "scheduled", "trackers": scheduled, "count": len(scheduled),
+                        "check_again_after_seconds": 1, "lightweight_refresh": True})
     except MCPToolError as exc:
         return mobile_json_error(str(exc), 400, exc.code)
 
@@ -27850,6 +28171,11 @@ def mobile_action_api():
     data = request.get_json(silent=True) or {}
     action = str(data.get("action") or "").strip().lower()
     try:
+        if (action in {"set_found_notification", "set_departure_notification"}
+                and bool_from_any(data.get("enabled"), False)
+                and bark_alarm_mode(data.get("bark_alarm")) != "standard"
+                and not notification_channel_names(["bark"])):
+            raise MCPToolError("Bitte Bark zuerst unter Einstellungen aktivieren und einen Empfänger speichern.", "bark_not_configured")
         if action == "locate":
             model = mcp_resolve_tracker(data.get("tracker"))
             return jsonify({"status": "scheduled", "tracker": mcp_tracker_row(model), "networks": mcp_trigger_locate(model)})
@@ -27860,12 +28186,29 @@ def mobile_action_api():
                 bool_from_any(data.get("enabled"), False),
                 str(data.get("mode") or "once"),
                 data.get("channels") if isinstance(data.get("channels"), list) else None,
+                data.get("bark_alarm"),
+                compact=bool_from_any(data.get("compact"), False),
             )
             return jsonify({"status": "ok", **result})
         if action == "set_departure_notification":
             model = mcp_resolve_tracker(data.get("tracker"))
-            result = mcp_set_departure_notification(model, data)
+            result = mcp_set_departure_notification(model, data, compact=bool_from_any(data.get("compact"), False))
             return jsonify({"status": "ok", **result})
+        if action == "stop_tracker_bark_alarms":
+            model = mcp_resolve_tracker(data.get("tracker"))
+            return jsonify(status="ok", stopped=stop_tracker_bark_alarms(mcp_notification_target_refs(model)))
+        if action == "confirm_tracker_bark_alarm":
+            refs = mcp_notification_target_refs(mcp_resolve_tracker(data.get("tracker")))
+            event_id = str(data.get("event_id") or "")
+            with notification_lock:
+                event = next((item for item in state.get("notification_events", [])
+                              if item.get("id") == event_id and item.get("tracker_ref") in refs
+                              and bark_alarm_mode(item.get("bark_alarm")) != "standard"), None)
+                if not event:
+                    raise MCPToolError("Bark-Alarm für diesen Tracker wurde nicht gefunden.", "not_found")
+                acknowledge_notification_event(event, True)
+                atomic_write_json(NOTIFICATION_EVENTS_FILE, state["notification_events"])
+            return jsonify(status="ok", event=event)
         if action == "set_history":
             model = mcp_resolve_tracker(data.get("tracker"))
             result = mcp_set_tracker_history(model, bool_from_any(data.get("enabled"), True), data.get("retention"), data.get("custom_days"))
@@ -27913,7 +28256,9 @@ def mobile_action_api():
                         raise MCPToolError("Ereignis-ID fehlt.")
                     remaining = [row for row in events if str(row.get("id")) != event_id]
                 else:
-                    remaining = [{**row, "acknowledged": True} for row in events]
+                    remaining = [dict(row) for row in events]
+                    for row in remaining:
+                        acknowledge_notification_event(row, True)
                 # Persist first, so a write failure never clears the live inbox.
                 atomic_write_json(NOTIFICATION_EVENTS_FILE, remaining)
                 state["notification_events"] = remaining
@@ -27923,8 +28268,9 @@ def mobile_action_api():
             event = next((item for item in state.get("notification_events", []) if str(item.get("id")) == event_id), None)
             if not event:
                 raise MCPToolError("Ereignis wurde nicht gefunden.", "not_found")
-            event["acknowledged"] = bool_from_any(data.get("acknowledged"), True)
-            atomic_write_json(NOTIFICATION_EVENTS_FILE, state.get("notification_events", []))
+            with notification_lock:
+                acknowledge_notification_event(event, bool_from_any(data.get("acknowledged"), True))
+                atomic_write_json(NOTIFICATION_EVENTS_FILE, state.get("notification_events", []))
             return jsonify({"status": "ok", "event": event})
         return mobile_json_error("Unbekannte Mobile-Aktion.", 404, "unknown_action")
     except MCPToolError as exc:
@@ -27991,7 +28337,7 @@ def access_register_client():
 
 def access_key_scope(path, method):
     # Explicit endpoint families: keys cannot manage users, passwords, backups or credentials.
-    if path in {'/api/v3/info', '/api/v3/schema', '/api/mobile/v1/session', '/api/mobile/v1/capabilities', '/api/mobile/v1/trackers', '/api/mobile/v1/tracker', '/api/mobile/v1/history', '/api/mobile/v1/history/stream', '/api/mobile/v1/history/days', '/api/mobile/v1/alerts', '/api/mobile/v1/google/local'} and method == 'GET':
+    if path in {'/api/v3/info', '/api/v3/schema', '/api/mobile/v1/session', '/api/mobile/v1/capabilities', '/api/mobile/v1/trackers', '/api/mobile/v1/tracker', '/api/mobile/v1/tracker-refresh', '/api/mobile/v1/history', '/api/mobile/v1/history/stream', '/api/mobile/v1/history/days', '/api/mobile/v1/alerts', '/api/mobile/v1/google/local'} and method == 'GET':
         return 'read'
     if path == '/api/mobile/v1/locate' and method == 'POST':
         return 'locate'

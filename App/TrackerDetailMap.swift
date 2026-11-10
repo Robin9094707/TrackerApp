@@ -1,6 +1,21 @@
 import SwiftUI
 import MapKit
 
+struct TrackerDetailLayout<Details: View>: View {
+    let tracker: Tracker
+    @ViewBuilder let details: () -> Details
+
+    var body: some View {
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                TrackerDetailMap(tracker: tracker)
+                    .frame(height: tracker.validLocation == nil ? 142 : min(370, max(140, geometry.size.height * 0.44)))
+                details()
+            }
+        }
+    }
+}
+
 /// The same saved-location map is used by server and native Google details.
 struct TrackerDetailMap: View {
     let tracker: Tracker
@@ -9,30 +24,26 @@ struct TrackerDetailMap: View {
     var body: some View {
         VStack(spacing: 0) {
             if tracker.validLocation != nil {
-                TrackerLocationMapCanvas(tracker: tracker, interactive: false)
-                    .frame(height: 240)
-                    .overlay(alignment: .topTrailing) {
-                        RJMapControlStack {
-                            RJMapControlButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Trackerkarte vergrößern") { expanded = true }
-                                .accessibilityIdentifier("tracker-detail-map-expand")
-                        }.padding(12)
+                TrackerLocationMapCanvas(tracker: tracker) { expanded = true }
+                    .overlay(alignment: .bottomLeading) {
+                        accuracy
+                            .padding(10)
+                            .allowsHitTesting(false)
                     }
-                locationCaption.padding(12)
             } else {
                 ContentUnavailableView("Noch kein Standort", systemImage: "mappin.slash.circle",
                     description: Text("Sobald eine gültige Ortung vorliegt, erscheint dein Tracker hier auf der Karte."))
-                    .frame(minHeight: 160)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityIdentifier("tracker-detail-map-empty")
             }
         }
         .background(Color(uiColor: .secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(Color.primary.opacity(0.06), lineWidth: 0.5))
+        .clipped()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("tracker-detail-map-card")
         .fullScreenCover(isPresented: $expanded) {
             NavigationStack {
-                TrackerLocationMapCanvas(tracker: tracker, interactive: true)
+                TrackerLocationMapCanvas(tracker: tracker)
                     .safeAreaInset(edge: .bottom) { locationCaption.padding(16).background(.regularMaterial) }
                     .navigationTitle(tracker.name)
                     .navigationBarTitleDisplayMode(.inline)
@@ -51,7 +62,7 @@ struct TrackerDetailMap: View {
             HStack(spacing: 10) { savedLocationLabel; Spacer(minLength: 0); accuracy }
             VStack(alignment: .leading, spacing: 8) { savedLocationLabel; accuracy }
         }
-        .font(.caption).frame(maxWidth: .infinity, alignment: .leading)
+        .font(.caption).fixedSize(horizontal: false, vertical: true)
     }
 
     private var savedLocationLabel: some View {
@@ -75,7 +86,7 @@ struct TrackerDetailMap: View {
 
 private struct TrackerLocationMapCanvas: View {
     let tracker: Tracker
-    let interactive: Bool
+    var expand: (() -> Void)? = nil
     @State private var position: MapCameraPosition = .automatic
     @State private var satellite = false
 
@@ -90,7 +101,7 @@ private struct TrackerLocationMapCanvas: View {
     }
 
     var body: some View {
-        Map(position: $position, interactionModes: interactive ? .all : []) {
+        Map(position: $position, interactionModes: [.pan, .zoom, .rotate]) {
             if let location = tracker.validLocation {
                 if let radius = accuracyRadius {
                     MapCircle(center: location.coordinate, radius: radius)
@@ -105,17 +116,22 @@ private struct TrackerLocationMapCanvas: View {
         .mapStyle(satellite ? .hybrid(elevation: .flat) : .standard(pointsOfInterest: .excludingAll))
         .accessibilityIdentifier("tracker-location-map")
         .overlay(alignment: .topTrailing) {
-            if interactive {
-                RJMapControlStack {
-                    RJMapControlButton(symbol: "scope", label: "Tracker auf Karte zentrieren", action: focus)
-                        .accessibilityIdentifier("tracker-detail-map-center")
+            RJMapControlStack {
+                RJMapControlButton(symbol: "scope", label: "Tracker auf Karte zentrieren", action: focus)
+                    .accessibilityIdentifier(expand == nil ? "tracker-detail-map-center" : "tracker-detail-map-inline-center")
+                RJMapControlDivider()
+                RJMapControlButton(symbol: satellite ? "map" : "globe.europe.africa", label: satellite ? "Standardkarte" : "Satellitenkarte") { satellite.toggle() }
+                    .accessibilityIdentifier(expand == nil ? "tracker-detail-map-style" : "tracker-detail-map-inline-style")
+                if let expand {
                     RJMapControlDivider()
-                    RJMapControlButton(symbol: satellite ? "map" : "globe.europe.africa", label: satellite ? "Standardkarte" : "Satellitenkarte") { satellite.toggle() }
-                        .accessibilityIdentifier("tracker-detail-map-style")
-                }.padding(12)
-            }
+                    RJMapControlButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Trackerkarte vergrößern", action: expand)
+                        .accessibilityIdentifier("tracker-detail-map-expand")
+                }
+            }.padding(12)
         }
-        .onChange(of: focusCoordinates, initial: true) { _, _ in focus() }
+        .onChange(of: focusCoordinates, initial: true) { _, _ in
+            if !position.positionedByUser { focus() }
+        }
     }
 
     private func focus() {

@@ -43,7 +43,7 @@ jobs:
           from pathlib import Path
           from zipfile import ZipFile, ZIP_DEFLATED
           root = Path('Backend')
-          with ZipFile('RJ-Tracker-Backend-21.0.0.zip', 'w', ZIP_DEFLATED) as archive:
+          with ZipFile('RJ-Tracker-Backend-21.2.0.zip', 'w', ZIP_DEFLATED) as archive:
               for path in sorted(root.rglob('*')):
                   relative = path.relative_to(root)
                   if path.is_file() and not any(part in {'runtime','data','__pycache__'} for part in relative.parts):
@@ -51,7 +51,7 @@ jobs:
           PY
       - uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-Backend-21.0.0
-          path: RJ-Tracker-Backend-21.0.0.zip
+          name: RJ-Tracker-Backend-21.2.0
+          path: RJ-Tracker-Backend-21.2.0.zip
           if-no-files-found: error
           retention-days: 30

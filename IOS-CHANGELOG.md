@@ -1,3 +1,17 @@
+# 7.2.0 (Build 32) · Kompass · Backend 21.2.0
+
+- Fund- und Bewegungsalarm speichern direkt. Beim Scharfstellen des Bewegungsalarms gilt der zuletzt gespeicherte Standort. Eine Ortung läuft danach im Hintergrund.
+- Apple und Samsung melden die Anbieterantwort auch bei leeren oder unveränderten Daten. Samsung zeigt die aktuelle Ortung vor dem separaten Verlaufsabruf.
+- Manuelle Abfragen werden pro Tracker zusammengefasst und pro Anbieter begrenzt. Standort- und Verlaufsspeicherung verwenden die bestehenden Formate.
+- Zeitangabe im Tracker-Detail erscheint einmal. Die Karte behält die Genauigkeitsangabe, und die Vollbildkarte zeigt die Zeit weiterhin.
+
+# 7.1.0 (Build 31) · Backend 21.1.0
+
+- Zoombare Karte über den scrollbaren Details für Apple, Google, Samsung und Fusion, mit Zentrieren, Satellitenansicht und Vollbild.
+- Einheitliche Einstellungen für serverseitige Fund- und Bewegungsmeldungen. Der Bewegungsalarm kann zwei oder drei eindeutige, ausreichend genaue Reports außerhalb aus derselben Abfrage auswerten.
+- Kritische Bark-Pushs einmalig oder etwa jede Minute bis zur Bestätigung. Ein Tipp auf die Bark-Meldung öffnet den zugehörigen Tracker. Kritische Hinweise müssen in Bark erlaubt sein.
+- Laufende Bark-Alarme lassen sich in den Mitteilungen des Trackers stoppen. Beide neuen Alarmarten benötigen die aktualisierte AMP-Python-Datei. Bestehende Daten beim Update im bisherigen Ordner behalten.
+
 # 7.0.0 (Build 30) · Backend 21.0.0
 
 - Direkte Standortkarte in allen Tracker-Details, auch bei lokaler Google-Ortung und gespeicherten Serverstandorten: Genauigkeitskreis, Vollbild, Zentrieren und Satellitenansicht. Kein neues Backend für die Kartenanzeige nötig.

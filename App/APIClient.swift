@@ -84,6 +84,14 @@ final class APIClient {
         return response.tracker
     }
 
+    func trackerRefresh(reference: String, after completion: Double, reuse: Bool) async throws -> TrackerRefreshResponse {
+        try await request(path: "/api/mobile/v1/tracker-refresh", query: [
+            .init(name: "ref", value: reference),
+            .init(name: "after", value: String(completion)),
+            .init(name: "reuse", value: reuse ? "1" : "0"),
+        ])
+    }
+
     func trackerCatalog() async throws -> [Tracker] {
         let response: TrackerCatalogResponse = try await request(path: "/api/mobile/v1/trackers", query: [.init(name: "limit", value: "1000")])
         return response.trackers
@@ -159,6 +167,13 @@ final class APIClient {
         var body = payload
         body["action"] = name
         return try await requestJSON(path: "/api/mobile/v1/action", method: "POST", json: body)
+    }
+
+    func trackerAlarmAction(_ name: String, payload: [String: Any]) async throws -> TrackerAlarmActionResponse {
+        var body = payload
+        body["action"] = name
+        body["compact"] = true
+        return try await request(path: "/api/mobile/v1/action", method: "POST", json: body)
     }
 
     func registerPush(token: String, label: String, model: String, systemVersion: String, appVersion: String) async throws -> JSONValue {

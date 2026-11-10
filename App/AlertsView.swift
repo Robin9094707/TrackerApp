@@ -110,12 +110,15 @@ struct AlertDetailView: View {
             }
             if let tracker = model.trackers.first(where: { $0.ref == event.trackerRef }) {
                 NavigationLink { TrackerDetailView(tracker: tracker) } label: { Label(tracker.name, systemImage: "airtag") }
+                if current.barkAlarm != nil && current.acknowledged != true {
+                    TrackerBarkConfirmation(tracker: tracker, eventID: event.id)
+                }
             }
         }
         .scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Meldung").navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.refreshAlerts(limit: 500, unreadOnly: false) }
         .task {
-            guard event.acknowledged != true else { return }
+            guard event.acknowledged != true, event.barkAlarm == nil else { return }
             do { try await model.runAction("acknowledge_event", payload: ["event_id": event.id, "acknowledged": true]) }
             catch { model.errorMessage = error.localizedDescription }
         }

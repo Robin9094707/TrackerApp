@@ -3,24 +3,42 @@ import MapKit
 
 struct TrackerDashboardShell: View {
     @Environment(AppModel.self) private var model
+    @Binding var trackerLink: TrackerPushLink?
     @State private var path: [String] = []
+    @State private var tab = 0
+    @State private var activeLink: TrackerPushLink?
+
     var body: some View {
-        TabView {
+        TabView(selection: $tab) {
             NavigationStack(path: $path) {
-                TrackerLibraryView { tracker in path.append(tracker.ref) }
+                TrackerLibraryView { tracker in
+                    activeLink = nil
+                    path.append(tracker.ref)
+                }
                     .navigationDestination(for: String.self) { ref in
                         if let tracker = model.trackers.first(where: { $0.ref == ref }) {
-                            TrackerDetailView(tracker: tracker)
+                            TrackerDetailView(tracker: tracker, barkEventID: activeLink?.reference == ref ? activeLink?.barkEventID : nil)
+                                .id(activeLink?.barkEventID ?? ref)
                         } else {
                             ContentUnavailableView("Objekt nicht verfügbar", systemImage: "airtag")
                         }
                     }
-            }.tabItem { Label("Objekte", systemImage: "square.grid.2x2.fill") }
+            }.tabItem { Label("Objekte", systemImage: "square.grid.2x2.fill") }.tag(0)
             NavigationStack { if model.serverActionsAvailable { PlacesHomeView() } else { ServerRequiredView() } }
-                .tabItem { Label("Orte", systemImage: "mappin.and.ellipse") }
+                .tabItem { Label("Orte", systemImage: "mappin.and.ellipse") }.tag(1)
             NavigationStack { if model.serverActionsAvailable { AlertsView() } else { ServerRequiredView() } }
-                .tabItem { Label("Meldungen", systemImage: "bell") }.badge(model.bootstrap?.alerts?.unreadCount ?? 0)
-            NavigationStack { MoreView() }.tabItem { Label("Ich", systemImage: "person.crop.circle") }
+                .tabItem { Label("Meldungen", systemImage: "bell") }.badge(model.bootstrap?.alerts?.unreadCount ?? 0).tag(2)
+            NavigationStack { MoreView() }.tabItem { Label("Ich", systemImage: "person.crop.circle") }.tag(3)
+        }
+        .onChange(of: trackerLink, initial: true) { _, link in
+            guard let link else { return }
+            activeLink = link
+            tab = 0
+            path = [link.reference]
+            trackerLink = nil
+            if !model.trackers.contains(where: { $0.ref == link.reference }) {
+                Task { await model.refreshTrackers() }
+            }
         }
         .alert("RJ Tracker", isPresented: Binding(get: { model.errorMessage != nil || model.locationService.message != nil }, set: { if !$0 { model.errorMessage = nil; model.locationService.message = nil } })) {
             Button("OK") { model.errorMessage = nil; model.locationService.message = nil }
