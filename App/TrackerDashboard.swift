@@ -51,11 +51,14 @@ struct DashboardShortcut: View {
     let symbol: String
     let tint: Color
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Image(systemName: symbol).font(.title2).foregroundStyle(tint)
+        VStack(alignment: .leading, spacing: 12) {
+            Image(systemName: symbol).font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: 40, height: 40)
+                .background(tint.gradient, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .shadow(color: tint.opacity(0.35), radius: 8, x: 0, y: 4)
             Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-        }.frame(maxWidth: .infinity, minHeight: 65, alignment: .leading).rjCard()
+                .lineLimit(1).minimumScaleFactor(0.75)
+        }.frame(maxWidth: .infinity, minHeight: 70, alignment: .leading).rjCard()
     }
 }
 

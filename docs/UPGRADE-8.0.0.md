@@ -1,11 +1,13 @@
-# RJ Tracker 8.0.0 · Backend 22.0.0 · Overhaul
+# RJ Tracker 8.x · Backend 22.x · Overhaul
+
+Aktuell: App 8.1.0 (Build 34) und Backend 22.1.0. Die Schritte gelten für 8.0 und 8.1 gleichermaßen; die Dateien heißen `RJ-Tracker-v8.1.0-unsigned.ipa` und `Tracker_Backend_AMP.py`.
 
 ## Installation
 
 1. Backend anhalten und den bestehenden Datenordner sichern.
-2. `Tracker_Backend_AMP.py` (22.0.0) anstelle der bisherigen Serverdatei ablegen. Dateiname, Ordner, Port und Umgebungsvariablen bleiben gleich. Nicht mit einem leeren Datenordner starten.
+2. `Tracker_Backend_AMP.py` (22.1.0) anstelle der bisherigen Serverdatei ablegen. Dateiname, Ordner, Port und Umgebungsvariablen bleiben gleich. Nicht mit einem leeren Datenordner starten.
 3. Server starten. Alle Tracker, Verläufe, Fusionen, Taschen, Freigaben, Bark-Schlüssel und Anmeldungen bleiben unverändert erhalten. Es gibt keine Datenmigration; neue Felder werden nur ergänzt.
-4. `RJ-Tracker-v8.0.0-unsigned.ipa` mit der bisherigen Bundle-ID und Signierungsidentität signieren und über die bestehende App installieren. Nicht vorher deinstallieren.
+4. `RJ-Tracker-v8.1.0-unsigned.ipa` mit der bisherigen Bundle-ID und Signierungsidentität signieren und über die bestehende App installieren. Nicht vorher deinstallieren.
 
 Die App 8.0 funktioniert auch mit Backend 21.x. Nur Netz-Priorität, Taschen-Schalter und Web-App benötigen Backend 22.0.
 

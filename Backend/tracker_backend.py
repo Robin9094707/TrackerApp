@@ -1,4 +1,4 @@
-# Universal Tag Studio 22.0.0 · OVERHAUL (web app, network priority)
+# Universal Tag Studio 22.1.0 · OVERHAUL (web app, network priority)
 # Backward-compatible single-file upgrade. Existing data/ directory layout,
 # tracker IDs, histories, shares and provider sessions are intentionally
 # preserved. Google integration: leonboe1/GoogleFindMyTools (GPL-3.0).
@@ -30674,7 +30674,7 @@ if not _DISABLE_BACKGROUND:
 # * school_mode.json keeps its schema; bags are toggled exactly like before.
 # * /app serves a responsive web client that only uses the existing
 #   session-cookie + CSRF protected mobile API.
-APP_VERSION = "22.0.0 OVERHAUL"
+APP_VERSION = "22.1.0 OVERHAUL"
 WEB_APP_PATH = "/app"
 _FUSION_BACKUP_REASONS = {"linked_history", "fusion_optimization", "fusion_history", "school_bag", "background", "history"}
 
@@ -31148,6 +31148,19 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 4px color-m
 .leaflet-control-attribution{background:var(--panel)!important;color:var(--muted)!important;border-radius:8px 0 0 0;font-size:10px}
 .leaflet-control-attribution a{color:var(--muted)!important}
 .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel-solid);color:var(--text);border-radius:14px}
+.hero{display:flex;align-items:center;gap:14px;padding:16px;border-radius:var(--radius);margin:2px 0 12px;background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 16%,var(--panel-solid)),color-mix(in srgb,var(--accent2) 14%,var(--panel-solid)));border:1px solid var(--line);animation:fade .4s both}
+.hero .eyebrow{font-size:11px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero h2{margin:2px 0 2px;font-size:22px;letter-spacing:-.4px}
+.ring{position:relative;width:72px;height:72px;flex:none}.ring svg{width:72px;height:72px;transform:rotate(-90deg)}
+.ring circle{fill:none;stroke-width:8;stroke-linecap:round}.ring .bgc{stroke:var(--line)}.ring .fg{stroke:url(#rg);transition:stroke-dashoffset .8s cubic-bezier(.2,.8,.2,1)}
+.ring div{position:absolute;inset:0;display:grid;place-content:center;text-align:center;line-height:1.05}.ring b{font-size:19px}.ring small{font-size:10px;color:var(--muted);font-weight:600}
+.hint{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line);cursor:pointer}.hint:first-of-type{border-top:0}
+.hint i{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;font-style:normal;color:#fff;flex:none;font-size:14px}
+.skel{height:70px;border-radius:18px;margin-bottom:8px;background:linear-gradient(90deg,var(--bg2) 25%,color-mix(in srgb,var(--bg2) 60%,var(--panel-solid)) 50%,var(--bg2) 75%);background-size:200% 100%;animation:shimmer 1.3s linear infinite}
+@keyframes shimmer{to{background-position:-200% 0}}
+.scrub{display:flex;align-items:center;gap:10px}.scrub input[type=range]{flex:1;accent-color:var(--accent);height:28px;padding:0;border:0;background:none;box-shadow:none!important}
+.star{font-size:22px;line-height:1;color:var(--warn);padding:6px}
+.pin.live:after{content:"";position:absolute;inset:-7px;border-radius:50%;border:2px solid currentColor;opacity:0;animation:ping 2.4s ease-out infinite}
 .handle{display:none}
 /* mobile: bottom sheet */
 @media (max-width:860px){
@@ -31260,7 +31273,7 @@ function setTiles(){if(!map)return;if(tiles)map.removeLayer(tiles);
   if(S.layer===1){tiles=L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:19,attribution:"Tiles © Esri"})}
   else{tiles=L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,className:"osm-tiles",attribution:"© OpenStreetMap-Mitwirkende"})}
   tiles.addTo(map)}
-function pinIcon(t,sel){const n=NET[t.provider]||NET.apple;return L.divIcon({className:"",iconSize:[44,44],iconAnchor:[22,44],html:'<div class="pin'+(sel?" sel":"")+'" style="background:'+n.hex+'"><span></span></div>'})}
+function pinIcon(t,sel){const n=NET[t.provider]||NET.apple;const live=t.last_seen_ts&&Date.now()/1000-t.last_seen_ts<900;return L.divIcon({className:"",iconSize:[44,44],iconAnchor:[22,44],html:'<div class="pin'+(sel?" sel":"")+(live?" live":"")+'" style="background:'+n.hex+";color:"+n.hex+'"><span></span></div>'})}
 function renderMarkers(){
   const seen=new Set();
   for(const t of S.trackers){const l=loc(t);if(!l)continue;seen.add(t.ref);let m=S.markers.get(t.ref);const ll=[l.latitude,l.longitude];
@@ -31276,9 +31289,9 @@ async function loadBoot(first){
   if(b.session&&b.session.csrf_token)S.csrf=b.session.csrf_token;S.user=b.session&&b.session.user;
   $("#statusline").textContent=S.trackers.length+" Objekte · Server "+String((b.api&&b.api.server_version)||"").split(" ")[0];
   $("#alertdot").classList.toggle("hidden",!(b.alerts&&b.alerts.unread_count));
-  renderMarkers();if(first)fitAll();render()}
+  renderMarkers();if(first){const ref=decodeURIComponent(location.hash.slice(1));if(ref&&S.trackers.some(t=>t.ref===ref)){render();select(ref)}else fitAll()}render()}
 function current(){return S.trackers.find(t=>t.ref===S.sel)}
-function select(ref,fromMap){S.sel=ref;if(S.tab!=="objects"&&S.tab!=="history")S.tab="objects";setTabs();renderMarkers();const t=current();const l=loc(t);if(l)map.flyTo([l.latitude,l.longitude],Math.max(map.getZoom(),15),{duration:.8});if(S.tab==="history")loadHistory();render();if(fromMap)sheet("mid")}
+function select(ref,fromMap){S.sel=ref;try{history.replaceState(null,"","#"+encodeURIComponent(ref))}catch(e){}if(S.tab!=="objects"&&S.tab!=="history")S.tab="objects";setTabs();renderMarkers();const t=current();const l=loc(t);if(l)map.flyTo([l.latitude,l.longitude],Math.max(map.getZoom(),15),{duration:.8});if(S.tab==="history")loadHistory();render();if(fromMap)sheet("mid")}
 /* locate */
 async function locate(ref){if(S.locating.has(ref))return;S.locating.add(ref);render();
   const started=Date.now()/1000;try{await api("/api/mobile/v1/locate","POST",{tracker:ref});
@@ -31296,26 +31309,45 @@ function avatar(t,big){const n=NET[t.provider]||NET.apple;return h("div",{class:
 function trackerRow(t){const l=loc(t);return h("div",{class:"row"+(S.sel===t.ref?" sel":""),onclick:()=>select(t.ref)},avatar(t),
   h("div",{class:"grow"},h("div",{class:"title"},t.name,t.school_bag?" 🎒":""),h("div",{class:"sub"},l?(addr(l)||((NET[l.network]||{}).name||l.provider||"")+" · ±"+meters(l.accuracy_m)):"Noch kein Standort")),
   h("div",{class:"age"},h("span",{class:"fresh",style:"background:"+freshColor(t.last_seen_ts)}),S.locating.has(t.ref)?"ortet …":ago(t.last_seen_ts)))}
+function batteryLow(b){const m=/(\d{1,3})\s*%/.exec(b||"");if(m)return Number(m[1])<=20;return/niedrig|kritisch|schwach|low|critical/i.test(b||"")}
+function insights(){const now=Date.now()/1000,bat=[],stale=[],miss=[];
+  for(const t of S.trackers){if(batteryLow(t.battery))bat.push({t,c:"var(--bad)",i:"🔋",d:"Batterie schwach ("+t.battery+")"});
+    if(!t.last_seen_ts)miss.push({t,c:"var(--soft)",i:"∅",d:"Noch kein Standort gemeldet"});
+    else if(now-t.last_seen_ts>12*3600){const hrs=Math.floor((now-t.last_seen_ts)/3600);stale.push({t,a:now-t.last_seen_ts,c:"var(--warn)",i:"⏱",d:"Keine neue Meldung seit "+(hrs<48?hrs+" Std.":Math.floor(hrs/24)+" Tagen")})}}
+  stale.sort((a,b)=>b.a-a.a);return[...bat,...stale,...miss].slice(0,4)}
+function hero(){const now=Date.now()/1000,total=S.trackers.length,fresh=S.trackers.filter(t=>t.last_seen_ts&&now-t.last_seen_ts<=7200).length;
+  const hr=new Date().getHours(),greet=hr>=5&&hr<11?"Guten Morgen":hr<18&&hr>=11?"Guten Tag":hr<23&&hr>=18?"Guten Abend":"Gute Nacht";
+  const C=2*Math.PI*30,frac=total?fresh/total:0;
+  const sum=!total?"Noch keine Objekte verbunden":fresh===total?(total===1?"Dein Objekt ist aktuell":"Alle "+total+" Objekte sind aktuell"):fresh+" von "+total+" aktuell · "+(total-fresh)+" älter als 2 Std.";
+  const ring=h("div",{class:"ring",role:"img","aria-label":fresh+" von "+total+" Objekten aktuell",html:'<svg viewBox="0 0 72 72"><defs><linearGradient id="rg" x1="0" x2="1"><stop offset="0" stop-color="#5b8cff"/><stop offset="1" stop-color="#9d7bff"/></linearGradient></defs><circle class="bgc" cx="36" cy="36" r="30"/><circle class="fg" cx="36" cy="36" r="30" stroke-dasharray="'+C+'" stroke-dashoffset="'+(C*(1-frac))+'"/></svg><div><b>'+fresh+'</b><small>von '+total+'</small></div>'});
+  const out=[h("div",{class:"hero"},h("div",{class:"grow"},h("div",{class:"eyebrow"},greet),h("h2",null,"Alles im Blick."),h("div",{class:"sub",style:"white-space:normal"},sum)),total?ring:null)];
+  if(total){const rows=insights();out.push(h("div",{class:"card"},h("div",{class:"section-h",style:"margin:0 0 6px"},"✨ Hinweise",rows.length?h("span",{class:"badge",style:"background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)"},rows.length):null),
+    rows.length?rows.map(r=>h("div",{class:"hint",onclick:()=>select(r.t.ref)},h("i",{style:"background:"+r.c},r.i),h("div",{class:"grow"},h("div",{class:"title",style:"font-size:14px"},r.t.name),h("div",{class:"sub"},r.d)))):
+    h("div",{class:"hint",style:"cursor:default"},h("i",{style:"background:var(--ok)"},"✓"),h("div",{class:"grow"},h("div",{class:"title",style:"font-size:14px"},"Alles in Ordnung"),h("div",{class:"sub",style:"white-space:normal"},"Keine schwache Batterie, keine überfälligen Meldungen.")))))}
+  return out}
 function renderObjects(){const t=current();if(t)return renderDetail(t);
+  if(!S.boot)return[h("div",{class:"skel",style:"height:104px"}),h("div",{class:"skel"}),h("div",{class:"skel"}),h("div",{class:"skel"})];
   const filters=[["all","Alle"],["fusion","Fusionen"],["apple","Apple"],["google","Google"],["samsung","Samsung"],["bags","Taschen"],["fav","Favoriten"]];
   const q=S.q.toLowerCase();const list=S.trackers.filter(t=>(S.filter==="all"||t.provider===S.filter||(S.filter==="bags"&&t.school_bag)||(S.filter==="fav"&&t.favorite))&&(!q||t.name.toLowerCase().includes(q)));
-  const search=h("input",{type:"text",placeholder:"Objekte suchen",value:S.q,oninput:e=>{S.q=e.target.value;const pos=e.target.selectionStart;render();const i=$("#content input");if(i){i.focus();i.setSelectionRange(pos,pos)}}});
-  return[h("div",{class:"search"},svg("search"),search),h("div",{class:"chips"},filters.map(([k,v])=>h("button",{class:"chip"+(S.filter===k?" on":""),onclick:()=>{S.filter=k;render()}},v))),
+  const search=h("input",{type:"text",placeholder:"Objekte suchen  ( / )",value:S.q,oninput:e=>{S.q=e.target.value;const pos=e.target.selectionStart;render();const i=$("#content input");if(i){i.focus();i.setSelectionRange(pos,pos)}}});
+  return[(!S.q&&S.filter==="all")?hero():null,h("div",{class:"search"},svg("search"),search),h("div",{class:"chips"},filters.map(([k,v])=>h("button",{class:"chip"+(S.filter===k?" on":""),onclick:()=>{S.filter=k;render()}},v))),
     list.length?list.map(trackerRow):h("div",{class:"empty"},h("b",null,"🛰️"),S.trackers.length?"Keine Treffer.":"Noch keine Objekte auf dem Server.")]}
 function renderDetail(t){const l=loc(t);const busy=S.locating.has(t.ref);
   const out=[h("button",{class:"back",onclick:()=>{S.sel=null;renderMarkers();render()}},svg("back"),"Alle Objekte"),
     h("div",{class:"detail-head"},avatar(t,true),h("div",{class:"grow"},h("h2",null,t.name),h("div",{class:"sub"},l?ago(l.timestamp)+" · "+((NET[l.network]||{}).full||l.provider||""):"Kein Standort"),
-      h("div",{style:"margin-top:6px;display:flex;gap:6px;flex-wrap:wrap"},h("span",{class:"badge "+(t.provider==="fusion"?"fu":"acc")},(NET[t.provider]||{}).name||t.provider),t.school_bag?h("span",{class:"badge ok"},"🎒 Tasche"):null,t.history_active?h("span",{class:"badge"},"Verlauf aktiv"):null))),
+      h("div",{style:"margin-top:6px;display:flex;gap:6px;flex-wrap:wrap"},h("span",{class:"badge "+(t.provider==="fusion"?"fu":"acc")},(NET[t.provider]||{}).name||t.provider),t.school_bag?h("span",{class:"badge ok"},"🎒 Tasche"):null,t.history_active?h("span",{class:"badge"},"Verlauf aktiv"):null)),h("button",{class:"star",title:"Favorit","aria-label":"Favorit umschalten",onclick:()=>toggleFav(t)},t.favorite?"★":"☆")),
     h("div",{class:"actions"},
       h("button",{class:"action"+(busy?" busy":""),onclick:()=>locate(t.ref),disabled:busy},svg("locate"),busy?"Ortet …":"Orten"),
       h("button",{class:"action",onclick:()=>{S.tab="history";setTabs();loadHistory();render()}},svg("route"),"Verlauf"),
       h("a",{class:"action",href:l?"https://www.google.com/maps/dir/?api=1&destination="+l.latitude+","+l.longitude:"#",target:"_blank",rel:"noopener",style:"color:inherit;text-decoration:none"+(l?"":";opacity:.5;pointer-events:none")},svg("nav"),"Route"))];
-  if(l)out.push(h("div",{class:"card"},h("dl",{class:"kv"},h("dt",null,"Adresse"),h("dd",null,addr(l)||"–"),h("dt",null,"Genauigkeit"),h("dd",null,"±"+meters(l.accuracy_m)),h("dt",null,"Gemeldet"),h("dd",null,fmtDate(l.timestamp)),h("dt",null,"Netz"),h("dd",null,(NET[l.network]||{}).full||l.provider||"–"),h("dt",null,"Batterie"),h("dd",null,t.battery||"–"),h("dt",null,"Koordinaten"),h("dd",null,l.latitude.toFixed(5)+", "+l.longitude.toFixed(5)))));
+  if(l)out.push(h("div",{class:"card"},h("dl",{class:"kv"},h("dt",null,"Adresse"),h("dd",null,addr(l)||"–"),h("dt",null,"Genauigkeit"),h("dd",null,"±"+meters(l.accuracy_m)),h("dt",null,"Gemeldet"),h("dd",null,fmtDate(l.timestamp)),h("dt",null,"Netz"),h("dd",null,(NET[l.network]||{}).full||l.provider||"–"),h("dt",null,"Batterie"),h("dd",null,t.battery||"–"),h("dt",null,"Koordinaten"),h("dd",null,h("button",{style:"font-weight:600;color:var(--accent)",title:"Kopieren",onclick:()=>copyText(l.latitude.toFixed(6)+", "+l.longitude.toFixed(6))},l.latitude.toFixed(5)+", "+l.longitude.toFixed(5)+" ⧉")))));
   if(t.status)out.push(h("div",{class:"card sub",style:"white-space:normal"},t.status));
   if(t.provider==="fusion")out.push(renderFusion(t));
   if(S.user&&S.user.is_main_admin)out.push(h("div",{class:"card",style:"display:flex;align-items:center;gap:12px"},h("div",{class:"grow"},h("div",{class:"title"},"🎒 Als Tasche verwenden"),h("div",{class:"sub",style:"white-space:normal"},"Verlauf wird dauerhaft gesammelt; Orte & Zeiten im Tab Taschen.")),
     h("label",{class:"switch"},h("input",{type:"checkbox",checked:!!t.school_bag,onchange:e=>toggleBag(t.ref,e.target.checked)}),h("span"))));
   return out}
+async function toggleFav(t){const id=t.id||t.ref.split(":").slice(1).join(":");try{await api("/api/v2/trackers/"+t.provider+"/"+encodeURIComponent(id)+"/preferences","POST",{favorite:!t.favorite});t.favorite=!t.favorite;toast(t.favorite?"Als Favorit gesichert":"Favorit entfernt");render();loadBoot().catch(()=>{})}catch(e){toast(e.message)}}
+async function copyText(v){try{await navigator.clipboard.writeText(v);toast("Kopiert")}catch(e){toast(v)}}
 /* fusion priority */
 function renderFusion(t){const box=h("div",{class:"card"});const f=S.fusion[t.ref];
   if(!f){api("/api/mobile/v1/fusion-networks?ref="+encodeURIComponent(t.ref)).then(r=>{S.fusion[t.ref]=r;render()}).catch(e=>{box.replaceChildren(h("div",{class:"sub"},e.message))});box.append(h("div",{class:"sub"},"Netzwerke werden geladen …"));return box}
@@ -31365,25 +31397,30 @@ function bagCard(b){const card=h("div",{class:"card"});const plan=S.bagPlan[b.re
 function todayKey(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
 async function loadHistory(){const t=current();if(!t)return;S.history=null;clearHistory();render();const day=S.historyDay||todayKey();
   try{const r=await api("/api/mobile/v1/history?ref="+encodeURIComponent(t.ref)+"&date="+day+"&limit=3000&resolve_addresses=1");if(current()!==t)return;S.history=r;drawHistory();render()}catch(e){S.history={error:e.message};render()}}
-function clearHistory(){if(S.historyLayer){map.removeLayer(S.historyLayer);S.historyLayer=null}}
+function clearHistory(){if(S.playing){clearInterval(S.playing);S.playing=null}S.scrubPts=null;S.scrubMarker=null;if(S.historyLayer){map.removeLayer(S.historyLayer);S.historyLayer=null}}
 function drawHistory(){clearHistory();const pts=(S.history&&S.history.points||[]).slice().sort((a,b)=>a.timestamp-b.timestamp);if(!pts.length)return;
   const g=L.layerGroup();const ll=pts.map(p=>[p.latitude,p.longitude]);
   L.polyline(ll,{color:"#7c8cff",weight:5,opacity:.85,lineJoin:"round"}).addTo(g);
   pts.forEach((p,i)=>{L.circleMarker([p.latitude,p.longitude],{radius:i===pts.length-1?7:4,color:"#fff",weight:2,fillColor:(NET[p.network]||NET.fusion).hex,fillOpacity:1}).bindPopup(fmtDate(p.timestamp)+"<br>"+((NET[p.network]||{}).full||p.network)+" · ±"+meters(p.accuracy_m)).addTo(g)});
   for(const s of(S.history.stays||[]))if(s.confirmed_stay)L.circle([s.latitude,s.longitude],{radius:Math.max(30,s.radius_m||40),color:"#16a34a",weight:1.5,fillOpacity:.12}).addTo(g);
+  S.scrubMarker=L.circleMarker(ll[ll.length-1],{radius:10,color:"#fff",weight:3,fillColor:"#5b8cff",fillOpacity:1}).addTo(g);S.scrubPts=pts;S.scrub=pts.length-1;
   S.historyLayer=g.addTo(map);map.fitBounds(ll,{padding:[60,60],maxZoom:17})}
+function scrubTo(i,pan){const p=S.scrubPts&&S.scrubPts[i];if(!p)return;S.scrub=i;if(S.scrubMarker)S.scrubMarker.setLatLng([p.latitude,p.longitude]);if(pan&&!map.getBounds().pad(-.15).contains([p.latitude,p.longitude]))map.panTo([p.latitude,p.longitude]);const el=$("#scrublabel");if(el)el.textContent=fmtTime(p.timestamp)+" · "+((NET[p.network]||{}).name||p.network)+" · ±"+meters(p.accuracy_m);const r=$("#scrubrange");if(r&&Number(r.value)!==i)r.value=i}
+function playHistory(){if(S.playing){clearInterval(S.playing);S.playing=null;render();return}const n=(S.scrubPts||[]).length;if(n<2)return;if(S.scrub>=n-1)scrubTo(0,true);S.playing=setInterval(()=>{if(S.scrub>=n-1||S.tab!=="history"){clearInterval(S.playing);S.playing=null;if(S.tab==="history")render();return}scrubTo(S.scrub+1,true)},Math.max(60,Math.min(450,9000/n)));render()}
 function renderHistory(){const t=current();
   if(!t)return[h("div",{class:"section-h"},"Objekt wählen"),...S.trackers.map(x=>h("div",{class:"row",onclick:()=>{S.sel=x.ref;renderMarkers();loadHistory()}},avatar(x),h("div",{class:"grow"},h("div",{class:"title"},x.name),h("div",{class:"sub"},x.history_active?"Verlauf aktiv":"Gespeicherte Meldungen")),h("div",{class:"age"},ago(x.last_seen_ts))))];
   const day=S.historyDay||todayKey();
   const out=[h("button",{class:"back",onclick:()=>{S.sel=null;clearHistory();renderMarkers();render()}},svg("back"),"Objekt wechseln"),
     h("div",{class:"detail-head"},avatar(t),h("div",{class:"grow"},h("h2",{style:"font-size:18px"},t.name),h("div",{class:"sub"},"Standortverlauf"))),
     h("div",{class:"dayrow"},h("button",{class:"btn small",onclick:()=>shiftDay(-1)},svg("back")),h("input",{type:"date",value:day,max:todayKey(),onchange:e=>{S.historyDay=e.target.value;loadHistory()}}),h("button",{class:"btn small",disabled:day>=todayKey(),onclick:()=>shiftDay(1),style:"transform:rotate(180deg)"},svg("back")))];
-  const r=S.history;if(!r){out.push(h("div",{class:"empty"},h("b",null,"⏳"),"Lade Verlauf …"));return out}
+  const r=S.history;if(!r){out.push(h("div",{class:"skel",style:"height:64px"}),h("div",{class:"skel"}),h("div",{class:"skel"}));return out}
   if(r.error){out.push(h("div",{class:"empty"},h("b",null,"⚠️"),r.error));return out}
   const sm=r.summary||{};const pts=r.points||[];
   out.push(h("div",{class:"stats"},h("div",{class:"stat"},h("b",null,sm.matching_reports??pts.length),h("span",null,"Reports")),h("div",{class:"stat"},h("b",null,meters(sm.distance_m)),h("span",null,"Strecke")),h("div",{class:"stat"},h("b",null,sm.confirmed_stays??0),h("span",null,"Aufenthalte"))));
   if(sm.network_counts)out.push(h("div",{class:"chips"},Object.entries(sm.network_counts).map(([n,c])=>h("span",{class:"chip"},((NET[n]||{}).name||n)+" · "+c))));
   if(!pts.length){out.push(h("div",{class:"empty"},h("b",null,"🗺️"),"Keine Meldungen an diesem Tag."));return out}
+  if(pts.length>1){const cur=S.scrubPts&&S.scrubPts[S.scrub];out.push(h("div",{class:"card"},h("div",{class:"section-h",style:"margin:0 0 6px"},"Zeitreise",h("span",{id:"scrublabel",style:"text-transform:none;letter-spacing:0"},cur?fmtTime(cur.timestamp)+" · "+((NET[cur.network]||{}).name||cur.network)+" · ±"+meters(cur.accuracy_m):"")),
+    h("div",{class:"scrub"},h("button",{class:"btn small primary","aria-label":S.playing?"Pause":"Abspielen",onclick:playHistory},S.playing?"❚❚":"▶"),h("input",{id:"scrubrange",type:"range",min:0,max:pts.length-1,value:S.scrub??pts.length-1,"aria-label":"Zeitpunkt im Verlauf",oninput:e=>scrubTo(Number(e.target.value),true)}))))}
   const items=[...(r.stays||[]).filter(s=>s.confirmed_stay).map(s=>({ts:s.start_ts,stay:s})),...pts.map(p=>({ts:p.timestamp,p}))].sort((a,b)=>b.ts-a.ts).slice(0,400);
   out.push(h("div",{class:"section-h"},"Zeitachse",h("span",null,pts.length+" Punkte")),h("div",{class:"timeline"},items.map(it=>it.stay?
     h("div",{class:"tl stay",onclick:()=>map.flyTo([it.stay.latitude,it.stay.longitude],17)},h("div",{class:"title",style:"font-size:14px"},"Aufenthalt · "+it.stay.duration_text),h("div",{class:"sub"},fmtTime(it.stay.start_ts)+"–"+fmtTime(it.stay.end_ts)+" · "+it.stay.report_count+" Reports")):
@@ -31418,6 +31455,10 @@ $("#layerbtn").onclick=()=>{S.layer=S.layer?0:1;localStore("layer",String(S.laye
 $("#themebtn").onclick=()=>{const next=isDark()?"light":"dark";localStore("theme",next);applyTheme()};
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>{if(!localStore("theme"))setTiles()});
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&S.csrf)loadBoot().catch(()=>{})});
+document.addEventListener("keydown",e=>{const tag=(e.target.tagName||"").toLowerCase();if(tag==="input"||tag==="select"||tag==="textarea"){if(e.key==="Escape")e.target.blur();return}
+  if(e.key==="/"&&!$("#shell").classList.contains("hidden")){e.preventDefault();S.tab="objects";S.sel=null;setTabs();clearHistory();renderMarkers();render();const i=$("#content .search input");if(i)i.focus()}
+  else if(e.key==="Escape"&&S.sel){S.sel=null;clearHistory();renderMarkers();render()}});
+window.addEventListener("hashchange",()=>{const ref=decodeURIComponent(location.hash.slice(1));if(ref&&S.trackers.some(t=>t.ref===ref)&&S.sel!==ref)select(ref)});
 initSheet();applyTheme();
 (async()=>{try{const s=await api("/api/mobile/v1/session");if(s.authenticated){S.csrf=s.csrf_token;S.user=s.user;await showApp()}else showLogin()}catch(e){showLogin()}})();
 </script>

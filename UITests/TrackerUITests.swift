@@ -337,7 +337,7 @@ final class TrackerUITests: XCTestCase {
         XCTAssertTrue(app.textFields["Bark-Server"].exists)
         capture("Panel-Bark")
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        app.buttons["Schultaschen"].firstMatch.tap()
+        app.buttons["Taschen"].firstMatch.tap()
         let bag = app.buttons["school-bag-fusion:demo-bag"]
         XCTAssertTrue(bag.waitForExistence(timeout: 10))
         bag.tap()

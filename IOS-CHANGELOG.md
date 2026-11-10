@@ -1,3 +1,10 @@
+# 8.1.0 (Build 34) · Backend 22.1.0
+
+- Startseite mit Begrüßung nach Tageszeit, Status-Ring („x von y aktuell“) und automatischen Hinweisen: schwache Batterie, lange keine Meldung, noch kein Standort. Ein Tipp öffnet das Objekt.
+- Hochwertigere Kacheln mit Farbverlauf-Symbolen, Druck-Feedback auf Karten und Kacheln, Zähler als Kapsel, Batterie-Warnsymbol in der Objektliste.
+- Web-App: gleiche Übersicht mit Ring und Hinweisen, „Zeitreise“ im Verlauf (Regler und Abspielen), Favoriten-Stern, Koordinaten kopieren, Lade-Skelette, pulsierende Pins für frische Standorte, Tastenkürzel `/` und `Esc`, direkte Links pro Objekt.
+- Alle Daten und Schnittstellen bleiben unverändert.
+
 # 8.0.0 (Build 33) · Overhaul · Backend 22.0.0
 
 - Neues Design: Indigo/Violett-Akzent, ruhiger Verlaufshintergrund, Karten mit Glanzkante, neues App-Icon und Objekt-Avatare in Netzfarbe.

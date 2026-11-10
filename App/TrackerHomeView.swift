@@ -13,19 +13,17 @@ struct TrackerLibraryView: View {
         @Bindable var model = model
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("DEIN TRACKER-PANEL").font(.caption.weight(.bold)).tracking(2).foregroundStyle(Color.accentColor)
-                    Text("Alles im Blick.").font(.system(.largeTitle, design: .rounded, weight: .bold))
-                    Text("\(model.trackers.count) Objekte · \(model.trackers.filter { $0.validLocation != nil }.count) mit gespeichertem Standort")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                }.padding(.top, 8)
+                DashboardHero(trackers: model.trackers).padding(.top, 8)
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 10)], spacing: 10) {
                     NavigationLink { TrackerMapOverview() } label: { DashboardShortcut(title: "Karte", symbol: "map.fill", tint: .teal) }
                     if model.serverActionsAvailable {
-                        NavigationLink { SchoolBagHub() } label: { DashboardShortcut(title: "Schultaschen", symbol: "backpack.fill", tint: .purple) }
+                        NavigationLink { SchoolBagHub() } label: { DashboardShortcut(title: "Taschen", symbol: "backpack.fill", tint: .indigo) }
                         NavigationLink { BarkSettingsView() } label: { DashboardShortcut(title: "Bark", symbol: "bell.badge.fill", tint: .orange) }
                     }
-                }.buttonStyle(.plain)
+                }.buttonStyle(RJPressStyle())
+                if !model.trackers.isEmpty {
+                    DashboardInsightsCard(trackers: model.trackers, onSelect: onSelect).rjCard()
+                }
                 if let message = model.statusMessage {
                     HStack(alignment: .top) {
                         Text(message).font(.footnote).foregroundStyle(.secondary)
@@ -37,7 +35,11 @@ struct TrackerLibraryView: View {
                 HStack {
                     Text("Meine Objekte").font(.title2.bold())
                     Spacer()
-                    Text("\(model.filteredTrackers.count)").font(.headline).foregroundStyle(Color.accentColor)
+                    Text("\(model.filteredTrackers.count)").font(.subheadline.weight(.bold).monospacedDigit())
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Color.accentColor.opacity(0.12), in: Capsule())
+                        .contentTransition(.numericText())
                 }
                 if model.selectedScope != .all || model.providerFilter != "all" {
                     Text("\(model.selectedScope.title) · \(model.providerFilter == "all" ? "Alle Netze" : model.providerFilter.rjProviderName)")
@@ -51,7 +53,7 @@ struct TrackerLibraryView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 14)], spacing: 14) {
                     ForEach(model.filteredTrackers) { tracker in
                         Button { onSelect(tracker) } label: { TrackerListRow(tracker: tracker).rjCard() }
-                            .buttonStyle(.plain)
+                            .buttonStyle(RJPressStyle())
                             .accessibilityIdentifier("tracker-row-\(tracker.ref)")
                             .contextMenu {
                                 Button { Task { await model.setFavorite(tracker) } } label: {
@@ -173,6 +175,7 @@ struct TrackerListRow: View {
                 HStack(spacing: 5) {
                     Text(tracker.name).font(.system(.headline, design: .default).weight(.semibold)).foregroundStyle(.primary).lineLimit(2)
                     if tracker.favorite == true { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.orange) }
+                    if DashboardInsights.batteryIsLow(tracker.battery) { Image(systemName: "battery.25percent").font(.caption2).foregroundStyle(.red).accessibilityLabel("Batterie schwach") }
                     if tracker.schoolBag == true { Image(systemName: "backpack.fill").font(.caption2).foregroundStyle(.indigo).accessibilityLabel("Tasche") }
                 }
                 HStack(spacing: 4) {

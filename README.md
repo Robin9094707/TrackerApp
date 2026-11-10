@@ -1,6 +1,6 @@
-# RJ Tracker 8.0.0 · Backend 22.0.0 · Overhaul
+# RJ Tracker 8.1.0 · Backend 22.1.0 · Overhaul
 
-Neues Design mit Startanimation, responsive **Web-App unter `/app`** (Karte, Ortung, Verlauf, Taschen, Mitteilungen), **Netz-Priorität für Fusionen** (Hauptnetz plus Backup) und Taschenmodus für jedes Objekt einschließlich Fusionen. Alle Server- und App-Daten bleiben kompatibel.
+Neues Design mit Startanimation, responsive **Web-App unter `/app`** (Karte, Ortung, Verlauf, Taschen, Mitteilungen), **Netz-Priorität für Fusionen** (Hauptnetz plus Backup) und Taschenmodus für jedes Objekt einschließlich Fusionen. Seit 8.1: schlaue Startseite mit Status-Ring und automatischen Hinweisen sowie „Zeitreise“ im Web-Verlauf. Alle Server- und App-Daten bleiben kompatibel.
 
 [Update, Web-App und Netz-Priorität](docs/UPGRADE-8.0.0.md) · [Changelog](IOS-CHANGELOG.md)
 
