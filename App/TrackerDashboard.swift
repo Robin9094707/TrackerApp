@@ -61,6 +61,13 @@ struct DashboardShortcut: View {
 
 struct SchoolBagHub: View {
     @Environment(AppModel.self) private var model
+
+    private static func fusionFirst(_ lhs: Tracker, _ rhs: Tracker) -> Bool {
+        let left = lhs.provider == "fusion" ? 0 : 1
+        let right = rhs.provider == "fusion" ? 0 : 1
+        if left != right { return left < right }
+        return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -68,13 +75,35 @@ struct SchoolBagHub: View {
                 if model.bootstrap?.session?.user?.isMainAdmin != true {
                     ContentUnavailableView("Hauptadmin-Anmeldung erforderlich", systemImage: "lock.shield")
                 } else {
-                    Text("Wähle einen Server-Tracker für seinen Tagesplan und die Wochenübersicht.")
+                    let all = (model.bootstrap?.trackers ?? []).filter { $0.archived != true }
+                    let bags = all.filter { $0.schoolBag == true }
+                    let others = all.filter { $0.schoolBag != true }.sorted(by: Self.fusionFirst)
+                    Text("Jedes Objekt kann eine Tasche sein – auch Fusionen aus Apple, Google und Samsung. Tippe für Tagesplan und Wochenübersicht.")
                         .font(.subheadline).foregroundStyle(.secondary)
+                    if !bags.isEmpty {
+                        Text("Aktive Taschen").font(.footnote.weight(.bold)).foregroundStyle(.secondary).textCase(.uppercase)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 14)], spacing: 14) {
+                            ForEach(bags) { tracker in
+                                VStack(spacing: 10) {
+                                    NavigationLink { SchoolPlanView(tracker: tracker) } label: {
+                                        TrackerListRow(tracker: tracker)
+                                    }.buttonStyle(.plain).accessibilityIdentifier("school-bag-\(tracker.ref)")
+                                    Divider()
+                                    BagToggleButton(tracker: tracker)
+                                }.rjCard()
+                            }
+                        }
+                    }
+                    Text(bags.isEmpty ? "Objekte" : "Weitere Objekte").font(.footnote.weight(.bold)).foregroundStyle(.secondary).textCase(.uppercase)
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 14)], spacing: 14) {
-                        ForEach(model.bootstrap?.trackers ?? []) { tracker in
-                            NavigationLink { SchoolPlanView(tracker: tracker) } label: {
-                                TrackerListRow(tracker: tracker).rjCard()
-                            }.buttonStyle(.plain).accessibilityIdentifier("school-bag-\(tracker.ref)")
+                        ForEach(others) { tracker in
+                            VStack(spacing: 10) {
+                                NavigationLink { SchoolPlanView(tracker: tracker) } label: {
+                                    TrackerListRow(tracker: tracker)
+                                }.buttonStyle(.plain).accessibilityIdentifier("school-bag-\(tracker.ref)")
+                                Divider()
+                                BagToggleButton(tracker: tracker)
+                            }.rjCard()
                         }
                     }
                 }

@@ -58,6 +58,7 @@ struct TrackerDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("tracker-school-plan")
+                    BagToggleButton(tracker: current).rjCompactCard()
                 }
                 RJGroupedSection(title: "Verlauf & Mitteilungen") {
                     NavigationLink { HistoryView(tracker: current) } label: {
@@ -293,6 +294,24 @@ struct FusionSourcesCard: View {
                 Label(summary, systemImage: disagreement["status"]?.stringValue == "warning" ? "exclamationmark.triangle" : "checkmark.shield")
                     .font(.footnote).foregroundStyle(.secondary)
             }
+            Divider()
+            NavigationLink {
+                FusionNetworkPolicyView(tracker: tracker)
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "list.number").foregroundStyle(.white)
+                        .frame(width: 30, height: 30)
+                        .background(RJBrand.gradient, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Netz-Priorität & Backup").font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                        Text(tracker.networkPolicySummary).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
+                }.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("fusion-network-priority")
         }.rjCard()
     }
 }

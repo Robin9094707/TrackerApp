@@ -1,3 +1,11 @@
+# RJ Tracker 8.0.0 · Backend 22.0.0 · Overhaul
+
+Neues Design mit Startanimation, responsive **Web-App unter `/app`** (Karte, Ortung, Verlauf, Taschen, Mitteilungen), **Netz-Priorität für Fusionen** (Hauptnetz plus Backup) und Taschenmodus für jedes Objekt einschließlich Fusionen. Alle Server- und App-Daten bleiben kompatibel.
+
+[Update, Web-App und Netz-Priorität](docs/UPGRADE-8.0.0.md) · [Changelog](IOS-CHANGELOG.md)
+
+---
+
 # RJ Tracker 7.0.0 · Backend 21.0.0
 
 Tracker-Panel im Stil der Panel-App, Schulwochen mit nachvollziehbaren Ortungsnachweisen, serverseitige Schulmeldungen und Bark mit mehreren Empfängern. Verbesserter Google-FCM-Empfang und direkte Protobuf-Auswertung.

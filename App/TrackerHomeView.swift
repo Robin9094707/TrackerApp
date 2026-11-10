@@ -158,7 +158,8 @@ struct TrackerListRow: View {
         HStack(spacing: 14) {
             Text(tracker.emoji ?? "📍").font(.system(size: 30))
                 .frame(width: 54, height: 54)
-                .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                .background(tracker.provider.rjProviderColor.opacity(0.16).gradient, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(tracker.provider.rjProviderColor.opacity(0.25), lineWidth: 1))
                 .overlay(alignment: .bottomTrailing) {
                     Image(systemName: tracker.provider.rjProviderSymbol)
                         .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
@@ -172,6 +173,7 @@ struct TrackerListRow: View {
                 HStack(spacing: 5) {
                     Text(tracker.name).font(.system(.headline, design: .default).weight(.semibold)).foregroundStyle(.primary).lineLimit(2)
                     if tracker.favorite == true { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.orange) }
+                    if tracker.schoolBag == true { Image(systemName: "backpack.fill").font(.caption2).foregroundStyle(.indigo).accessibilityLabel("Tasche") }
                 }
                 HStack(spacing: 4) {
                     Text(tracker.location?.address?.locality ?? tracker.provider.rjProviderName)

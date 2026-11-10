@@ -25,8 +25,27 @@ struct MoreView: View {
             }
             if model.showsGoogleControls { Section("Google Find Hub") { GoogleLauncherCard() } }
             if model.serverActionsAvailable {
+                if let webApp = webAppURL {
+                    Section {
+                        Link(destination: webApp) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "globe").foregroundStyle(.white)
+                                    .frame(width: 30, height: 30)
+                                    .background(RJBrand.gradient, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Web-App öffnen").font(.body.weight(.semibold)).foregroundStyle(.primary)
+                                    Text(webApp.absoluteString).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.up.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
+                            }
+                        }
+                    } footer: {
+                        Text("Alle Ortungsfunktionen, Verlauf und Taschen im Browser – mit demselben Login.")
+                    }
+                }
                 Section("Meine Objekte") {
-                    NavigationLink { SchoolBagHub() } label: { Label("Schultaschen & Wochenübersicht", systemImage: "backpack.fill") }
+                    NavigationLink { SchoolBagHub() } label: { Label("Taschen & Wochenübersicht", systemImage: "backpack.fill") }
                     NavigationLink { BarkSettingsView() } label: { Label("Bark & Sammelmeldungen", systemImage: "bell.badge.fill") }
                     NavigationLink { GroupsView() } label: { Label("Gruppen", systemImage: "folder") }
                     NavigationLink { ArchiveView() } label: { Label("Archiv & ausgeblendete Objekte", systemImage: "archivebox") }
@@ -60,6 +79,14 @@ struct MoreView: View {
         }
         .scrollContentBackground(.hidden).rjScreenChrome().navigationTitle("Ich").navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.refresh() }
+    }
+
+    private var webAppURL: URL? {
+        var base = model.serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else { return nil }
+        if !base.lowercased().hasPrefix("http") { base = "https://" + base }
+        while base.hasSuffix("/") { base.removeLast() }
+        return URL(string: base + "/app")
     }
 }
 

@@ -118,6 +118,8 @@ struct Tracker: Codable, Identifiable, Hashable {
     var refresh: TrackerRefresh?
     var networkDisagreement: JSONValue?
     var capabilities: JSONValue?
+    var schoolBag: Bool?
+    var networkPolicy: JSONValue?
 
     var id: String { ref }
 
@@ -133,6 +135,8 @@ struct Tracker: Codable, Identifiable, Hashable {
         case historyPolicy = "history_policy"
         case groups
         case networkDisagreement = "network_disagreement"
+        case schoolBag = "school_bag"
+        case networkPolicy = "network_policy"
     }
 }
 

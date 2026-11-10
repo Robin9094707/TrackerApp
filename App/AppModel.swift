@@ -520,6 +520,12 @@ final class AppModel {
         Haptics.success()
     }
 
+    /// 8.0: thin pass-through for the additive overhaul endpoints
+    /// (fusion network priority and bags). Existing routes are unchanged.
+    func serverJSON(_ path: String, method: String = "GET", json: [String: Any]? = nil, query: [URLQueryItem] = []) async throws -> JSONValue {
+        try await api.requestJSON(path: path, method: method, json: json, query: query)
+    }
+
     func runAction(_ action: String, payload: [String: Any]) async throws {
         _ = try await self.api.action(action, payload: payload)
         self.api.clearHistoryCache()
