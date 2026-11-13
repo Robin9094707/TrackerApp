@@ -110,6 +110,23 @@ class OverhaulApiTests(unittest.TestCase):
         self.assertEqual(anonymous.get("/api/mobile/v1/bootstrap").status_code, 401)
         self.assertEqual(anonymous.get("/api/mobile/v1/bags").status_code, 401)
 
+    def test_web_app_map_tiles_are_allowed_and_page_is_cached(self):
+        client = APP.test_client()
+        page = client.get("/app", headers={"Accept-Encoding": "gzip"})
+        self.assertEqual(page.headers.get("Content-Encoding"), "gzip")
+        body = gzip.decompress(page.data).decode("utf-8")
+        self.assertIn("tiles.openfreemap.org", body)
+        self.assertNotIn("tile.openstreetmap.org", body)
+        self.assertNotIn("resolve_addresses=1", body, "history must not block on geocoding every point")
+        csp = page.headers["Content-Security-Policy"]
+        for host in ("https://tiles.openfreemap.org", "https://server.arcgisonline.com", "blob:"):
+            self.assertIn(host, csp)
+        # Tile servers reject requests without a Referer; only the origin is sent.
+        self.assertEqual(page.headers["Referrer-Policy"], "strict-origin-when-cross-origin")
+        again = client.get("/app/", headers={"If-None-Match": page.headers["ETag"]})
+        self.assertEqual(again.status_code, 304)
+        self.assertEqual(client.get("/app").data.decode("utf-8"), body)
+
     def test_large_json_is_gzip_compressed_when_accepted(self):
         plain = self.client.get("/api/mobile/v1/bootstrap")
         packed = self.client.get("/api/mobile/v1/bootstrap", headers={"Accept-Encoding": "gzip"})

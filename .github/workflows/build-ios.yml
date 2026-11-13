@@ -54,12 +54,12 @@ jobs:
           python Tracker_Backend_AMP.py --amp-check
       - uses: actions/upload-artifact@v7.0.1
         with:
-          name: RJ-Tracker-Backend-22.1.0-AMP
+          name: RJ-Tracker-Backend-22.2.0-AMP
           path: Tracker_Backend_AMP.py
           if-no-files-found: error
           retention-days: 30
       - name: Publish backend download link
-        run: echo "Backend 22.1.0 AMP is available in this run’s Artifacts. Keep the existing data directory and start configuration." >> "$GITHUB_STEP_SUMMARY"
+        run: echo "Backend 22.2.0 AMP is available in this run’s Artifacts. Keep the existing data directory and start configuration." >> "$GITHUB_STEP_SUMMARY"
   build:
     needs: backend
     name: Build unsigned iOS IPA

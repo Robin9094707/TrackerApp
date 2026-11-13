@@ -1,3 +1,16 @@
+# RJ Tracker Backend 22.2.0 · Web-App im Liquid-Glass-Design
+
+Neue Web-App unter **`/app`** im Stil von Apples „Wo ist?“ – für Computer, iPad und Handy-Browser. Die App bleibt unverändert, es wird nur die Serverdatei ersetzt. Daten, Anmeldungen und Tracker bleiben erhalten.
+
+- **Orten, Aktualisieren, Standortverlauf** mit Zeitreise, Aufenthalten und Tagesauswahl, dazu Mitteilungen
+- **Karte repariert:** OpenFreeMap-Vektorkarte (ohne Schlüssel und ohne Abrufgrenze) mit deutschen Beschriftungen, Hell/Dunkel und Satellit. Die alte Seite schickte keinen Referer mit, deshalb hat OpenStreetMap die Kacheln gesperrt.
+- **Kein endloses Laden mehr:** Der Verlauf fragt nicht mehr für jeden Punkt eine Adresse ab (vorher etwa 1 Sekunde pro Punkt). Adressen werden nur noch bei Bedarf geladen, und alle Anfragen haben eine Zeitgrenze.
+- Desktop/iPad mit schwebender Seitenleiste, Handy mit Bottom Sheet und Tab-Leiste. Die Seite ist komprimiert etwa 24 KB groß und wird per ETag zwischengespeichert.
+
+Die Action **Check and package Tracker backend** erzeugt `Tracker_Backend_AMP.py` (22.2.0).
+
+---
+
 # RJ Tracker 8.1.0 · Backend 22.1.0 · Overhaul
 
 Neues Design mit Startanimation, responsive **Web-App unter `/app`** (Karte, Ortung, Verlauf, Taschen, Mitteilungen), **Netz-Priorität für Fusionen** (Hauptnetz plus Backup) und Taschenmodus für jedes Objekt einschließlich Fusionen. Seit 8.1: schlaue Startseite mit Status-Ring und automatischen Hinweisen sowie „Zeitreise“ im Web-Verlauf. Alle Server- und App-Daten bleiben kompatibel.
