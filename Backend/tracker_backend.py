@@ -30674,7 +30674,7 @@ if not _DISABLE_BACKGROUND:
 # * school_mode.json keeps its schema; bags are toggled exactly like before.
 # * /app serves a responsive web client that only uses the existing
 #   session-cookie + CSRF protected mobile API.
-APP_VERSION = "22.2.0 LIQUID GLASS"
+APP_VERSION = "22.2.1 LIQUID GLASS"
 WEB_APP_PATH = "/app"
 _FUSION_BACKUP_REASONS = {"linked_history", "fusion_optimization", "fusion_history", "school_bag", "background", "history"}
 
@@ -31477,7 +31477,7 @@ async function refreshAll(btn){const b=$("#b-refresh");b.classList.add("busy");t
 async function locate(ref){if(S.locating.has(ref))return;S.locating.add(ref);renderMarkers();render(true);
   const t0=now()-2,before=(byRef(ref)||{}).last_seen_ts||0,fusion=ref.startsWith("fusion:");let done=false,got=false;
   try{await api(P+"/locate",{method:"POST",body:{tracker:ref}});toast("Ortung angefordert …",1800);
-    for(let i=0;i<40&&!done;i++){await sleep(i<6?1500:2500);
+    for(let i=0;i<30&&!done;i++){await sleep(i<4?2500:4000);
       try{if(!fusion){const x=await api(P+"/tracker-refresh?ref="+enc(ref)+"&after="+t0);if(x.refresh&&x.refresh.completion>t0)done=true}
         else{const x=await api(P+"/tracker?ref="+enc(ref));if((x.tracker&&x.tracker.last_seen_ts||0)>before)done=true;else if(i>=14)done=true}}catch(e){if(e.status===401)throw e}}
     await loadTrackers();const t=byRef(ref);got=t&&(t.last_seen_ts||0)>before;
@@ -31655,7 +31655,7 @@ async function showApp(){S.authed=true;$("#login").hidden=true;["#panel","#tabba
   const ref=decodeURIComponent(location.hash.slice(1)||"");
   try{await loadTrackers();if(ref&&byRef(ref))select(ref)}catch(e){toast(e.message,4000)}
   loadAlerts();clearInterval(S.t1);clearInterval(S.t2);
-  S.t1=setInterval(()=>{if(!document.hidden&&!S.locAll)loadTrackers().catch(()=>{})},20000);
+  S.t1=setInterval(()=>{if(!document.hidden&&!S.locAll&&!S.locating.size)loadTrackers().catch(()=>{})},20000);
   S.t2=setInterval(()=>{if(!document.hidden)loadAlerts()},60000)}
 async function logout(){try{await api("/api/logout",{method:"POST"})}catch(e){}S.csrf="";S.trackers=[];S.loaded=false;for(const[,m]of MK)m.mk.remove();MK.clear();showLogin()}
 let p2fa=false;
@@ -31690,6 +31690,64 @@ setTimeout(bootDone,4000);
 </body>
 </html>
 '''
+
+
+# --- 22.2.1: hang watchdog --------------------------------------------------
+# Read-only diagnostics. When a request runs longer than the threshold, the
+# console receives the request path plus the stack of every thread once, so a
+# blocked lock or a stalled provider call can be located from the AMP log.
+_HANG_SECONDS = max(5.0, float(os.environ.get("ULTRA_TRACKER_HANG_SECONDS", "20") or 20))
+_hang_requests = {}
+_hang_lock = threading.Lock()
+_hang_last_dump = [0.0]
+
+
+@app.before_request
+def hang_watchdog_begin():
+    with _hang_lock:
+        _hang_requests[threading.get_ident()] = (time.monotonic(), request.method, request.path, False)
+
+
+@app.teardown_request
+def hang_watchdog_end(_exc=None):
+    with _hang_lock:
+        _hang_requests.pop(threading.get_ident(), None)
+
+
+def hang_watchdog_dump(stuck):
+    import traceback as _traceback
+    names = {thread.ident: thread.name for thread in threading.enumerate()}
+    lines = ["HÄNGER ERKANNT – laufende Anfragen:"]
+    lines += [f"  {method} {path} seit {age:.0f} s (Thread {names.get(ident, ident)})" for ident, age, method, path in stuck]
+    for ident, frame in sys._current_frames().items():
+        if ident == threading.get_ident():
+            continue
+        stack = "".join(_traceback.format_stack(frame, limit=14))
+        lines.append(f"--- Thread {names.get(ident, ident)} ---\n{stack}")
+    logger.error("\n".join(lines)[:60000])
+
+
+def hang_watchdog_loop():
+    while True:
+        time.sleep(5)
+        try:
+            now_m = time.monotonic()
+            with _hang_lock:
+                stuck = []
+                for ident, (started, method, path, reported) in list(_hang_requests.items()):
+                    if not reported and now_m - started > _HANG_SECONDS and not path.endswith("/stream"):
+                        stuck.append((ident, now_m - started, method, path))
+                        _hang_requests[ident] = (started, method, path, True)
+            if stuck and now_m - _hang_last_dump[0] > 60:
+                _hang_last_dump[0] = now_m
+                hang_watchdog_dump(stuck)
+            elif stuck:
+                logger.warning("Anfrage hängt weiterhin: %s", ", ".join(f"{m} {p} ({a:.0f} s)" for _, a, m, p in stuck))
+        except Exception:
+            pass
+
+
+threading.Thread(target=hang_watchdog_loop, daemon=True, name="hang-watchdog").start()
 
 
 if __name__ == "__main__":
