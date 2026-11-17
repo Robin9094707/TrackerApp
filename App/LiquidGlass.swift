@@ -31,7 +31,7 @@ extension View {
         if #available(iOS 26.0, *) {
             if prominent { self.buttonStyle(.glassProminent) } else { self.buttonStyle(.glass) }
         } else {
-            if prominent { self.rjGlassButtonStyle(prominent: true) } else { self.rjGlassButtonStyle() }
+            if prominent { self.buttonStyle(.borderedProminent) } else { self.buttonStyle(.bordered) }
         }
     }
 
