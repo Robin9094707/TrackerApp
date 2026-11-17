@@ -305,7 +305,7 @@ struct NativeGoogleHistoryView: View {
                             }.rjCard()
                         }
                         if limit < points.count {
-                            Button("Weitere Meldungen") { limit += 120 }.buttonStyle(.bordered).buttonBorderShape(.capsule).frame(maxWidth: .infinity)
+                            Button("Weitere Meldungen") { limit += 120 }.rjGlassButtonStyle().buttonBorderShape(.capsule).frame(maxWidth: .infinity)
                                 .onAppear { limit += 120 }
                         }
                     }
@@ -408,7 +408,7 @@ struct GoogleNearbyView: View {
                 Text("\(Int(signal)) dBm · stärkeres Signal bedeutet meist näher").font(.caption).foregroundStyle(.secondary)
             }
             Text("Bewege dich langsam. Die Anzeige verwendet Bluetooth-Signalstärke.").multilineTextAlignment(.center).foregroundStyle(.secondary)
-            Button("Klingeln lassen", systemImage: "speaker.wave.2.fill") { Task { do { try await google.ring(deviceID) } catch { message = error.localizedDescription } } }.buttonStyle(.borderedProminent)
+            Button("Klingeln lassen", systemImage: "speaker.wave.2.fill") { Task { do { try await google.ring(deviceID) } catch { message = error.localizedDescription } } }.rjGlassButtonStyle(prominent: true)
             if let message { Text(message).font(.footnote).foregroundStyle(.orange) }
             Spacer()
         }.padding(24).rjScreenChrome().navigationTitle("Nahsuche").navigationBarTitleDisplayMode(.inline)

@@ -44,7 +44,12 @@ struct TrackerDetailMap: View {
         .fullScreenCover(isPresented: $expanded) {
             NavigationStack {
                 TrackerLocationMapCanvas(tracker: tracker)
-                    .safeAreaInset(edge: .bottom) { locationCaption.padding(16).background(.regularMaterial) }
+                    .rjSafeAreaBar(edge: .bottom) {
+                        locationCaption
+                            .padding(.horizontal, 18).padding(.vertical, 14)
+                            .rjGlassSurface(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                            .padding(.horizontal, 16).padding(.bottom, 8)
+                    }
                     .navigationTitle(tracker.name)
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {

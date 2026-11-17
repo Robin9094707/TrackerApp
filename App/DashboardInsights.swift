@@ -133,6 +133,8 @@ struct DashboardHero: View {
             }
         }
         .frame(width: 76, height: 76)
+        .padding(10)
+        .rjGlassSurface(Circle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(fresh) von \(total) Objekten aktuell")
     }
@@ -152,9 +154,10 @@ struct DashboardInsightsCard: View {
                     Text("Hinweise").font(.headline)
                     Spacer()
                     if !rows.isEmpty {
-                        Text("\(rows.count)").font(.caption.weight(.bold)).foregroundStyle(.white)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
+                        Text("\(rows.count)").font(.caption.weight(.bold).monospacedDigit()).foregroundStyle(.white)
+                            .padding(.horizontal, 9).padding(.vertical, 3)
                             .background(Color.orange.gradient, in: Capsule())
+                            .contentTransition(.numericText())
                     }
                 }
                 if rows.isEmpty {

@@ -14,13 +14,15 @@ struct TrackerLibraryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 DashboardHero(trackers: model.trackers).padding(.top, 8)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 10)], spacing: 10) {
-                    NavigationLink { TrackerMapOverview() } label: { DashboardShortcut(title: "Karte", symbol: "map.fill", tint: .teal) }
-                    if model.serverActionsAvailable {
-                        NavigationLink { SchoolBagHub() } label: { DashboardShortcut(title: "Taschen", symbol: "backpack.fill", tint: .indigo) }
-                        NavigationLink { BarkSettingsView() } label: { DashboardShortcut(title: "Bark", symbol: "bell.badge.fill", tint: .orange) }
-                    }
-                }.buttonStyle(RJPressStyle())
+                RJGlassGroup(spacing: 6) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 10)], spacing: 10) {
+                        NavigationLink { TrackerMapOverview() } label: { DashboardShortcut(title: "Karte", symbol: "map.fill", tint: .teal) }
+                        if model.serverActionsAvailable {
+                            NavigationLink { SchoolBagHub() } label: { DashboardShortcut(title: "Taschen", symbol: "backpack.fill", tint: .indigo) }
+                            NavigationLink { BarkSettingsView() } label: { DashboardShortcut(title: "Bark", symbol: "bell.badge.fill", tint: .orange) }
+                        }
+                    }.buttonStyle(RJPressStyle())
+                }
                 if !model.trackers.isEmpty {
                     DashboardInsightsCard(trackers: model.trackers, onSelect: onSelect).rjCard()
                 }
@@ -28,17 +30,20 @@ struct TrackerLibraryView: View {
                     HStack(alignment: .top) {
                         Text(message).font(.footnote).foregroundStyle(.secondary)
                         Spacer()
-                        Button { model.statusMessage = nil } label: { Image(systemName: "xmark.circle.fill") }
+                        Button { withAnimation(.snappy) { model.statusMessage = nil } } label: { Image(systemName: "xmark") }
+                            .buttonBorderShape(.circle)
+                            .rjGlassButtonStyle()
                             .accessibilityLabel("Hinweis schließen")
                     }.rjCard()
+                    .rjGlassMaterialize()
                 }
                 HStack {
                     Text("Meine Objekte").font(.title2.bold())
                     Spacer()
                     Text("\(model.filteredTrackers.count)").font(.subheadline.weight(.bold).monospacedDigit())
                         .foregroundStyle(Color.accentColor)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(Color.accentColor.opacity(0.12), in: Capsule())
+                        .padding(.horizontal, 12).padding(.vertical, 5)
+                        .rjGlassSurface(Capsule(), tint: Color.accentColor.opacity(0.18))
                         .contentTransition(.numericText())
                 }
                 if model.selectedScope != .all || model.providerFilter != "all" {
@@ -50,9 +55,10 @@ struct TrackerLibraryView: View {
                 } else if model.filteredTrackers.isEmpty {
                     ContentUnavailableView(model.trackers.isEmpty ? "Noch keine Objekte" : "Keine Treffer", systemImage: "airtag", description: Text(model.trackers.isEmpty ? "Füge über + deine Tracker hinzu." : "Passe deine Suche oder Filter an."))
                 }
+                RJGlassGroup(spacing: 8) {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 14)], spacing: 14) {
                     ForEach(model.filteredTrackers) { tracker in
-                        Button { onSelect(tracker) } label: { TrackerListRow(tracker: tracker).rjCard() }
+                        Button { onSelect(tracker) } label: { TrackerListRow(tracker: tracker).rjCard(interactive: true) }
                             .buttonStyle(RJPressStyle())
                             .accessibilityIdentifier("tracker-row-\(tracker.ref)")
                             .contextMenu {
@@ -63,6 +69,7 @@ struct TrackerLibraryView: View {
                                 if tracker.validLocation != nil { ShareLink(item: tracker.shareText) { Label("Standort teilen", systemImage: "square.and.arrow.up") } }
                             }
                     }
+                }
                 }
                 SyncStatusView().rjCard()
             }.padding(20).padding(.bottom, 24).frame(maxWidth: 1100).frame(maxWidth: .infinity)
@@ -79,11 +86,11 @@ struct TrackerLibraryView: View {
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fertig") { addingObject = false } } }
             }
         }
-        .searchable(text: $model.searchText, prompt: "Name, Adresse oder Notiz")
         .refreshable { await refreshVisibleSources() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { addingObject = true } label: { Image(systemName: "plus").font(.title2.weight(.medium)) }
+                Button { addingObject = true } label: { Image(systemName: "plus").font(.body.weight(.semibold)) }
+                    .rjToolbarProminent()
                     .accessibilityLabel("Objekt hinzufügen")
             }
             ToolbarItem(placement: .topBarLeading) {

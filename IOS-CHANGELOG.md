@@ -1,3 +1,12 @@
+# 8.2.0 (Build 35) · Liquid Glass · Backend 22.2.1 (unverändert)
+
+- Echtes Liquid Glass von iOS 26 in der ganzen App: Karten, Kacheln, Abschnitte, Kartensteuerung und Statusanzeigen nutzen `glassEffect` und reagieren beim Antippen. Benachbartes Glas wird gruppiert (`GlassEffectContainer`).
+- Neue Tab-Leiste: eigener Such-Tab (der runde Glasknopf neben der Tab-Leiste), die Leiste wird beim Scrollen kleiner, und darüber sitzt eine Statuszeile mit Ring „x von y aktuell“, Aktualisieren und „Alle orten“.
+- Karte: Steuerung in einer Glaskapsel, schwebende Statusleiste und ein Aktionsknopf, der sich zu „Alle orten“ und „Aktualisieren“ aufklappt. Tippt man ein Objekt an, öffnet es sich als Halbblatt, und die Karte bleibt bedienbar.
+- Objektdetails: Favoritenstern als getönter Glasknopf, Orten und Route als Glaskacheln. Mitteilungen, Ort speichern und Bereich überwachen öffnen mit Zoom-Übergang. Sheets haben eine halbe und eine volle Höhe.
+- Buttons in der ganzen App nutzen die Glas-Stile `.glass` und `.glassProminent`. Unter „Ich“ gibt es farbige Symbole wie in den Einstellungen. Unter iOS 18 bleibt das bisherige Material-Design.
+- Server und Daten bleiben unverändert: einfach die IPA als Update über die bestehende App installieren.
+
 # 8.1.0 (Build 34) · Backend 22.1.0
 
 - Startseite mit Begrüßung nach Tageszeit, Status-Ring („x von y aktuell“) und automatischen Hinweisen: schwache Batterie, lange keine Meldung, noch kein Standort. Ein Tipp öffnet das Objekt.

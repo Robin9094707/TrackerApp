@@ -96,7 +96,7 @@ struct HistoryView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             Label("Verlauf konnte nicht aktualisiert werden", systemImage: "wifi.exclamationmark").font(.headline)
                             Text(error).font(.footnote).foregroundStyle(.secondary)
-                            Button("Erneut versuchen") { Task { await load(force: true) } }.buttonStyle(.bordered).buttonBorderShape(.capsule)
+                            Button("Erneut versuchen") { Task { await load(force: true) } }.rjGlassButtonStyle().buttonBorderShape(.capsule)
                         }.rjCard()
                     }
                     if response != nil && (!points.isEmpty || (!loading && !preparing)) {
@@ -253,7 +253,7 @@ struct HistoryView: View {
                     .font(.subheadline.weight(.semibold))
                     .frame(minHeight: 36)
             }
-            .buttonStyle(.bordered)
+            .rjGlassButtonStyle()
             .buttonBorderShape(.capsule)
             .accessibilityIdentifier("history-today")
             if calendarResponse == nil {
@@ -752,7 +752,7 @@ struct HistoryView: View {
             }
             if timelineLimit < timelineCount {
                 Button("Weitere Meldungen (\(timelineCount - timelineLimit))") { timelineLimit += 100 }
-                    .buttonStyle(.bordered).buttonBorderShape(.capsule).frame(maxWidth: .infinity).padding(.vertical, 6)
+                    .rjGlassButtonStyle().buttonBorderShape(.capsule).frame(maxWidth: .infinity).padding(.vertical, 6)
                     .onAppear { timelineLimit = min(timelineCount, timelineLimit + 100) }
             }
         }

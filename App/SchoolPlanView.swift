@@ -214,7 +214,7 @@ struct SchoolPlanView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.secondary)
                         Button("Erneut laden", systemImage: "arrow.clockwise") { Task { await load() } }
-                            .buttonStyle(.bordered)
+                            .rjGlassButtonStyle()
                     }.rjCard()
                 }
                 if let snapshot {
@@ -275,7 +275,7 @@ struct SchoolPlanView: View {
             }
             Button(value.enabled ? "Orte und Routinen einrichten" : "Schultaschenmodus einrichten", systemImage: "slider.horizontal.3") {
                 showEditor = true
-            }.buttonStyle(.borderedProminent)
+            }.rjGlassButtonStyle(prominent: true)
         }.frame(maxWidth: .infinity, alignment: .leading).rjCard()
     }
 

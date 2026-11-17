@@ -35,13 +35,13 @@ struct RJGlassBackdrop: View {
                 startPoint: .top, endPoint: .bottom)
             if !reduceTransparency {
                 GeometryReader { geometry in
-                    Circle().fill(RJBrand.indigo.opacity(scheme == .dark ? 0.22 : 0.14))
+                    Circle().fill(RJBrand.indigo.opacity(scheme == .dark ? 0.30 : 0.20))
                         .frame(width: geometry.size.width * 1.1).blur(radius: 110)
                         .offset(x: geometry.size.width * 0.35, y: -260)
-                    Circle().fill(RJBrand.violet.opacity(scheme == .dark ? 0.16 : 0.10))
+                    Circle().fill(RJBrand.violet.opacity(scheme == .dark ? 0.24 : 0.16))
                         .frame(width: geometry.size.width).blur(radius: 120)
                         .offset(x: -geometry.size.width * 0.55, y: geometry.size.height * 0.45)
-                    Circle().fill(Color.cyan.opacity(scheme == .dark ? 0.07 : 0.06))
+                    Circle().fill(Color.cyan.opacity(scheme == .dark ? 0.14 : 0.12))
                         .frame(width: geometry.size.width * 0.7).blur(radius: 100)
                         .offset(x: geometry.size.width * 0.5, y: geometry.size.height * 0.8)
                 }
@@ -67,33 +67,36 @@ extension View {
         }
     }
 
-    func rjCard() -> some View {
-        modifier(RJPanelCard())
+    /// Large content card. iOS 26: Liquid Glass, interactive when the card is tappable.
+    func rjCard(interactive: Bool = false, tint: Color? = nil) -> some View {
+        modifier(RJPanelCard(interactive: interactive, tint: tint))
     }
 
-    func rjCompactCard() -> some View {
+    func rjCompactCard(interactive: Bool = false) -> some View {
         padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: RJDesign.compactCorner, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: RJDesign.compactCorner, style: .continuous).strokeBorder(Color.primary.opacity(0.06)))
+            .modifier(RJCompactSurface(interactive: interactive))
     }
 
     func rjScreenChrome() -> some View {
         background(RJGlassBackdrop())
-            .toolbarBackground(.hidden, for: .navigationBar)
+            .rjNavigationBarChrome()
+            .rjSoftScrollEdge()
     }
 
     func rjListChrome() -> some View {
         scrollContentBackground(.hidden)
             .background(RJGlassBackdrop())
             .listStyle(.insetGrouped)
-            .toolbarBackground(.hidden, for: .navigationBar)
+            .rjNavigationBarChrome()
+            .rjSoftScrollEdge()
     }
 
     func rjFormChrome() -> some View {
         scrollContentBackground(.hidden)
             .background(RJGlassBackdrop())
-            .toolbarBackground(.hidden, for: .navigationBar)
+            .rjNavigationBarChrome()
+            .rjSoftScrollEdge()
     }
 
     func rjGlassControl() -> some View {
@@ -103,8 +106,21 @@ extension View {
 }
 
 private struct RJPanelCard: ViewModifier {
+    var interactive = false
+    var tint: Color? = nil
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .glassEffect(.regular.tint(tint).interactive(interactive),
+                             in: RoundedRectangle(cornerRadius: RJDesign.corner, style: .continuous))
+        } else {
+            legacy(content)
+        }
+    }
+
+    private func legacy(_ content: Content) -> some View {
         content.padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
@@ -123,13 +139,27 @@ private struct RJPanelCard: ViewModifier {
     }
 }
 
+private struct RJCompactSurface: ViewModifier {
+    var interactive = false
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.interactive(interactive),
+                                in: RoundedRectangle(cornerRadius: RJDesign.compactCorner, style: .continuous))
+        } else {
+            content
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: RJDesign.compactCorner, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: RJDesign.compactCorner, style: .continuous).strokeBorder(Color.primary.opacity(0.06)))
+        }
+    }
+}
+
 private struct RJInteractiveGlass: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     func body(content: Content) -> some View {
-        if reduceTransparency {
-            content.background(Color(uiColor: .secondarySystemGroupedBackground), in: Circle())
-        } else if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, *) {
             content.glassEffect(.regular.interactive(), in: Circle())
+        } else if reduceTransparency {
+            content.background(Color(uiColor: .secondarySystemGroupedBackground), in: Circle())
         } else {
             content.background(.regularMaterial, in: Circle())
         }
@@ -137,11 +167,10 @@ private struct RJInteractiveGlass: ViewModifier {
 }
 
 struct RJGlassControls<Content: View>: View {
+    var spacing: CGFloat = 12
     @ViewBuilder var content: () -> Content
     var body: some View {
-        if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: 12) { content() }
-        } else { content() }
+        RJGlassGroup(spacing: spacing, content: content)
     }
 }
 
@@ -151,8 +180,7 @@ struct RJPrimaryButtonStyle: ButtonStyle {
         if #available(iOS 26.0, *) {
             configuration.label.padding(.horizontal, 16).padding(.vertical, 8)
                 .foregroundStyle(.white)
-                .glassEffect(.regular.tint(.blue).interactive(), in: Capsule())
-                .opacity(configuration.isPressed ? 0.75 : 1)
+                .glassEffect(.regular.tint(.accentColor).interactive(), in: Capsule())
         } else {
             configuration.label.padding(.horizontal, 16).padding(.vertical, 8)
                 .foregroundStyle(.white).background(.blue, in: Capsule())
@@ -180,7 +208,10 @@ struct RJLaunchView: View {
                     Text("RJ Tracker").font(.largeTitle.bold())
                     Text("Deine Dinge. Immer im Blick.").font(.subheadline).foregroundStyle(.secondary)
                 }
-                ProgressView("Verbinden …").font(.caption).padding(.top, 4)
+                ProgressView("Verbinden …").font(.caption)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .rjGlassSurface(Capsule())
+                    .padding(.top, 4)
             }
             .opacity(appeared || reduceMotion ? 1 : 0)
             .offset(y: appeared || reduceMotion ? 0 : 12)
@@ -360,9 +391,9 @@ struct AccuracyPill: View {
         if let accuracy, accuracy > 0 {
             Label("±\(accuracy.metersText)", systemImage: "scope")
                 .font(.caption.weight(.semibold))
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(.secondary.opacity(0.12), in: Capsule())
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .rjGlassSurface(Capsule())
         }
     }
 }
@@ -430,7 +461,7 @@ struct TrackerMapBubble: View {
                     .overlay(Circle().stroke(selected ? Color.accentColor : Color.black.opacity(0.06), lineWidth: selected ? 3 : 0.5))
                 if locating {
                     ProgressView().controlSize(.mini).padding(4)
-                        .background(.regularMaterial, in: Circle())
+                        .rjGlassSurface(Circle())
                         .offset(x: 4, y: -4)
                 } else if tracker.favorite == true {
                     Image(systemName: "star.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
@@ -470,10 +501,10 @@ struct RJMapControlStack<Content: View>: View {
         let stack = VStack(spacing: 0) { content() }
             .font(.system(size: 19, weight: .medium))
             .buttonStyle(.plain)
-        if reduceTransparency {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 0) { stack.glassEffect(.regular.interactive(), in: Capsule()) }
+        } else if reduceTransparency {
             stack.background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
-        } else if #available(iOS 26.0, *) {
-            stack.glassEffect(.regular.interactive(), in: Capsule())
         } else {
             stack.background(.regularMaterial, in: Capsule())
                 .overlay(Capsule().stroke(Color.primary.opacity(0.06), lineWidth: 0.5).allowsHitTesting(false))
@@ -743,8 +774,7 @@ struct TrackerActionTile: View {
         }
         .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
         .padding(14)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.primary.opacity(0.05), lineWidth: 0.5))
+        .rjGlassSurface(RoundedRectangle(cornerRadius: 22, style: .continuous), interactive: isEnabled)
         .opacity(isEnabled ? 1 : 0.5)
         .contentShape(RoundedRectangle(cornerRadius: 22))
     }
@@ -786,7 +816,7 @@ struct RJGroupedSection<Content: View>: View {
             }
             VStack(spacing: 0) { content() }
                 .padding(.horizontal, 14)
-                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .rjGlassSurface(RoundedRectangle(cornerRadius: 22, style: .continuous))
             if let footer {
                 Text(footer).font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 6)
             }

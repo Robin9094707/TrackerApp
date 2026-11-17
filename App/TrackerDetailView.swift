@@ -19,6 +19,7 @@ struct TrackerDetailView: View {
     @State private var busy = false
     @State private var showDelete = false
     @State private var deletionError: String?
+    @Namespace private var sheetSource
     private var current: Tracker { model.trackers.first { $0.ref == tracker.ref } ?? tracker }
 
     var body: some View {
@@ -68,6 +69,7 @@ struct TrackerDetailView: View {
                     Button { showAutomation = true } label: {
                         detailRow("Mitteilungen", subtitle: alarmSubtitle, icon: "bell.badge.fill", color: .red)
                     }
+                    .matchedTransitionSource(id: "automation", in: sheetSource)
                 }
                 .buttonStyle(.plain)
                 if current.provider == "google" {
@@ -78,10 +80,12 @@ struct TrackerDetailView: View {
                     Button { showSavePlace = true } label: {
                         detailRow("Diesen Ort speichern", subtitle: "Standort als Ort merken", icon: "star.fill", color: .orange)
                     }.disabled(current.validLocation == nil)
+                    .matchedTransitionSource(id: "save-place", in: sheetSource)
                     Divider().padding(.leading, 44)
                     Button { showGeofence = true } label: {
                         detailRow("Bereich überwachen", subtitle: "Mitteilung beim Betreten oder Verlassen", icon: "mappin.and.ellipse", color: .green)
                     }.disabled(current.validLocation == nil)
+                    .matchedTransitionSource(id: "geofence", in: sheetSource)
                 }
                 .buttonStyle(.plain)
                 information
@@ -90,9 +94,10 @@ struct TrackerDetailView: View {
                     RJGroupedSection(footer: "Der Server legt einen Recovery-Fall an und fragt häufiger ab. Dies aktiviert keinen offiziellen Apple-Verloren-Modus.") {
                         Button { showRecoveryConfirm = true } label: {
                             HStack {
-                                Text("Als vermisst suchen").font(.body.weight(.medium)).foregroundStyle(.red)
+                                Text("Als vermisst suchen").font(.body.weight(.semibold)).foregroundStyle(.red)
                                 Spacer()
                                 Image(systemName: "lifepreserver.fill").foregroundStyle(.red)
+                                    .symbolEffect(.pulse, isActive: busy)
                             }.padding(.vertical, 14).contentShape(Rectangle())
                         }.buttonStyle(.plain).disabled(busy)
                     }
@@ -130,7 +135,10 @@ struct TrackerDetailView: View {
                 .accessibilityLabel("Objektaktionen")
             }
         }
-        .sheet(isPresented: $showGroups) { NavigationStack { GroupAssignmentView(tracker: current) } }
+        .sheet(isPresented: $showGroups) {
+            NavigationStack { GroupAssignmentView(tracker: current) }
+                .presentationDetents([.medium, .large])
+        }
         .confirmationDialog("Apple-Tracker endgültig aus dieser App entfernen?", isPresented: $showDelete, titleVisibility: .visible) {
             Button("Tracker & App-Verlauf löschen", role: .destructive) { Task { await removeAppleTracker() } }
         } message: {
@@ -142,10 +150,23 @@ struct TrackerDetailView: View {
                 Button(action == "hidden" ? "Ausblenden" : "Archivieren") { Task { await changeVisibility(action) } }
             }
         } message: { Text("Du kannst es unter Ich → Archiv wiederherstellen. Gespeicherte Daten werden nicht gelöscht.") }
-        .sheet(isPresented: $showEdit) { NavigationStack { TrackerEditorView(tracker: current) } }
-        .sheet(isPresented: $showAutomation) { NavigationStack { TrackerAutomationView(tracker: current) } }
-        .sheet(isPresented: $showSavePlace) { NavigationStack { PlaceEditorView(seed: current.validLocation, suggestedName: current.name) } }
-        .sheet(isPresented: $showGeofence) { NavigationStack { PlaceEditorView(seed: current.validLocation, suggestedName: current.name, geofence: true, trackerRef: current.ref) } }
+        .sheet(isPresented: $showEdit) {
+            NavigationStack { TrackerEditorView(tracker: current) }
+                .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showAutomation) {
+            NavigationStack { TrackerAutomationView(tracker: current) }
+                .presentationDetents([.medium, .large])
+                .navigationTransition(.zoom(sourceID: "automation", in: sheetSource))
+        }
+        .sheet(isPresented: $showSavePlace) {
+            NavigationStack { PlaceEditorView(seed: current.validLocation, suggestedName: current.name) }
+                .navigationTransition(.zoom(sourceID: "save-place", in: sheetSource))
+        }
+        .sheet(isPresented: $showGeofence) {
+            NavigationStack { PlaceEditorView(seed: current.validLocation, suggestedName: current.name, geofence: true, trackerRef: current.ref) }
+                .navigationTransition(.zoom(sourceID: "geofence", in: sheetSource))
+        }
         .confirmationDialog("Recovery-Suche starten?", isPresented: $showRecoveryConfirm, titleVisibility: .visible) {
             Button("Suche aktivieren") { Task { await recover() } }
         } message: { Text("Der Server legt einen Recovery-Fall an. Dies aktiviert keinen offiziellen Apple-Verloren-Modus.") }
@@ -156,9 +177,11 @@ struct TrackerDetailView: View {
         HStack(alignment: .top, spacing: 8) {
             TrackerLocationSummary(symbol: current.emoji ?? "📍", provider: current.latestSourceName ?? current.provider,
                 location: current.validLocation, timestamp: current.reportTimestamp > 0 ? current.reportTimestamp : nil)
-            Button { Task { await model.setFavorite(current) } } label: {
-                Image(systemName: current.favorite == true ? "star.fill" : "star").foregroundStyle(.orange).frame(width: 44, height: 44)
-            }.buttonStyle(.plain).disabled(model.updatingRefs.contains(current.ref)).accessibilityLabel("Favorit umschalten")
+            RJGlassIconButton(symbol: current.favorite == true ? "star.fill" : "star", label: "Favorit umschalten",
+                              tint: current.favorite == true ? .orange : nil) {
+                Task { await model.setFavorite(current) }
+            }
+            .disabled(model.updatingRefs.contains(current.ref))
         }
     }
 
@@ -171,9 +194,11 @@ struct TrackerDetailView: View {
     }
 
     private var actions: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) { locateButton; routeButton }
-            VStack(spacing: 10) { locateButton; routeButton }
+        RJGlassGroup(spacing: 6) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) { locateButton; routeButton }
+                VStack(spacing: 10) { locateButton; routeButton }
+            }
         }
     }
 
@@ -339,7 +364,9 @@ struct TrackerEditorView: View {
                 ScrollView(.horizontal) {
                     HStack {
                         ForEach(["🎒", "🔑", "🚲", "🧳", "🚗", "🛴", "👜", "📍"], id: \.self) { symbol in
-                            Button { emoji = symbol } label: { Text(symbol).font(.title).padding(8) }.buttonStyle(.plain)
+                            Button { emoji = symbol } label: { Text(symbol).font(.title).frame(width: 52, height: 52) }
+                                .buttonStyle(.plain)
+                                .rjGlassSurface(Circle(), tint: emoji == symbol ? Color.accentColor.opacity(0.35) : nil, interactive: true)
                         }
                     }
                 }
@@ -347,6 +374,7 @@ struct TrackerEditorView: View {
             Section("Notiz") { TextField("Zum Beispiel: im Innenfach", text: $note, axis: .vertical).lineLimit(3...6) }
             if let error { Section { Text(error).foregroundStyle(.red) } }
         }
+        .rjSheetGlassForm()
         .navigationTitle("Objekt bearbeiten").navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() } }
@@ -441,7 +469,8 @@ struct TrackerAutomationView: View {
         .onAppear(perform: loadAlarmSettings)
         .navigationTitle("Mitteilungen & Verlauf").navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() }.disabled(busy) } }
-        .overlay { if busy { ProgressView().padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18)) } }
+        .rjSheetGlassForm()
+        .overlay { if busy { ProgressView().padding(22).rjGlassSurface(RoundedRectangle(cornerRadius: 20, style: .continuous)) } }
         .interactiveDismissDisabled(busy)
     }
     @ViewBuilder private var deliveryChoices: some View {

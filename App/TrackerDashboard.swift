@@ -10,26 +10,38 @@ struct TrackerDashboardShell: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            NavigationStack(path: $path) {
-                TrackerLibraryView { tracker in
-                    activeLink = nil
-                    path.append(tracker.ref)
-                }
-                    .navigationDestination(for: String.self) { ref in
-                        if let tracker = model.trackers.first(where: { $0.ref == ref }) {
-                            TrackerDetailView(tracker: tracker, barkEventID: activeLink?.reference == ref ? activeLink?.barkEventID : nil)
-                                .id(activeLink?.barkEventID ?? ref)
-                        } else {
-                            ContentUnavailableView("Objekt nicht verfügbar", systemImage: "airtag")
-                        }
+            Tab("Objekte", systemImage: "square.grid.2x2.fill", value: 0) {
+                NavigationStack(path: $path) {
+                    TrackerLibraryView { tracker in
+                        activeLink = nil
+                        path.append(tracker.ref)
                     }
-            }.tabItem { Label("Objekte", systemImage: "square.grid.2x2.fill") }.tag(0)
-            NavigationStack { if model.serverActionsAvailable { PlacesHomeView() } else { ServerRequiredView() } }
-                .tabItem { Label("Orte", systemImage: "mappin.and.ellipse") }.tag(1)
-            NavigationStack { if model.serverActionsAvailable { AlertsView() } else { ServerRequiredView() } }
-                .tabItem { Label("Meldungen", systemImage: "bell") }.badge(model.bootstrap?.alerts?.unreadCount ?? 0).tag(2)
-            NavigationStack { MoreView() }.tabItem { Label("Ich", systemImage: "person.crop.circle") }.tag(3)
+                        .navigationDestination(for: String.self) { ref in
+                            if let tracker = model.trackers.first(where: { $0.ref == ref }) {
+                                TrackerDetailView(tracker: tracker, barkEventID: activeLink?.reference == ref ? activeLink?.barkEventID : nil)
+                                    .id(activeLink?.barkEventID ?? ref)
+                            } else {
+                                ContentUnavailableView("Objekt nicht verfügbar", systemImage: "airtag")
+                            }
+                        }
+                }
+            }
+            Tab("Orte", systemImage: "mappin.and.ellipse", value: 1) {
+                NavigationStack { if model.serverActionsAvailable { PlacesHomeView() } else { ServerRequiredView() } }
+            }
+            Tab("Meldungen", systemImage: "bell", value: 2) {
+                NavigationStack { if model.serverActionsAvailable { AlertsView() } else { ServerRequiredView() } }
+            }
+            .badge(model.bootstrap?.alerts?.unreadCount ?? 0)
+            Tab("Ich", systemImage: "person.crop.circle", value: 3) {
+                NavigationStack { MoreView() }
+            }
+            Tab("Suchen", systemImage: "magnifyingglass", value: 4, role: .search) {
+                NavigationStack { TrackerSearchView() }
+            }
         }
+        .rjTabBarMinimizeOnScroll()
+        .rjTabAccessory { RJStatusAccessory() }
         .onChange(of: trackerLink, initial: true) { _, link in
             guard let link else { return }
             activeLink = link
@@ -58,7 +70,7 @@ struct DashboardShortcut: View {
                 .shadow(color: tint.opacity(0.35), radius: 8, x: 0, y: 4)
             Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
                 .lineLimit(1).minimumScaleFactor(0.75)
-        }.frame(maxWidth: .infinity, minHeight: 70, alignment: .leading).rjCard()
+        }.frame(maxWidth: .infinity, minHeight: 70, alignment: .leading).rjCard(interactive: true)
     }
 }
 
@@ -117,9 +129,12 @@ struct SchoolBagHub: View {
 
 struct TrackerMapOverview: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var position: MapCameraPosition = .automatic
     @State private var selected: Tracker?
     @State private var satellite = false
+    @State private var actionsOpen = false
+    @Namespace private var glass
     private var located: [Tracker] { model.filteredTrackers.filter { $0.validLocation != nil } }
     var body: some View {
         Map(position: $position) {
@@ -136,36 +151,88 @@ struct TrackerMapOverview: View {
         }
         .mapStyle(satellite ? .hybrid(elevation: .realistic) : .standard(pointsOfInterest: .excludingAll))
         .mapControls { MapCompass(); MapScaleView() }
+        .overlay(alignment: .topTrailing) {
+            RJMapControlStack {
+                RJMapControlButton(symbol: satellite ? "map" : "globe.europe.africa", active: satellite, label: satellite ? "Standardkarte" : "Satellit") {
+                    satellite.toggle()
+                }
+                RJMapControlDivider()
+                RJMapControlButton(symbol: "location", label: "Meine Position") {
+                    model.locationService.request()
+                    position = .userLocation(fallback: .automatic)
+                }
+            }.padding(12)
+        }
         .overlay {
             if located.isEmpty {
                 ContentUnavailableView("Noch keine Standorte", systemImage: "map", description: Text("Gespeicherte Ortungen erscheinen hier, sobald sie verfügbar sind."))
                     .rjCard().padding()
             }
         }
-        .safeAreaInset(edge: .bottom) {
-            HStack {
-                Label("\(located.count) gespeicherte Standorte", systemImage: "clock.arrow.circlepath").font(.caption)
-                Spacer()
-                Button("Alle zeigen", systemImage: "arrow.up.left.and.arrow.down.right") { fit() }
-                    .labelStyle(.iconOnly).buttonStyle(.bordered).accessibilityIdentifier("dashboard-map-fit")
-            }.padding(14).background(.regularMaterial)
-        }
+        .rjSafeAreaBar(edge: .bottom) { bottomBar }
         .navigationTitle("Karte").navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            Toggle("Satellit", isOn: $satellite).toggleStyle(.button)
-            Button("Meine Position", systemImage: "location") {
-                model.locationService.request()
-                position = .userLocation(fallback: .automatic)
-            }
-        }
         .task { fit() }
         .sheet(item: $selected) { tracker in
             NavigationStack {
                 TrackerDetailView(tracker: tracker)
                     .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fertig") { selected = nil } } }
             }
+            .presentationDetents([.medium, .large])
+            .presentationBackgroundInteraction(.enabled(upThrough: .medium))
         }
     }
+
+    /// Floating glass: status capsule and fit button merge into one surface,
+    /// the action button morphs open into extra actions (glassEffectID).
+    private var bottomBar: some View {
+        RJGlassGroup(spacing: 14) {
+            HStack(alignment: .bottom, spacing: 10) {
+                HStack(spacing: 10) {
+                    Label("\(located.count) Standorte", systemImage: "clock.arrow.circlepath")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.leading, 16).padding(.vertical, 12)
+                    Button { fit() } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.body.weight(.semibold))
+                            .frame(width: 44, height: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Alle zeigen")
+                    .accessibilityIdentifier("dashboard-map-fit")
+                    .padding(.trailing, 4)
+                }
+                .rjGlassSurface(Capsule(), interactive: true)
+                .rjGlassID("status", in: glass)
+                Spacer(minLength: 0)
+                VStack(spacing: 10) {
+                    if actionsOpen {
+                        if model.serverActionsAvailable {
+                            RJGlassIconButton(symbol: "location.fill", label: "Alle orten", size: 48) {
+                                Task { await model.locateAll() }
+                                toggleActions()
+                            }
+                            .disabled(model.isLocatingAll)
+                            .rjGlassID("locate-all", in: glass)
+                        }
+                        RJGlassIconButton(symbol: "arrow.clockwise", label: "Aktualisieren", size: 48) {
+                            Task { await model.refreshTrackers() }
+                            toggleActions()
+                        }
+                        .rjGlassID("refresh", in: glass)
+                    }
+                    RJGlassIconButton(symbol: actionsOpen ? "xmark" : "ellipsis", label: actionsOpen ? "Aktionen schließen" : "Weitere Aktionen",
+                                      tint: actionsOpen ? nil : Color.accentColor, size: 52) { toggleActions() }
+                        .rjGlassID("actions", in: glass)
+                }
+            }
+            .padding(.horizontal, 16).padding(.bottom, 8)
+        }
+    }
+
+    private func toggleActions() {
+        withAnimation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.78)) { actionsOpen.toggle() }
+    }
+
     private func fit() {
         if let region = RJMapCamera.overview(locations: located.compactMap(\.validLocation), panelCoverage: 0) {
             position = .region(region)

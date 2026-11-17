@@ -11,7 +11,7 @@ Die Action **Check and package Tracker backend** erzeugt `Tracker_Backend_AMP.py
 
 ---
 
-# RJ Tracker 8.1.0 · Backend 22.1.0 · Overhaul
+# RJ Tracker 8.2.0 · Backend 22.2.1 · Liquid Glass
 
 Neues Design mit Startanimation, responsive **Web-App unter `/app`** (Karte, Ortung, Verlauf, Taschen, Mitteilungen), **Netz-Priorität für Fusionen** (Hauptnetz plus Backup) und Taschenmodus für jedes Objekt einschließlich Fusionen. Seit 8.1: schlaue Startseite mit Status-Ring und automatischen Hinweisen sowie „Zeitreise“ im Web-Verlauf. Alle Server- und App-Daten bleiben kompatibel.
 
